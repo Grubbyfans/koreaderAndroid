@@ -19,9 +19,13 @@ object EpubImporter {
     fun epubDir(context: Context): File = File(context.filesDir, "epub").apply { mkdirs() }
 
     /**
-     * 复制 SAF URI 指向的 EPUB 到私有目录，返回落盘文件名。
+     * 复制 SAF URI 指向的 EPUB 到私有目录，提取封面并登记书库，返回落盘文件名。
      * 文件名取源 URI 的 display name（去扩展名 + 规范化），
      * 冲突时保留 `.epub` 原名（同名覆盖语义见方案 §5.5）。
+     *
+     * 导入结果会同时：
+     * - 把 EPUB 复制到 files/epub/（供 WebViewAssetLoader 提供正文）；
+     * - 通过 [LibraryStore] 登记 library.json、提取并保存封面。
      */
     suspend fun import(context: Context, uri: Uri): Result<File> = withContext(Dispatchers.IO) {
         try {
@@ -32,6 +36,15 @@ object EpubImporter {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: return@withContext Result.failure(IllegalStateException("无法打开 EPUB: $uri"))
+
+            // 提取封面并登记书库（失败不阻断正文导入，仅忽略封面）
+            try {
+                val cover = CoverExtractor.extract(target)
+                LibraryStore(context).registerBook(safeName, cover)
+            } catch (e: Exception) {
+                // 书库登记失败不影响已落盘的正文，静默忽略（上层仍可用文件直接阅读）
+            }
+
             Result.success(target)
         } catch (e: Exception) {
             Result.failure(e)

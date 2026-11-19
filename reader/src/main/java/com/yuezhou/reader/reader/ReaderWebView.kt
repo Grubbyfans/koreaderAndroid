@@ -105,12 +105,14 @@ class ReaderWebView(context: Context) : WebView(context) {
     /**
      * 打开 EPUB。epubFile 须为已复制到私有目录 files/epub/ 下的文件；
      * 这里用其文件名构造受控 URL 传给 JS 侧 view.open()。
+     * restoreCfi 非空时打开后跳转到该位置（恢复阅读进度）。
      */
-    fun openEpub(epubFileName: String) {
+    fun openEpub(epubFileName: String, restoreCfi: String? = null) {
         val url = "https://appassets.androidplatform.net/epub/$epubFileName"
         whenReaderReady {
+            val restore = restoreCfi ?: ""
             evaluateJavascript(
-                "window.__reader.openBook(${jsonQuote(url)}).then(r => {});",
+                "window.__reader.openBook(${jsonQuote(url)}, ${jsonQuote(restore)}).then(r => {});",
                 null,
             )
         }

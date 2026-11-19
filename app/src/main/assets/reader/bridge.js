@@ -11,13 +11,17 @@ let currentBook = null
 
 // 供 Kotlin 调用的全局接口
 window.__reader = {
-    // 打开 EPUB：epubUrl 为 Android 侧提供的可访问 URL
-    async openBook(epubUrl) {
+    // 打开 EPUB：epubUrl 为 Android 侧提供的可访问 URL；restoreCfi 为可选的恢复位置
+    async openBook(epubUrl, restoreCfi) {
         try {
             currentBook = await view.open(epubUrl)
             // 关键：open() 只装载书，不渲染第一页；必须显式 init 才会翻页显示内容，
             // 否则 WebView 白屏。lastLocation 为空时显示正文起始。
             await view.init({ showTextStart: true })
+            // 有恢复位置则跳转过去
+            if (restoreCfi) {
+                await view.goTo(restoreCfi)
+            }
             post('bookOpened', {
                 sections: currentBook.sections?.length ?? 0,
                 title: currentBook.metadata?.title ?? '',
