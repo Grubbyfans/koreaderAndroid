@@ -8,9 +8,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -71,6 +74,8 @@ private fun ReaderScreen(
     var webView by remember { mutableStateOf<ReaderWebView?>(null) }
     var currentCfi by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf("请选择 EPUB 文件") }
+    // 待打开的书名：WebView 尚未创建时先暂存，WebView 就绪后自动消费
+    var pendingBook by remember { mutableStateOf<String?>(null) }
 
     // 监听 reader 事件
     val eventListener: (ReaderEvent) -> Unit = { event ->
@@ -90,7 +95,13 @@ private fun ReaderScreen(
                 val result = EpubImporter.import(context, uri)
                 result.fold(
                     onSuccess = { file ->
-                        webView?.openEpub(file.name)
+                        // 若 WebView 已就绪则直接打开；否则暂存，待 WebView 创建后消费
+                        val wv = webView
+                        if (wv != null) {
+                            wv.openEpub(file.name)
+                        } else {
+                            pendingBook = file.name
+                        }
                         status = "已加载：${file.name}"
                     },
                     onFailure = { e ->
@@ -102,7 +113,12 @@ private fun ReaderScreen(
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                // edge-to-edge 下避开状态栏与导航栏，避免顶部按钮被状态栏遮挡
+                .windowInsetsPadding(WindowInsets.safeDrawing),
+        ) {
             Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                 Button(onClick = onPick) { Text("选择 EPUB") }
                 Text(
@@ -123,6 +139,11 @@ private fun ReaderScreen(
                         ReaderWebView(ctx).also { wv ->
                             wv.eventListener = eventListener
                             webView = wv
+                            // WebView 创建完成后，若已有待打开的书，立即打开
+                            pendingBook?.let { name ->
+                                pendingBook = null
+                                wv.openEpub(name)
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxSize(),

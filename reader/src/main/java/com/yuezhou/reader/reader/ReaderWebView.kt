@@ -40,6 +40,15 @@ class ReaderWebView(context: Context) : WebView(context) {
         private set
 
     init {
+        // debug 构建开启 WebView 远程调试，便于用 Chrome chrome://inspect 排查白屏
+        val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (debuggable) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
+        // 关键修复：部分设备（如三星 + Android 14/15）上 WebView 的独立 Surface 会浮在
+        // Compose 内容之上，把「选择 EPUB」按钮等控件盖住，导致进入阅读器后界面白屏。
+        // 用软件渲染层强制 WebView 与 Compose 共用同一渲染层，避免遮挡。
+        setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -80,7 +89,8 @@ class ReaderWebView(context: Context) : WebView(context) {
         webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
                 val msg = "[JS:${consoleMessage.messageLevel()}] ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})"
-                Log.d(TAG, msg)
+                // 用 W 级别确保 logcat 默认可见，方便排查白屏
+                Log.w(TAG, msg)
                 return true
             }
         }
@@ -121,10 +131,15 @@ class ReaderWebView(context: Context) : WebView(context) {
 
     /**
      * bridge.js 是 ES module，onPageFinished 时可能尚未执行完，window.__reader 未就绪。
-     * 这里轮询 window.__readerReady，就绪后再执行动作；最多尝试 60 次（约 3 秒）后放弃。
+     * 这里轮询 window.__readerReady，就绪后再执行动作；最多尝试 200 次（约 10 秒）后放弃，
+     * 覆盖冷启动下 WebView + ES module 的加载耗时。
      */
-    private fun whenReaderReady(remaining: Int = 60, action: () -> Unit) {
-        if (remaining <= 0) return
+    private fun whenReaderReady(remaining: Int = 200, action: () -> Unit) {
+        if (remaining <= 0) {
+            Log.e(TAG, "等待 reader 就绪超时，放弃执行动作")
+            eventListener?.invoke(ReaderEvent.Error("阅读器初始化超时"))
+            return
+        }
         evaluateJavascript(
             "window.__readerReady === true",
         ) { ready ->
