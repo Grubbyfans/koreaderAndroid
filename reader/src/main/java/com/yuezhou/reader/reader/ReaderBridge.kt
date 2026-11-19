@@ -1,0 +1,25 @@
+package com.yuezhou.reader.reader
+
+/**
+ * 阅读器桥接事件：由 WebView 内的 foliate-js 回传，供 Kotlin 层消费。
+ */
+sealed interface ReaderEvent {
+    /** 书籍已打开。 */
+    data class BookOpened(val sections: Int, val title: String) : ReaderEvent
+    /** 位置变化（翻页/跳转），携带 CFI。 */
+    data class Relocated(val cfi: String?, val index: Int?, val fraction: Float?) : ReaderEvent
+    /** 错误。 */
+    data class Error(val message: String) : ReaderEvent
+}
+
+/**
+ * Kotlin 侧桥接接口：暴露给 WebView JS 层调用（@JavascriptInterface）。
+ * 保持方法签名稳定，JS 侧 `window.__reader` 与之对应。
+ */
+interface ReaderBridge {
+    /**
+     * JS 回传事件。data 为 JSON 字符串，由实现方解析。
+     * 注意：@JavascriptInterface 方法必须在 UI 线程被调用，且参数为原始类型/String。
+     */
+    fun onReaderEvent(type: String, data: String)
+}
