@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,6 +94,8 @@ private fun BookshelfScreen() {
     var refreshKey by remember { mutableStateOf(0) }
     // 当前选中的底部导航 tab
     var currentTab by remember { mutableStateOf(Tab.书架) }
+    // 管理态（多选删除）：非空表示进入管理态，集合为已勾选的 bookId
+    var selecting by remember { mutableStateOf<Set<String>?>(null) }
 
     val store = remember { LibraryStore(context) }
 
@@ -120,17 +124,74 @@ private fun BookshelfScreen() {
         loading = false
     }
 
+    // 管理态下返回键退出管理态（而非退出 App）
+    BackHandler(enabled = selecting != null) {
+        selecting = null
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = YuezhouColors.Background,
         topBar = {
-            TopAppBar(
-                title = { Text(if (currentTab == Tab.书架) "书库" else currentTab.label) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = YuezhouColors.Surface,
-                    titleContentColor = YuezhouColors.TextPrimary,
-                ),
-            )
+            if (selecting != null && currentTab == Tab.书架) {
+                // 管理态顶栏：已选数量 + 全选/删除
+                val selected = selecting!!
+                TopAppBar(
+                    title = { Text("已选 ${selected.size} 项") },
+                    navigationIcon = {
+                        Text(
+                            "取消",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = YuezhouColors.TextPrimary,
+                            modifier = Modifier
+                                .clickable { selecting = null }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    },
+                    actions = {
+                        val allSelected = books.isNotEmpty() && selected.size == books.size
+                        Text(
+                            if (allSelected) "取消全选" else "全选",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = YuezhouColors.Brand,
+                            modifier = Modifier
+                                .clickable {
+                                    selecting = if (allSelected) emptySet()
+                                    else books.map { it.bookId }.toSet()
+                                }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        Text(
+                            "删除",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (selected.isEmpty()) YuezhouColors.TextSecondary
+                            else Color(0xFFE64340),
+                            modifier = Modifier
+                                .clickable(enabled = selected.isNotEmpty()) {
+                                    scope.launch {
+                                        val removed = store.removeBooks(selected)
+                                        selecting = null
+                                        status = "已移除 ${removed.size} 本"
+                                        refreshKey++
+                                    }
+                                }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = YuezhouColors.Surface,
+                        titleContentColor = YuezhouColors.TextPrimary,
+                    ),
+                )
+            } else {
+                TopAppBar(
+                    title = { Text(if (currentTab == Tab.书架) "书库" else currentTab.label) },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = YuezhouColors.Surface,
+                        titleContentColor = YuezhouColors.TextPrimary,
+                    ),
+                )
+            }
         },
         floatingActionButton = {
             if (currentTab == Tab.书架) {
@@ -174,7 +235,17 @@ private fun BookshelfScreen() {
             }
 
             when (currentTab) {
-                Tab.书架 -> BookshelfContent(books, loading, { pickEpub.launch(arrayOf("application/epub+zip")) })
+                Tab.书架 -> BookshelfContent(
+                    books = books,
+                    loading = loading,
+                    selecting = selecting,
+                    onPickEpub = { pickEpub.launch(arrayOf("application/epub+zip")) },
+                    onEnterSelect = { selecting = setOf(it) },
+                    onToggleSelect = { id ->
+                        val cur = selecting ?: emptySet()
+                        selecting = if (id in cur) cur - id else cur + id
+                    },
+                )
                 Tab.最近阅读 -> RecentReading(books)
                 Tab.设置 -> SettingsPage()
             }
@@ -193,7 +264,10 @@ private enum class Tab(val label: String) {
 private fun BookshelfContent(
     books: List<LibraryStore.Entry>,
     loading: Boolean,
-    pickEpub: (() -> Unit),
+    selecting: Set<String>?,
+    onPickEpub: () -> Unit,
+    onEnterSelect: (String) -> Unit,
+    onToggleSelect: (String) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     when {
@@ -203,7 +277,7 @@ private fun BookshelfContent(
             }
         }
         books.isEmpty() -> {
-            EmptyLibrary(onImport = { pickEpub() })
+            EmptyLibrary(onImport = { onPickEpub() })
         }
         else -> {
             LazyVerticalGrid(
@@ -214,12 +288,21 @@ private fun BookshelfContent(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(books, key = { it.bookId }) { book ->
-                    BookCard(book = book, onClick = {
-                        val intent = Intent(context, ReaderActivity::class.java).apply {
-                            putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId)
-                        }
-                        context.startActivity(intent)
-                    })
+                    BookCard(
+                        book = book,
+                        selecting = selecting != null,
+                        checked = selecting?.contains(book.bookId) == true,
+                        onClick = {
+                            if (selecting != null) onToggleSelect(book.bookId)
+                            else {
+                                val intent = Intent(context, ReaderActivity::class.java).apply {
+                                    putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId)
+                                }
+                                context.startActivity(intent)
+                            }
+                        },
+                        onLongClick = { onEnterSelect(book.bookId) },
+                    )
                 }
             }
         }
@@ -333,11 +416,20 @@ private fun SettingsPage() {
 }
 
 @Composable
-private fun BookCard(book: LibraryStore.Entry, onClick: () -> Unit) {
+private fun BookCard(
+    book: LibraryStore.Entry,
+    selecting: Boolean,
+    checked: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Column(
         modifier = Modifier
-            .clickable(onClick = onClick)
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -372,6 +464,27 @@ private fun BookCard(book: LibraryStore.Entry, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(8.dp),
                 )
+            }
+
+            // 管理态：右上角勾选圆点
+            if (selecting) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(20.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(if (checked) YuezhouColors.Brand else Color.White.copy(alpha = 0.9f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (checked) {
+                        Text(
+                            "✓",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
             }
         }
 

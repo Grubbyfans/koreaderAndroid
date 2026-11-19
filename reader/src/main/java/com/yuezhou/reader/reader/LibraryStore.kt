@@ -246,6 +246,50 @@ class LibraryStore(private val context: Context) {
         readProgress(bookId)?.second
     }
 
+    /**
+     * 移除一本（或多本）书籍：删除正文 EPUB、封面、进度、显示名，并从 library.json 摘除。
+     * 复用 [registerBook] 的目录/协议约定，保证清理彻底、不残留孤儿记录。
+     *
+     * @return 实际移除的 bookId 列表（正文不存在等情况下会跳过）。
+     */
+    suspend fun removeBooks(bookIds: Collection<String>): List<String> = withContext(Dispatchers.IO) {
+        val existing: List<LibraryBook> = if (libraryFile.exists()) {
+            try { LibraryCatalog.decode(libraryFile.readText()).books } catch (e: Exception) { emptyList() }
+        } else emptyList()
+        val removed = ArrayList<String>()
+        for (bookId in bookIds) {
+            try {
+                val book = existing.firstOrNull { it.bookId == bookId } ?: continue
+                // 正文：files/epub/<fileName>（library.json 的 fileName 为唯一身份）
+                File(booksDir, book.fileName).delete()
+                // 封面
+                book.coverPath?.let { File(root, it).delete() }
+                File(coversDir, "$bookId.json").delete()
+                // 进度
+                File(progressDir, "$bookId.json").delete()
+                // 显示名映射
+                removeTitle(bookId)
+                removed.add(bookId)
+            } catch (e: Exception) {
+                // 单项失败不阻断其余，继续处理
+            }
+        }
+        if (removed.isNotEmpty()) {
+            // 从 library.json 摘除已移除项
+            val kept = existing.filter { it.bookId !in removed }
+            val catalog = LibraryCatalogData(
+                books = kept.sortedBy { it.bookId },
+                coverDirectoryReady = true,
+                schemaVersion = 2,
+                raw = buildJsonObject { put("schemaVersion", 2); put("coverDirectoryReady", true) },
+            )
+            libraryFile.writeText(LibraryCatalog.encode(catalog))
+            // 同步清理显示名映射文件（若已空则删除）
+            cleanupTitlesIfEmpty()
+        }
+        removed
+    }
+
     /** 读取进度：返回 (percent, location, lastReadAtMillis)。无进度返回 null。 */
     private fun readProgress(bookId: String): Triple<Double?, String?, Long?>? {
         val f = File(progressDir, "$bookId.json")
@@ -294,6 +338,23 @@ class LibraryStore(private val context: Context) {
             } else org.json.JSONObject()
             jo.put(bookId, title)
             titlesFile.writeText(jo.toString())
+        } catch (e: Exception) { /* 忽略 */ }
+    }
+
+    /** 从显示名映射中移除某本书。 */
+    private fun removeTitle(bookId: String) {
+        try {
+            if (!titlesFile.exists()) return
+            val jo = try { org.json.JSONObject(titlesFile.readText()) } catch (e: Exception) { org.json.JSONObject() }
+            if (jo.has(bookId)) jo.remove(bookId)
+            titlesFile.writeText(jo.toString())
+        } catch (e: Exception) { /* 忽略 */ }
+    }
+
+    /** 显示名映射为空时删除文件，避免残留空文件。 */
+    private fun cleanupTitlesIfEmpty() {
+        try {
+            if (titlesFile.exists() && readTitles().isEmpty()) titlesFile.delete()
         } catch (e: Exception) { /* 忽略 */ }
     }
 
