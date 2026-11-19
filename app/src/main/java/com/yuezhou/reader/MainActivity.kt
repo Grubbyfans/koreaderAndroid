@@ -27,9 +27,11 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
@@ -69,7 +72,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
+            YuezhouTheme {
                 BookshelfScreen()
             }
         }
@@ -87,6 +90,8 @@ private fun BookshelfScreen() {
     var status by remember { mutableStateOf<String?>(null) }
     // 刷新触发计数：+1 触发重新加载书库
     var refreshKey by remember { mutableStateOf(0) }
+    // 当前选中的底部导航 tab
+    var currentTab by remember { mutableStateOf(Tab.书架) }
 
     val store = remember { LibraryStore(context) }
 
@@ -117,25 +122,30 @@ private fun BookshelfScreen() {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        containerColor = YuezhouColors.Background,
         topBar = {
             TopAppBar(
-                title = { Text("书库") },
+                title = { Text(if (currentTab == Tab.书架) "书库" else currentTab.label) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    containerColor = YuezhouColors.Surface,
+                    titleContentColor = YuezhouColors.TextPrimary,
                 ),
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { pickEpub.launch(arrayOf("application/epub+zip")) },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Text("+", style = MaterialTheme.typography.headlineMedium)
+            if (currentTab == Tab.书架) {
+                FloatingActionButton(
+                    onClick = { pickEpub.launch(arrayOf("application/epub+zip")) },
+                    containerColor = YuezhouColors.Brand,
+                    contentColor = Color.White,
+                ) {
+                    Text("+", style = MaterialTheme.typography.headlineMedium)
+                }
             }
         },
-        bottomBar = { BottomNavBar() },
+        bottomBar = {
+            BottomNavBar(current = currentTab, onSelect = { currentTab = it })
+        },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -158,40 +168,167 @@ private fun BookshelfScreen() {
                 Text(
                     text = it,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = YuezhouColors.TextSecondary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
 
-            when {
-                loading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+            when (currentTab) {
+                Tab.书架 -> BookshelfContent(books, loading, { pickEpub.launch(arrayOf("application/epub+zip")) })
+                Tab.最近阅读 -> RecentReading(books)
+                Tab.设置 -> SettingsPage()
+            }
+        }
+    }
+}
+
+/** 底部导航的三个 tab。 */
+private enum class Tab(val label: String) {
+    书架("书库"),
+    最近阅读("最近阅读"),
+    设置("设置"),
+}
+
+@Composable
+private fun BookshelfContent(
+    books: List<LibraryStore.Entry>,
+    loading: Boolean,
+    pickEpub: (() -> Unit),
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    when {
+        loading -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+        books.isEmpty() -> {
+            EmptyLibrary(onImport = { pickEpub() })
+        }
+        else -> {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(books, key = { it.bookId }) { book ->
+                    BookCard(book = book, onClick = {
+                        val intent = Intent(context, ReaderActivity::class.java).apply {
+                            putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId)
+                        }
+                        context.startActivity(intent)
+                    })
+                }
+            }
+        }
+    }
+}
+
+/** 最近阅读：按最近阅读时间倒序，仅展示有阅读记录的书。 */
+@Composable
+private fun RecentReading(books: List<LibraryStore.Entry>) {
+    val recent = remember(books) {
+        books.filter { it.lastReadAt != null }
+            .sortedByDescending { it.lastReadAt }
+    }
+    if (recent.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                "还没有阅读记录",
+                style = MaterialTheme.typography.bodyMedium,
+                color = YuezhouColors.TextSecondary,
+            )
+        }
+        return
+    }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        lazyItems(recent, key = { it.bookId }) { book ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        context.startActivity(
+                            Intent(context, ReaderActivity::class.java).apply {
+                                putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId)
+                            },
+                        )
+                    }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 小封面
+                Box(
+                    modifier = Modifier
+                        .size(width = 44.dp, height = 58.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(YuezhouColors.Surface),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val cover = book.coverPng
+                    if (cover != null) {
+                        val bmp = remember(cover) {
+                            BitmapFactory.decodeByteArray(cover, 0, cover.size)?.asImageBitmap()
+                        }
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    } else {
+                        Text(
+                            book.title.take(1),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = YuezhouColors.Brand,
+                        )
                     }
                 }
-                books.isEmpty() -> {
-                    EmptyLibrary(onImport = { pickEpub.launch(arrayOf("application/epub+zip")) })
-                }
-                else -> {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        contentPadding = PaddingValues(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(books, key = { it.bookId }) { book ->
-                            BookCard(book = book, onClick = {
-                                val intent = Intent(context, ReaderActivity::class.java).apply {
-                                    putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId)
-                                }
-                                context.startActivity(intent)
-                            })
-                        }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        book.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    book.percent?.let { p ->
+                        Text(
+                            "已读 ${(p * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
                     }
                 }
             }
         }
+    }
+}
+
+/** 设置页：阅读默认值占位（当前展示主题/翻页等已持久化的说明）。 */
+@Composable
+private fun SettingsPage() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+    ) {
+        Text("设置", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "字号、主题、翻页模式等阅读选项，可在打开书籍后点击屏幕呼出面板进行调节，并会自动保存。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = YuezhouColors.TextSecondary,
+        )
     }
 }
 
@@ -208,7 +345,7 @@ private fun BookCard(book: LibraryStore.Entry, onClick: () -> Unit) {
                 .fillMaxWidth()
                 .aspectRatio(0.75f)
                 .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(CoverPlaceholder.color(book.bookId)),
             contentAlignment = Alignment.Center,
         ) {
             val cover = book.coverPng
@@ -219,22 +356,27 @@ private fun BookCard(book: LibraryStore.Entry, onClick: () -> Unit) {
                 if (bmp != null) {
                     Image(
                         bitmap = bmp,
-                        contentDescription = book.bookId,
+                        contentDescription = book.title,
                         contentScale = ContentScale.FillBounds,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
             } else {
+                // 无封面：书名文字占位（渐变色底 + 书名）
                 Text(
-                    text = book.bookId.take(1),
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = book.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(8.dp),
                 )
             }
         }
 
         Text(
-            text = book.bookId,
+            text = book.title,
             style = MaterialTheme.typography.bodySmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -245,12 +387,32 @@ private fun BookCard(book: LibraryStore.Entry, onClick: () -> Unit) {
         book.percent?.let { p ->
             LinearProgressIndicator(
                 progress = { p.toFloat() },
+                color = YuezhouColors.Brand,
+                trackColor = YuezhouColors.Divider,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp)
                     .height(3.dp),
             )
         }
+    }
+}
+
+/** 封面占位：根据 bookId 生成稳定的渐变底色。 */
+private object CoverPlaceholder {
+    private val palette = listOf(
+        Color(0xFF5B8FF9),
+        Color(0xFF61C0BF),
+        Color(0xFFF6903D),
+        Color(0xFF9D7BD8),
+        Color(0xFFE8684A),
+        Color(0xFF5DADEC),
+        Color(0xFF6DC8EC),
+        Color(0xFF78D3A0),
+    )
+    fun color(key: String): Color {
+        val idx = (key.hashCode() and Int.MAX_VALUE) % palette.size
+        return palette[idx]
     }
 }
 
@@ -261,43 +423,45 @@ private fun EmptyLibrary(onImport: () -> Unit) {
             Text(
                 text = "书库还是空的",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = YuezhouColors.TextPrimary,
             )
             Spacer(Modifier.height(8.dp))
             Text(
                 text = "点击右下角 + 导入 EPUB 书籍",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = YuezhouColors.TextSecondary,
             )
         }
     }
 }
 
 @Composable
-private fun BottomNavBar() {
+private fun BottomNavBar(current: Tab, onSelect: (Tab) -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
+        color = YuezhouColors.Surface,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp),
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            NavItem("书库", selected = true)
-            NavItem("最近阅读", selected = false)
-            NavItem("设置", selected = false)
+            NavItem("书库", selected = current == Tab.书架) { onSelect(Tab.书架) }
+            NavItem("最近阅读", selected = current == Tab.最近阅读) { onSelect(Tab.最近阅读) }
+            NavItem("设置", selected = current == Tab.设置) { onSelect(Tab.设置) }
         }
     }
 }
 
 @Composable
-private fun NavItem(label: String, selected: Boolean) {
+private fun NavItem(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         text = label,
         style = MaterialTheme.typography.labelLarge,
-        color = if (selected) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (selected) YuezhouColors.Brand else YuezhouColors.TextSecondary,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
     )
 }

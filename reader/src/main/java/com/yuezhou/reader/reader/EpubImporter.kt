@@ -37,10 +37,11 @@ object EpubImporter {
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: return@withContext Result.failure(IllegalStateException("无法打开 EPUB: $uri"))
 
-            // 提取封面并登记书库（失败不阻断正文导入，仅忽略封面）
+            // 提取封面 + 书名并登记书库（失败不阻断正文导入，仅忽略）
             try {
                 val cover = CoverExtractor.extract(target)
-                LibraryStore(context).registerBook(safeName, cover)
+                val title = CoverExtractor.extractTitle(target)
+                LibraryStore(context).registerBook(safeName, cover, title)
             } catch (e: Exception) {
                 // 书库登记失败不影响已落盘的正文，静默忽略（上层仍可用文件直接阅读）
             }

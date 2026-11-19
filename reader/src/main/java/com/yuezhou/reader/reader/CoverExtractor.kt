@@ -48,6 +48,26 @@ object CoverExtractor {
         }
     }
 
+    /** 从 EPUB 元数据提取书名（OPF 的 dc:title）。失败返回 null。 */
+    fun extractTitle(epubFile: File): String? {
+        return try {
+            ZipFile(epubFile).use { zip ->
+                val opfPath = locateOpf(zip) ?: return null
+                val opfEntry = zip.getEntry(opfPath) ?: return null
+                val opfText = zip.getInputStream(opfEntry).use { it.readBytes().toString(Charsets.UTF_8) }
+                // 优先 <dc:title>...</dc:title>，其次 title 属性形式
+                val title = Regex("<dc:title[^>]*>([\\s\\S]*?)</dc:title>", RegexOption.IGNORE_CASE)
+                    .find(opfText)?.groupValues?.get(1)
+                    ?.replace(Regex("<[^>]+>"), "")
+                    ?.trim()
+                    ?.replace(Regex("\\s+"), " ")
+                title?.takeIf { it.isNotBlank() }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** 定位 OPF 路径：读 container.xml 的 rootfile full-path。 */
     private fun locateOpf(zip: ZipFile): String? {
         val container = zip.getEntry("META-INF/container.xml") ?: return null

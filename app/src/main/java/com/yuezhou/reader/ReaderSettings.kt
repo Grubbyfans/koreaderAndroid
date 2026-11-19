@@ -17,7 +17,7 @@ data class ReaderPreferences(
     /** 行距（倍数）。 */
     val lineHeight: Double = 1.6,
     /** 页面边距（px）。 */
-    val pageMargin: Int = 20,
+    val pageMargin: Int = 12,
     /** 主题：light / sepia / dark。 */
     val theme: String = "light",
     /** 翻页模式：false=左右翻页，true=上下滚动。 */
@@ -40,7 +40,7 @@ object ReaderSettings {
             ReaderPreferences(
                 fontSize = prefs[KEY_FONT_SIZE] ?: 18,
                 lineHeight = prefs[KEY_LINE_HEIGHT] ?: 1.6,
-                pageMargin = prefs[KEY_PAGE_MARGIN] ?: 20,
+                pageMargin = prefs[KEY_PAGE_MARGIN] ?: 12,
                 theme = prefs[KEY_THEME] ?: "light",
                 vertical = prefs[KEY_VERTICAL] ?: false,
             )

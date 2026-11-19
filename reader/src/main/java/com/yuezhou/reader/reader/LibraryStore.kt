@@ -40,6 +40,8 @@ class LibraryStore(private val context: Context) {
     private val booksDir: File get() = EpubImporter.epubDir(context)
     private val coversDir: File get() = File(root, "covers").apply { mkdirs() }
     private val progressDir: File get() = File(root, "progress").apply { mkdirs() }
+    /** 显示名映射：bookId → EPUB 元数据书名（本地展示用，不写入 library.json 以保持协议 title=bookId）。 */
+    private val titlesFile: File get() = File(root, "display_titles.json")
 
     /** 统一时间戳格式：秒精度、无小数秒，符合 ProtocolChecks.validTimestamp 的严格正则。 */
     private fun now(): String =
@@ -50,16 +52,20 @@ class LibraryStore(private val context: Context) {
         val books: List<Entry>,
     )
 
-    /** 单本书的展示信息：协议字段 + 本地展示用的封面/进度。 */
+    /** 单本书的展示信息：协议字段 + 本地展示用的封面/进度/书名。 */
     data class Entry(
         val bookId: String,
         val fileName: String,
         val size: Long,
         val coverPng: ByteArray?,
+        /** 展示名：优先 EPUB 元数据书名，缺失时回退 bookId。 */
+        val title: String,
         /** 阅读进度百分比 0..1，无进度为 null。 */
         val percent: Double?,
         /** 最近一次阅读的 XPointer/CFI，无进度为 null。 */
         val location: String?,
+        /** 最近阅读时间戳（epoch millis），用于「最近阅读」排序；无记录为 null。 */
+        val lastReadAt: Long?,
     )
 
     /** 读取本地书库快照。书库文件不存在或损坏时返回空列表（不覆盖原文件）。 */
@@ -89,13 +95,16 @@ class LibraryStore(private val context: Context) {
             } else null
         }
         val progress = readProgress(book.bookId)
+        val title = readTitles()[book.bookId] ?: book.bookId
         return Entry(
             bookId = book.bookId,
             fileName = book.fileName,
             size = book.size,
             coverPng = cover,
+            title = title,
             percent = progress?.first,
             location = progress?.second,
+            lastReadAt = progress?.third,
         )
     }
 
@@ -112,6 +121,7 @@ class LibraryStore(private val context: Context) {
     suspend fun registerBook(
         fileName: String,
         coverPng: ByteArray?,
+        title: String? = null,
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val target = File(booksDir, fileName)
@@ -120,6 +130,11 @@ class LibraryStore(private val context: Context) {
 
             val bookId = com.yuezhou.reader.core.protocol.BookNames.localId(fileName).first
                 ?: return@withContext Result.failure(IllegalStateException("无效 EPUB 文件名: $fileName"))
+
+            // 书名：写入本地显示名映射（不写 library.json，保持协议 title=bookId）
+            if (!title.isNullOrBlank()) {
+                writeTitle(bookId, title)
+            }
 
             // 封面：有则写 covers/<bookId>.json，否则移除旧封面
             var coverPath: String? = null
@@ -231,15 +246,55 @@ class LibraryStore(private val context: Context) {
         readProgress(bookId)?.second
     }
 
-    private fun readProgress(bookId: String): Pair<Double?, String?>? {
+    /** 读取进度：返回 (percent, location, lastReadAtMillis)。无进度返回 null。 */
+    private fun readProgress(bookId: String): Triple<Double?, String?, Long?>? {
         val f = File(progressDir, "$bookId.json")
         if (!f.exists()) return null
         return try {
             val p = ProgressRecords.decode(f.readText())
-            p.percent to p.xpointer
+            val ts = parseTimestamp(p.updatedAt)
+            Triple(p.percent, p.xpointer, ts)
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** 解析带偏移的 ISO-8601 时间戳为 epoch millis；失败返回 null。 */
+    private fun parseTimestamp(s: String): Long? {
+        return try {
+            OffsetDateTime.parse(s).toInstant().toEpochMilli()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 读取显示名映射（bookId → 书名）。文件不存在或损坏返回空 map。 */
+    private fun readTitles(): Map<String, String> {
+        if (!titlesFile.exists()) return emptyMap()
+        return try {
+            org.json.JSONObject(titlesFile.readText()).let { jo ->
+                val map = HashMap<String, String>()
+                val keys = jo.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    map[k] = jo.optString(k)
+                }
+                map
+            }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    /** 保存显示名映射（bookId → 书名）。 */
+    private fun writeTitle(bookId: String, title: String) {
+        try {
+            val jo = if (titlesFile.exists()) {
+                try { org.json.JSONObject(titlesFile.readText()) } catch (e: Exception) { org.json.JSONObject() }
+            } else org.json.JSONObject()
+            jo.put(bookId, title)
+            titlesFile.writeText(jo.toString())
+        } catch (e: Exception) { /* 忽略 */ }
     }
 
     private fun readBookSize(bookId: String): Long {

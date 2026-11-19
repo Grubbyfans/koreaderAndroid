@@ -89,7 +89,7 @@ class ReaderActivity : ComponentActivity() {
         }
         pickEpubLauncher = { launcher.launch(arrayOf("application/epub+zip")) }
         setContent {
-            MaterialTheme {
+            YuezhouTheme {
                 ReaderScreen(
                     bookId = bookId,
                     onEpubReadySetter = { onEpubReady = it },
@@ -233,6 +233,7 @@ private fun ReaderScreen(
 
     // 排版设置变化时应用（打开书后生效）
     LaunchedEffect(readerPrefs) {
+        webView?.verticalMode = readerPrefs.vertical
         webView?.applySettings(
             fontSize = readerPrefs.fontSize,
             lineHeight = readerPrefs.lineHeight,
@@ -244,6 +245,7 @@ private fun ReaderScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = false, // 禁用边缘滑动手势，避免与翻页手势冲突；目录仅通过按钮打开
         drawerContent = {
             ModalDrawerSheet(
                 modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
@@ -278,6 +280,10 @@ private fun ReaderScreen(
                     ReaderWebView(ctx).also { wv ->
                         wv.eventListener = eventListener
                         wv.onTap = { panelVisible = !panelVisible }
+                        wv.onPageTap = { dir ->
+                            if (dir > 0) wv.nextPage() else wv.prevPage()
+                        }
+                        wv.verticalMode = readerPrefs.vertical
                         webView = wv
                         pendingOpen?.let { (name, cfi) ->
                             pendingOpen = null
@@ -350,6 +356,8 @@ private fun ReaderPanel(
     onFractionSeek: (Float) -> Unit,
     onPrefsChange: (ReaderPreferences) -> Unit,
 ) {
+    // 设置区折叠状态
+    var settingsExpanded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxSize()) {
         // 顶部栏
         Surface(
@@ -413,17 +421,21 @@ private fun ReaderPanel(
                         )
                     }
                 }
+                // 底部操作：目录 + 设置（设置默认收起）
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
                 ) {
                     PanelAction("目录", onClick = onOpenToc)
-                    PanelAction("字号", onClick = { /* 见设置区 */ })
-                    PanelAction("主题", onClick = { /* 见设置区 */ })
-                    PanelAction("翻页", onClick = { /* 见设置区 */ })
+                    PanelAction(
+                        if (settingsExpanded) "收起设置" else "设置",
+                        onClick = { settingsExpanded = !settingsExpanded },
+                    )
                 }
-                // 设置区（内联展开）
-                SettingsControls(prefs = prefs, onPrefsChange = onPrefsChange)
+                // 设置区（默认收起，点击「设置」展开）
+                if (settingsExpanded) {
+                    SettingsControls(prefs = prefs, onPrefsChange = onPrefsChange)
+                }
             }
         }
     }

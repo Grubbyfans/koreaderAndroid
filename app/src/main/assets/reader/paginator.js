@@ -820,6 +820,21 @@ export class Paginator extends HTMLElement {
             })
         })
     }
+    // 上下滚动模式下，触摸结束时检测是否滚动到章节边界，若是则切到相邻章节。
+    #checkScrolledBoundary() {
+        if (this.#locked) return
+        const atTop = this.start <= 1
+        const atBottom = this.viewSize - this.end <= 1
+        if (!atTop && !atBottom) return
+        const dir = atBottom ? 1 : -1
+        const index = this.#adjacentIndex(dir)
+        if (index == null) return
+        this.#locked = true
+        this.#goTo({
+            index,
+            anchor: dir < 0 ? () => 1 : () => 0,
+        }).finally(() => { this.#locked = false })
+    }
     #onTouchStart(e) {
         const touch = e.changedTouches[0]
         this.#touchState = {
@@ -852,7 +867,13 @@ export class Paginator extends HTMLElement {
     }
     #onTouchEnd() {
         this.#touchScrolled = false
-        if (this.scrolled) return
+        if (this.scrolled) {
+            // 上下滚动模式跨章节：foliate 默认 scrolled 不跨章节，滚动到章节
+            // 顶部/底部就停住。这里在触摸结束时检测是否已到边界，若到边界则
+            // 切到相邻章节（顶部→上一章末尾，底部→下一章开头）。
+            this.#checkScrolledBoundary()
+            return
+        }
 
         // XXX: Firefox seems to report scale as 1... sometimes...?
         // at this point I'm basically throwing `requestAnimationFrame` at
@@ -1060,14 +1081,15 @@ export class Paginator extends HTMLElement {
     async #turnPage(dir, distance) {
         if (this.#locked) return
         this.#locked = true
-        const prev = dir === -1
-        const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
-        if (shouldGo) await this.#goTo({
-            index: this.#adjacentIndex(dir),
-            anchor: prev ? () => 1 : () => 0,
-        })
-        if (shouldGo || !this.hasAttribute('animated')) await wait(100)
-        this.#locked = false
+        try {
+            const prev = dir === -1
+            const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
+            if (shouldGo) await this.#goTo({
+                index: this.#adjacentIndex(dir),
+                anchor: prev ? () => 1 : () => 0,
+            })
+            if (shouldGo || !this.hasAttribute('animated')) await wait(100)
+        } finally { this.#locked = false }
     }
     prev(distance) {
         return this.#turnPage(-1, distance)

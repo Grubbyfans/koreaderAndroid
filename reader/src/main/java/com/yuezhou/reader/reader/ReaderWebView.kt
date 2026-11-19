@@ -35,22 +35,26 @@ class ReaderWebView(context: Context) : WebView(context) {
     /** 桥接事件监听器。 */
     var eventListener: ((ReaderEvent) -> Unit)? = null
 
-    /** 正文单击回调（用于呼出/收起阅读面板）。 */
+    /** 正文单击回调（用于呼出/收起阅读面板），按点击区域传动作。 */
     var onTap: (() -> Unit)? = null
+
+    /** 翻页点击回调（左右 1/3 区域单击时触发，参数为翻页方向）。 */
+    var onPageTap: ((Int) -> Unit)? = null // +1 下一页 / -1 上一页
 
     /** 当前是否已加载宿主页面。 */
     var isPageLoaded = false
         private set
 
-    private val gestureDetector = android.view.GestureDetector(
-        context,
-        object : android.view.GestureDetector.SimpleOnGestureListener() {
-            override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
-                onTap?.invoke()
-                return true
-            }
-        },
-    )
+    /** 是否为上下滚动模式（滚动模式下左右点击不翻页）。 */
+    var verticalMode = false
+
+    // 单击判定：记录按下时的位置与时间，抬起时若位移/时长在阈值内则视为单击
+    private var downX = 0f
+    private var downY = 0f
+    private var downTime = 0L
+
+    private val tapSlop = 12 // px，超过视为滑动
+    private val tapTimeout = 300L // ms，超过视为长按
 
     init {
         // debug 构建开启 WebView 远程调试，便于用 Chrome chrome://inspect 排查白屏
@@ -62,11 +66,37 @@ class ReaderWebView(context: Context) : WebView(context) {
         // Compose 内容之上，把「选择 EPUB」按钮等控件盖住，导致进入阅读器后界面白屏。
         // 用软件渲染层强制 WebView 与 Compose 共用同一渲染层，避免遮挡。
         setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
-        // 单击检测：WebView 会消费触摸事件，Compose 的 clickable 收不到，
-        // 这里用 GestureDetector 区分单击与翻页滑动，单击回调 onTap。
+        // 单击检测：WebView 会消费触摸事件，Compose 的 clickable 收不到。
+        // 这里手动判定「单击」，并按屏幕横向三分区域分发：
+        //   左 1/3 → 上一页，右 1/3 → 下一页（左右翻页模式），中间 1/3 → 呼出/收起面板。
+        // 上下滚动模式下左右区域不再翻页，仅中间点击呼出面板；滑动始终交给 WebView 处理。
         setOnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            false // 返回 false 让 WebView 继续处理滑动翻页
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    downTime = event.eventTime
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    val dx = kotlin.math.abs(event.x - downX)
+                    val dy = kotlin.math.abs(event.y - downY)
+                    val dt = event.eventTime - downTime
+                    if (dx <= tapSlop && dy <= tapSlop && dt <= tapTimeout) {
+                        val w = width.toFloat()
+                        if (w > 0f) {
+                            val rel = event.x / w
+                            if (!verticalMode && rel < 0.33f) {
+                                onPageTap?.invoke(-1)
+                            } else if (!verticalMode && rel > 0.67f) {
+                                onPageTap?.invoke(+1)
+                            } else {
+                                onTap?.invoke()
+                            }
+                        }
+                    }
+                }
+            }
+            false // 返回 false，让 WebView 继续处理滑动翻页/滚动
         }
         settings.apply {
             javaScriptEnabled = true

@@ -161,7 +161,7 @@ function applyTheme() {
     view.style.background = t.bg
 }
 
-// 向每个已加载章节的 iframe document 注入字号/行距/边距/主题样式
+// 向每个已加载章节的 iframe document 注入字号/行距/主题样式
 function applyTextStyle() {
     const s = currentSettings
     const themes = {
@@ -170,6 +170,8 @@ function applyTextStyle() {
         dark: { bg: '#1a1a1a', fg: '#c8c8c8' },
     }
     const t = themes[s.theme] || themes.light
+    // 注意：不再注入 body 的 padding，边距由 foliate 的 gap/margin 属性控制，
+    // 避免与 foliate 内置的 grid 边距（--_gap）叠加导致左右留白过大。
     const css = `
         html, body {
             background: ${t.bg} !important;
@@ -178,7 +180,6 @@ function applyTextStyle() {
         body {
             font-size: ${s.fontSize}px !important;
             line-height: ${s.lineHeight} !important;
-            padding: ${s.pageMargin}px !important;
         }
         p, div, li {
             line-height: inherit;
@@ -187,6 +188,12 @@ function applyTextStyle() {
     try {
         const renderer = view.renderer
         if (!renderer) return
+        // 边距交给 foliate 属性控制：margin=上下留白，gap=左右留白。
+        // pageMargin 作为统一边距：左右用其一半（避免过宽），上下用其值。
+        if (renderer.setAttribute) {
+            renderer.setAttribute('margin', `${s.pageMargin}px`)
+            renderer.setAttribute('gap', `${Math.round(s.pageMargin / 2)}px`)
+        }
         // foliate-paginator 的 document 通过 getContents() 拿不到，这里遍历 shadow 内的 iframe
         const contents = renderer.getContents?.()
         if (Array.isArray(contents)) {
@@ -233,7 +240,7 @@ view.addEventListener('load', (e) => {
         const t = themes[s.theme] || themes.light
         const css = `
             html, body { background: ${t.bg} !important; color: ${t.fg} !important; }
-            body { font-size: ${s.fontSize}px !important; line-height: ${s.lineHeight} !important; padding: ${s.pageMargin}px !important; }
+            body { font-size: ${s.fontSize}px !important; line-height: ${s.lineHeight} !important; }
         `
         injectStyle(doc, css)
     }
