@@ -15,6 +15,9 @@ window.__reader = {
     async openBook(epubUrl) {
         try {
             currentBook = await view.open(epubUrl)
+            // 关键：open() 只装载书，不渲染第一页；必须显式 init 才会翻页显示内容，
+            // 否则 WebView 白屏。lastLocation 为空时显示正文起始。
+            await view.init({ showTextStart: true })
             post('bookOpened', {
                 sections: currentBook.sections?.length ?? 0,
                 title: currentBook.metadata?.title ?? '',

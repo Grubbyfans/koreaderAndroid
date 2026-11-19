@@ -1,8 +1,10 @@
 package com.yuezhou.reader.reader
 
-import android.annotation.SuppressLint
 import android.content.Context
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -44,13 +46,29 @@ class ReaderWebView(context: Context) : WebView(context) {
             // 允许访问受控的 https 本地来源
             allowFileAccess = false
             allowContentAccess = false
+            // 允许混合内容（本地 https 来源内部 fetch）
+            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         }
         webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(
                 view: WebView,
                 request: WebResourceRequest,
             ): WebResourceResponse? {
-                return assetLoader.shouldInterceptRequest(request.url)
+                val resp = assetLoader.shouldInterceptRequest(request.url)
+                if (resp == null) {
+                    Log.w(TAG, "拦截失败(返回null): ${request.url} method=${request.method}")
+                }
+                return resp
+            }
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: android.webkit.WebResourceError,
+            ) {
+                super.onReceivedError(view, request, error)
+                if (request.isForMainFrame) {
+                    Log.e(TAG, "主框架加载错误: ${request.url} code=${error.errorCode} desc=${error.description}")
+                }
             }
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
@@ -59,8 +77,19 @@ class ReaderWebView(context: Context) : WebView(context) {
                 addJavascriptInterface(JsBridge(), "ReaderBridge")
             }
         }
+        webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+                val msg = "[JS:${consoleMessage.messageLevel()}] ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})"
+                Log.d(TAG, msg)
+                return true
+            }
+        }
         // 加载宿主页面
         loadUrl("https://appassets.androidplatform.net/assets/reader/index.html")
+    }
+
+    companion object {
+        private const val TAG = "ReaderWebView"
     }
 
     /**
