@@ -35,9 +35,22 @@ class ReaderWebView(context: Context) : WebView(context) {
     /** 桥接事件监听器。 */
     var eventListener: ((ReaderEvent) -> Unit)? = null
 
+    /** 正文单击回调（用于呼出/收起阅读面板）。 */
+    var onTap: (() -> Unit)? = null
+
     /** 当前是否已加载宿主页面。 */
     var isPageLoaded = false
         private set
+
+    private val gestureDetector = android.view.GestureDetector(
+        context,
+        object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
+                onTap?.invoke()
+                return true
+            }
+        },
+    )
 
     init {
         // debug 构建开启 WebView 远程调试，便于用 Chrome chrome://inspect 排查白屏
@@ -49,6 +62,12 @@ class ReaderWebView(context: Context) : WebView(context) {
         // Compose 内容之上，把「选择 EPUB」按钮等控件盖住，导致进入阅读器后界面白屏。
         // 用软件渲染层强制 WebView 与 Compose 共用同一渲染层，避免遮挡。
         setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+        // 单击检测：WebView 会消费触摸事件，Compose 的 clickable 收不到，
+        // 这里用 GestureDetector 区分单击与翻页滑动，单击回调 onTap。
+        setOnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            false // 返回 false 让 WebView 继续处理滑动翻页
+        }
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -82,8 +101,7 @@ class ReaderWebView(context: Context) : WebView(context) {
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 isPageLoaded = true
-                // 页面就绪后注入桥接对象
-                addJavascriptInterface(JsBridge(), "ReaderBridge")
+                // 桥接对象已在 init 中注入（loadUrl 之前），此处不再重复注入
             }
         }
         webChromeClient = object : WebChromeClient() {
@@ -94,6 +112,12 @@ class ReaderWebView(context: Context) : WebView(context) {
                 return true
             }
         }
+        // 关键：必须在 loadUrl 之前注入桥接对象，否则 ES module 顶层代码执行时
+        // window.ReaderBridge 尚不可用，导致所有事件回传静默丢失（bookOpened/relocate/toc 等）。
+        addJavascriptInterface(
+            JsBridge { type, data -> post { dispatchEvent(type, data) } },
+            "ReaderBridge",
+        )
         // 加载宿主页面
         loadUrl("https://appassets.androidplatform.net/assets/reader/index.html")
     }
@@ -131,6 +155,41 @@ class ReaderWebView(context: Context) : WebView(context) {
     fun nextPage() = whenReaderReady { evaluateJavascript("window.__reader.next();", null) }
     fun prevPage() = whenReaderReady { evaluateJavascript("window.__reader.prev();", null) }
 
+    /** 请求目录树（结果通过 TocLoaded 事件回传）。 */
+    fun requestToc() = whenReaderReady {
+        evaluateJavascript("window.__reader.getTableOfContents();", null)
+    }
+
+    /** 跳转到目录项（href 指向章节）。 */
+    fun goToToc(href: String) = whenReaderReady {
+        evaluateJavascript("window.__reader.goToToc(${jsonQuote(href)}).then(r => {});", null)
+    }
+
+    /** 跳到全书百分比进度（0..1）。 */
+    fun goToFraction(frac: Float) = whenReaderReady {
+        evaluateJavascript("window.__reader.goToFraction($frac).then(r => {});", null)
+    }
+
+    /** 应用排版设置（字号/行距/边距/主题/翻页模式）。 */
+    fun applySettings(
+        fontSize: Int,
+        lineHeight: Double,
+        pageMargin: Int,
+        theme: String,
+        vertical: Boolean,
+    ) = whenReaderReady {
+        val js = buildString {
+            append("window.__reader.applySettings({")
+            append("fontSize:$fontSize,")
+            append("lineHeight:$lineHeight,")
+            append("pageMargin:$pageMargin,")
+            append("theme:${jsonQuote(theme)},")
+            append("vertical:$vertical")
+            append("}).then(r => {});")
+        }
+        evaluateJavascript(js, null)
+    }
+
     /**
      * bridge.js 是 ES module，onPageFinished 时可能尚未执行完，window.__reader 未就绪。
      * 这里轮询 window.__readerReady，就绪后再执行动作；最多尝试 200 次（约 10 秒）后放弃，
@@ -154,10 +213,10 @@ class ReaderWebView(context: Context) : WebView(context) {
     }
 
     /** JS 侧桥接对象：由 JS `window.ReaderBridge.onReaderEvent(type, data)` 调用。 */
-    private inner class JsBridge {
+    class JsBridge(private val onEvent: (String, String) -> Unit) {
         @JavascriptInterface
         fun onReaderEvent(type: String, data: String) {
-            post { dispatchEvent(type, data) }
+            onEvent(type, data)
         }
     }
 
@@ -177,6 +236,10 @@ class ReaderWebView(context: Context) : WebView(context) {
                     index = (obj["index"] as? Number)?.toInt(),
                     fraction = (obj["fraction"] as? Number)?.toFloat(),
                 )
+            }
+            "toc" -> {
+                val obj = parseJson(data)
+                ReaderEvent.TocLoaded(parseTocItems(obj["items"]))
             }
             "error" -> {
                 val obj = parseJson(data)
@@ -202,6 +265,23 @@ class ReaderWebView(context: Context) : WebView(context) {
         } catch (e: Exception) {
             emptyMap()
         }
+    }
+
+    /** 解析嵌套目录项 JSON（label/href/subitems）。 */
+    private fun parseTocItems(items: Any?): List<TocItem> {
+        if (items !is org.json.JSONArray) return emptyList()
+        val result = ArrayList<TocItem>()
+        for (i in 0 until items.length()) {
+            val node = items.optJSONObject(i) ?: continue
+            result.add(
+                TocItem(
+                    label = node.optString("label"),
+                    href = node.optString("href"),
+                    subitems = parseTocItems(node.opt("subitems")),
+                ),
+            )
+        }
+        return result
     }
 
     private fun jsonQuote(s: String): String =

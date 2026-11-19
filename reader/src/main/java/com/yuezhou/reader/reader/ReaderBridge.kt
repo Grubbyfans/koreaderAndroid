@@ -8,9 +8,19 @@ sealed interface ReaderEvent {
     data class BookOpened(val sections: Int, val title: String) : ReaderEvent
     /** 位置变化（翻页/跳转），携带 CFI。 */
     data class Relocated(val cfi: String?, val index: Int?, val fraction: Float?) : ReaderEvent
+    /** 目录（TOC）已就绪，携带目录树。 */
+    data class TocLoaded(val items: List<TocItem>) : ReaderEvent
     /** 错误。 */
     data class Error(val message: String) : ReaderEvent
 }
+
+/** 目录项（对应 foliate-js book.toc 的层级结构）。 */
+data class TocItem(
+    val label: String,
+    val href: String,
+    /** 子章节；空列表表示叶子节点。 */
+    val subitems: List<TocItem> = emptyList(),
+)
 
 /**
  * Kotlin 侧桥接接口：暴露给 WebView JS 层调用（@JavascriptInterface）。
