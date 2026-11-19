@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "coverDirectoryReady": true,
+  "books": [
+    {
+      "schemaVersion": 2,
+      "status": "ready",
+      "bookId": "示例书",
+      "title": "示例书",
+      "fileName": "示例书.epub",
+      "path": "books/示例书.epub",
+      "size": 10485760,
+      "uploadedAt": "2026-11-19T18:00:00+08:00",
+      "coverPath": "covers/示例书.json",
+      "coverVersion": "8bf8d30bb96e451cab236e154e267c5b"
+    },
+    {
+      "schemaVersion": 2,
+      "status": "ready",
+      "bookId": "无封面书",
+      "title": "无封面书",
+      "fileName": "无封面书.EPUB",
+      "path": "books/无封面书.EPUB",
+      "size": 1,
+      "uploadedAt": "2026-11-19T18:00:00Z"
+    }
+  ]
+}

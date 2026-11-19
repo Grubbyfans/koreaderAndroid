@@ -1,6 +1,7 @@
 # Gradle
 .gradle/
 .gradle-build.log
+build-local.sh
 build/
 !gradle/wrapper/gradle-wrapper.jar
 local.properties
