@@ -69,22 +69,43 @@ class ReaderWebView(context: Context) : WebView(context) {
      */
     fun openEpub(epubFileName: String) {
         val url = "https://appassets.androidplatform.net/epub/$epubFileName"
-        evaluateJavascript(
-            "window.__reader.openBook(${jsonQuote(url)}).then(r => {});",
-            null,
-        )
+        whenReaderReady {
+            evaluateJavascript(
+                "window.__reader.openBook(${jsonQuote(url)}).then(r => {});",
+                null,
+            )
+        }
     }
 
     /** 跳转到指定 CFI。 */
     fun goToCfi(cfi: String) {
-        evaluateJavascript(
-            "window.__reader.goToCfi(${jsonQuote(cfi)}).then(r => {});",
-            null,
-        )
+        whenReaderReady {
+            evaluateJavascript(
+                "window.__reader.goToCfi(${jsonQuote(cfi)}).then(r => {});",
+                null,
+            )
+        }
     }
 
-    fun nextPage() = evaluateJavascript("window.__reader.next();", null)
-    fun prevPage() = evaluateJavascript("window.__reader.prev();", null)
+    fun nextPage() = whenReaderReady { evaluateJavascript("window.__reader.next();", null) }
+    fun prevPage() = whenReaderReady { evaluateJavascript("window.__reader.prev();", null) }
+
+    /**
+     * bridge.js 是 ES module，onPageFinished 时可能尚未执行完，window.__reader 未就绪。
+     * 这里轮询 window.__readerReady，就绪后再执行动作；最多尝试 60 次（约 3 秒）后放弃。
+     */
+    private fun whenReaderReady(remaining: Int = 60, action: () -> Unit) {
+        if (remaining <= 0) return
+        evaluateJavascript(
+            "window.__readerReady === true",
+        ) { ready ->
+            if (ready == "true") {
+                action()
+            } else {
+                postDelayed({ whenReaderReady(remaining - 1, action) }, 50)
+            }
+        }
+    }
 
     /** JS 侧桥接对象：由 JS `window.ReaderBridge.onReaderEvent(type, data)` 调用。 */
     private inner class JsBridge {
@@ -137,20 +158,8 @@ class ReaderWebView(context: Context) : WebView(context) {
         }
     }
 
-    private fun jsonQuote(s: String): String {
-        // 简单 JSON 字符串转义（书名/CFI 可能含引号）
-        val sb = StringBuilder("\"")
-        for (c in s) {
-            when (c) {
-                '"' -> sb.append("\\\"")
-                '\\' -> sb.append("\\\\")
-                '\n' -> sb.append("\\n")
-                '\r' -> sb.append("\\r")
-                '\t' -> sb.append("\\t")
-                else -> sb.append(c)
-            }
-        }
-        sb.append("\"")
-        return sb.toString()
-    }
+    private fun jsonQuote(s: String): String =
+        // 用 org.json 的 quote 正确处理引号、反斜杠、控制字符与 U+2028/U+2029，
+        // 避免手写转义遗漏导致注入到 JS 字符串字面量时出错。
+        org.json.JSONObject.quote(s)
 }

@@ -15,7 +15,7 @@ import kotlinx.serialization.json.putJsonArray
  *
  * 上限：4 MiB、10000 本；单本 size 1 B ~ 1 GiB 整数。
  * title 必须等于 bookId；path 必须等于 "books/" + fileName；fileName 必须是合法云端 EPUB 名且 cloudId == bookId。
- * 有 coverPath 必须有 coverVersion（字符串，≤128 字节）；无封面时两者都不出现。
+ * 有 coverPath 必须有 coverVersion（非空字符串，插件端不校验长度）；无封面时两者都不出现。
  * contentSha256 / coverPng 字段在 v2 记录中必须不存在。
  * 未知可选字段原样保留（插件在部分写路径会丢弃，但读端不应主动破坏）。
  */
@@ -108,7 +108,8 @@ object LibraryCatalog {
         val coverVersion = ProtocolChecks.string(obj, "coverVersion", required = false)
         if (coverPath != null) {
             if (coverVersion == null) throw ProtocolError.InvalidInput("有 coverPath 必须有 coverVersion")
-            if (coverVersion.toByteArray(Charsets.UTF_8).size > 128) throw ProtocolError.InvalidInput("coverVersion 超过 128 字节")
+            // coverVersion 是不透明缓存版本（方案 §4.4），插件端不校验长度，这里只要求非空字符串，不设字节上限。
+            if (coverVersion.isEmpty()) throw ProtocolError.InvalidInput("coverVersion 不能为空字符串")
             if (coverPath != "covers/$bookId.json") throw ProtocolError.InvalidInput("coverPath 格式非法")
         } else if (coverVersion != null) {
             throw ProtocolError.InvalidInput("无 coverPath 时不得有 coverVersion")
