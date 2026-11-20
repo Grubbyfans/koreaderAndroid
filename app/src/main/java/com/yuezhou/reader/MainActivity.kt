@@ -49,6 +49,9 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -110,6 +113,9 @@ private fun BookshelfScreen() {
     var selecting by remember { mutableStateOf<Set<String>?>(null) }
     // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
     var pendingDelete by remember { mutableStateOf<Set<String>?>(null) }
+    // 软删除集合：确认删除后先隐藏，Snackbar 撤销前不真正落盘删除
+    var hiddenBooks by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val store = remember { LibraryStore(context) }
 
@@ -146,6 +152,7 @@ private fun BookshelfScreen() {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = YuezhouColors.Background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (selecting != null && currentTab == Tab.书架) {
                 // 管理态顶栏：已选数量 + 全选/删除
@@ -244,9 +251,10 @@ private fun BookshelfScreen() {
                 )
             }
 
+            val visibleBooks = books.filter { it.bookId !in hiddenBooks }
             when (currentTab) {
                 Tab.书架 -> BookshelfContent(
-                    books = books,
+                    books = visibleBooks,
                     loading = loading,
                     selecting = selecting,
                     onPickEpub = { pickEpub.launch(arrayOf("application/epub+zip")) },
@@ -256,7 +264,7 @@ private fun BookshelfScreen() {
                         selecting = if (id in cur) cur - id else cur + id
                     },
                 )
-                Tab.最近阅读 -> RecentReading(books)
+                Tab.最近阅读 -> RecentReading(visibleBooks)
                 Tab.设置 -> SettingsPage()
             }
         }
@@ -284,11 +292,24 @@ private fun BookshelfScreen() {
                 TextButton(
                     onClick = {
                         scope.launch {
-                            val removed = store.removeBooks(toDelete)
+                            // 先软隐藏，给撤销窗口；Snackbar 超时（未撤销）才真正删除
+                            hiddenBooks = hiddenBooks + toDelete
                             pendingDelete = null
                             selecting = null
-                            status = "已移除 ${removed.size} 本"
                             refreshKey++
+                            val result = snackbarHostState.showSnackbar(
+                                message = "已移除 ${toDelete.size} 本",
+                                actionLabel = "撤销",
+                            )
+                            if (result == SnackbarResult.ActionPerformed) {
+                                // 撤销：恢复显示，不删除
+                                hiddenBooks = hiddenBooks - toDelete
+                                refreshKey++
+                            } else {
+                                // 超时/消失：真正删除
+                                store.removeBooks(toDelete)
+                                refreshKey++
+                            }
                         }
                     },
                 ) {
