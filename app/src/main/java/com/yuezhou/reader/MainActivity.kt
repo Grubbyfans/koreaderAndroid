@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -52,12 +54,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -461,19 +465,118 @@ private fun RecentReading(books: List<LibraryStore.Entry>) {
     }
 }
 
-/** 设置页：阅读默认值占位（当前展示主题/翻页等已持久化的说明）。 */
+/** 设置页：全局阅读默认值（主题/翻页/字号/行距/页边距）+ 云同步与朗读的占位说明。 */
 @Composable
 private fun SettingsPage() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val prefs by ReaderSettings.flow(context).collectAsState(
+        initial = ReaderPreferences(),
+    )
+
+    // 松手才保存的预览值（避免拖动中频繁写 DataStore）
+    var fontSizePreview by remember { mutableStateOf<Int?>(null) }
+    var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
+    var marginPreview by remember { mutableStateOf<Int?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
         Text("设置", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(16.dp))
+
+        // 主题
+        Text("主题", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("light" to "浅色", "sepia" to "护眼", "dark" to "深色").forEach { (value, label) ->
+                val selected = prefs.theme == value
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+                        .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(theme = value)) } }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        // 翻页模式
+        Text("翻页模式", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(false to "左右翻页", true to "上下滚动").forEach { (value, label) ->
+                val selected = prefs.vertical == value
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+                        .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(vertical = value)) } }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        // 字号
+        Text("默认字号：${fontSizePreview ?: prefs.fontSize}", style = MaterialTheme.typography.bodyMedium)
+        Slider(
+            value = (fontSizePreview ?: prefs.fontSize).toFloat(),
+            onValueChange = { fontSizePreview = it.toInt() },
+            onValueChangeFinished = {
+                val v = fontSizePreview
+                if (v != null) {
+                    scope.launch { ReaderSettings.save(context, prefs.copy(fontSize = v)) }
+                    fontSizePreview = null
+                }
+            },
+            valueRange = 12f..30f,
+        )
+
+        // 行距
+        Text("默认行距：${String.format("%.1f", lineHeightPreview ?: prefs.lineHeight)}", style = MaterialTheme.typography.bodyMedium)
+        Slider(
+            value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
+            onValueChange = { lineHeightPreview = it.toDouble() },
+            onValueChangeFinished = {
+                val v = lineHeightPreview
+                if (v != null) {
+                    scope.launch { ReaderSettings.save(context, prefs.copy(lineHeight = v)) }
+                    lineHeightPreview = null
+                }
+            },
+            valueRange = 1.2f..2.5f,
+        )
+
+        // 页边距
+        Text("默认页边距：${marginPreview ?: prefs.pageMargin}", style = MaterialTheme.typography.bodyMedium)
+        Slider(
+            value = (marginPreview ?: prefs.pageMargin).toFloat(),
+            onValueChange = { marginPreview = it.toInt() },
+            onValueChangeFinished = {
+                val v = marginPreview
+                if (v != null) {
+                    scope.launch { ReaderSettings.save(context, prefs.copy(pageMargin = v)) }
+                    marginPreview = null
+                }
+            },
+            valueRange = 0f..48f,
+        )
+
+        Spacer(Modifier.height(24.dp))
         Text(
-            "字号、主题、翻页模式等阅读选项，可在打开书籍后点击屏幕呼出面板进行调节，并会自动保存。",
-            style = MaterialTheme.typography.bodyMedium,
+            "云同步与朗读功能尚未接入，将在 P4/P5（WebDAV / 百度网盘）与 P2（TTS）后端就绪后开放。",
+            style = MaterialTheme.typography.bodySmall,
             color = YuezhouColors.TextSecondary,
         )
     }
