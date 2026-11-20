@@ -131,7 +131,9 @@ window.__reader = {
     // 提取当前章节正文文本：返回 [{ cfi, text }] 列表，供朗读（TTS）分句使用。
     // 按文档序遍历文本节点，跳过 script/style/隐藏装饰与导航文本；
     // 每个文本节点生成其起始位置的 CFI，作为朗读偏移 → 原文位置的锚点。
-    getCurrentChapterText() {
+    // startCfi 非空时，只返回「该位置及其之后」的文本（从该节点内偏移处截断），
+    // 使朗读从用户当前阅读位置开始，而非本章开头。
+    getCurrentChapterText(startCfi) {
         try {
             const contents = view.renderer?.getContents?.()
             if (!Array.isArray(contents) || contents.length === 0) {
@@ -140,15 +142,50 @@ window.__reader = {
             }
             // 取当前可见章节（第一项）；跨页可能有多项，但同一章节共享一个 index
             const { doc, index } = contents[0]
+
+            // 反解起点：当前阅读位置的文本节点 + 节点内偏移
+            let startNode = null
+            let startOffset = 0
+            if (startCfi) {
+                try {
+                    const resolved = view.resolveCFI?.(startCfi)
+                    if (resolved && typeof resolved.anchor === 'function') {
+                        const range = resolved.anchor(doc)
+                        if (range && range.startContainer) {
+                            startNode = range.startContainer
+                            startOffset = range.startOffset || 0
+                        }
+                    }
+                } catch (e) { /* 起点反解失败则回退到章首 */ }
+            }
+
             const items = []
             const walker = doc.createTreeWalker(doc.body || doc.documentElement, NodeFilter.SHOW_TEXT)
             let node
+            let started = !startNode // 无起点则从头开始
             while ((node = walker.nextNode())) {
                 const text = node.nodeValue
                 if (!text || !text.trim()) continue
                 const parent = node.parentElement
                 if (!parent || isNonReadable(parent)) continue
-                // 为文本节点生成起始位置 CFI（collapsed range 指向节点起始）
+
+                // 起点之前：跳过；起点所在节点：从 startOffset 处截断并标记 started
+                if (!started) {
+                    if (node === startNode) {
+                        started = true
+                        const tail = text.substring(startOffset)
+                        if (tail.trim()) {
+                            const cfi = getTextNodeCfi(index, node, doc, startOffset)
+                            if (cfi) items.push({ cfi, text: tail.replace(/\u00a0/g, ' ') })
+                        }
+                        continue
+                    }
+                    // 起点节点可能被 TreeWalker 略过（如起点在非文本节点），
+                    // 用位置比较判断是否已越过起点。
+                    if (isBeforeStart(node, startNode)) continue
+                    started = true
+                }
+
                 const cfi = getTextNodeCfi(index, node, doc)
                 if (!cfi) continue
                 items.push({ cfi, text: text.replace(/\u00a0/g, ' ') })
@@ -320,16 +357,32 @@ function isNonReadable(el) {
     return false
 }
 
-// 为文本节点生成其起始位置的 CFI；失败返回 null。
+// 为文本节点生成其指定偏移位置的 CFI；失败返回 null。
 // 复用 view.getCFI(index, range)：foliate 内部用 CFI.fromRange 计算到文本节点级偏移。
-function getTextNodeCfi(index, textNode, doc) {
+// offset 为节点内字符偏移（0-based）；默认 0 即节点起始。
+function getTextNodeCfi(index, textNode, doc, offset = 0) {
     try {
         const range = doc.createRange()
-        range.setStart(textNode, 0)
+        range.setStart(textNode, Math.min(offset, textNode.nodeValue?.length ?? 0))
         range.collapse(true)
         return view.getCFI(index, range) ?? null
     } catch (e) {
         return null
+    }
+}
+
+// 判断文本节点 node 是否位于 startNode 之前（文档序）。
+// 用于起点反解后跳过起点之前的文本节点（当起点节点不在 TreeWalker 结果中时兜底）。
+function isBeforeStart(node, startNode) {
+    try {
+        // compareBoundaryPoints：node 的末尾 与 startNode 的开头比较；<0 表示 node 在前。
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        const startRange = document.createRange()
+        startRange.selectNodeContents(startNode)
+        return range.compareBoundaryPoints(Range.END_TO_START, startRange) < 0
+    } catch (e) {
+        return false
     }
 }
 

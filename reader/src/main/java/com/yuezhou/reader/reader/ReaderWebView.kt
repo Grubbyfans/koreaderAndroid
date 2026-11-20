@@ -190,9 +190,11 @@ class ReaderWebView(context: Context) : WebView(context) {
         evaluateJavascript("window.__reader.getTableOfContents();", null)
     }
 
-    /** 请求当前章节正文文本（结果通过 ChapterText 事件回传，供朗读分句）。 */
-    fun requestChapterText() = whenReaderReady {
-        evaluateJavascript("window.__reader.getCurrentChapterText();", null)
+    /** 请求当前章节正文文本（结果通过 ChapterText 事件回传，供朗读分句）。
+     *  startCfi 非空时，只返回该位置及其之后的文本（从当前阅读位置开始朗读）。 */
+    fun requestChapterText(startCfi: String? = null) = whenReaderReady {
+        val cfiArg = if (startCfi.isNullOrBlank()) "null" else jsonQuote(startCfi)
+        evaluateJavascript("window.__reader.getCurrentChapterText($cfiArg);", null)
     }
 
     /** 朗读高亮：定位到文本节点 CFI + 节点内字符偏移处并选中。 */
