@@ -10,10 +10,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -94,8 +96,8 @@ internal fun BookUploadControls(sync: CloudSync, queue: BookUploadQueue, cloudLo
     var loadError by remember { mutableStateOf<String?>(null) }
     var showTasks by remember { mutableStateOf(false) }
 
-    Row {
-        TextButton(enabled = !queue.busy && !cloudLoading && !showSelection, onClick = {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(enabled = !queue.busy && !cloudLoading && !showSelection, onClick = {
             selection = null
             loadError = null
             showSelection = true
@@ -109,10 +111,10 @@ internal fun BookUploadControls(sync: CloudSync, queue: BookUploadQueue, cloudLo
                 }
             }
         }) { Text("立即同步") }
-        TextButton(onClick = { showTasks = true }) { Text("上传任务") }
-        TextButton(enabled = !queue.busy && !cloudLoading, onClick = queue::repair) {
-            Text("补全待发布")
-        }
+        OutlinedButton(onClick = { showTasks = true }) { Text("上传任务") }
+    }
+    TextButton(enabled = !queue.busy && !cloudLoading, onClick = queue::repair) {
+        Text("补全待发布")
     }
     queue.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 

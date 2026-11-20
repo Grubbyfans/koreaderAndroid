@@ -57,9 +57,6 @@ fun CloudConfigSection(store: CloudCredentialStore) {
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text("云同步", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-
         val creds = credentials ?: CloudCredentials()
 
         // 当前生效后端选择（仅列出已配置的后端）

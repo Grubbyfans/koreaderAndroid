@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,16 +30,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items as lazyItems
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -53,11 +56,12 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -70,6 +74,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,15 +83,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.reader.CloudCredentialStore
 import com.yuezhou.reader.reader.CloudSync
+import com.yuezhou.reader.reader.DownloadDirectory
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
-import com.yuezhou.reader.reader.DownloadDirectory
 import com.yuezhou.reader.reader.LocalScanner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -1034,7 +1039,6 @@ private fun RecentReading(books: List<LibraryStore.Entry>) {
     }
 }
 
-/** 设置页：全局阅读默认值（主题/翻页/字号/行距/页边距）+ 云同步与朗读的占位说明。 */
 @Composable
 private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, cloudLoading: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1069,164 +1073,213 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
     var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
     var marginPreview by remember { mutableStateOf<Int?>(null) }
 
+    var showReading by rememberSaveable { mutableStateOf(false) }
+    val credentialStore = remember(context) { CloudCredentialStore(context) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("设置", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(16.dp))
-
-        Text("下载目录", style = MaterialTheme.typography.titleMedium)
-        Text(downloadLabel, style = MaterialTheme.typography.bodyMedium)
-        Text("云端下载会保存到所选目录，同时在应用内保留阅读副本。")
-        Row {
-            TextButton(onClick = { chooseDownloadDirectory.launch(downloadDirectory.uri) }) {
-                Text("选择目录")
-            }
-            if (downloadDirectory.uri != null) {
-                TextButton(onClick = {
-                    downloadDirectory.reset()
-                    downloadLabel = downloadDirectory.label()
-                    downloadError = null
-                }) {
-                    Text("恢复默认")
-                }
-            }
+        SettingsCard("书籍同步", highlighted = true) {
+            BookUploadControls(cloudSync, uploadQueue, cloudLoading)
         }
-        downloadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Spacer(Modifier.height(16.dp))
 
-        // 主题
-        Text("主题", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("light" to "浅色", "sepia" to "护眼", "dark" to "深色").forEach { (value, label) ->
-                val selected = prefs.theme == value
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (selected) Color.White else YuezhouColors.TextSecondary,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
-                        .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(theme = value)) } }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
+        SettingsCard("云端账号") {
+            CloudConfigSection(store = credentialStore)
         }
-        Spacer(Modifier.height(16.dp))
 
-        // 翻页模式
-        Text("翻页模式", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(false to "左右翻页", true to "上下滚动").forEach { (value, label) ->
-                val selected = prefs.vertical == value
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (selected) Color.White else YuezhouColors.TextSecondary,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
-                        .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(vertical = value)) } }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+        SettingsCard("下载目录") {
+            Text(downloadLabel, style = MaterialTheme.typography.bodyMedium)
+            Text("下载的 EPUB 会同时保留一份应用内阅读副本。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+            Row {
+                TextButton(onClick = { chooseDownloadDirectory.launch(downloadDirectory.uri) }) {
+                    Text("选择目录")
+                }
+                if (downloadDirectory.uri != null) {
+                    TextButton(onClick = {
+                        downloadDirectory.reset()
+                        downloadLabel = downloadDirectory.label()
+                        downloadError = null
+                    }) {
+                        Text("恢复默认")
+                    }
+                }
             }
+            downloadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-        Spacer(Modifier.height(16.dp))
 
-        // 字号
-        Text("默认字号：${fontSizePreview ?: prefs.fontSize}", style = MaterialTheme.typography.bodyMedium)
-        Slider(
-            value = (fontSizePreview ?: prefs.fontSize).toFloat(),
-            onValueChange = { fontSizePreview = it.toInt() },
-            onValueChangeFinished = {
-                val v = fontSizePreview
-                if (v != null) {
-                    scope.launch { ReaderSettings.save(context, prefs.copy(fontSize = v)) }
-                    fontSizePreview = null
-                }
-            },
-            valueRange = 12f..30f,
-        )
-
-        // 行距
-        Text("默认行距：${String.format("%.1f", lineHeightPreview ?: prefs.lineHeight)}", style = MaterialTheme.typography.bodyMedium)
-        Slider(
-            value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
-            onValueChange = { lineHeightPreview = it.toDouble() },
-            onValueChangeFinished = {
-                val v = lineHeightPreview
-                if (v != null) {
-                    scope.launch { ReaderSettings.save(context, prefs.copy(lineHeight = v)) }
-                    lineHeightPreview = null
-                }
-            },
-            valueRange = 1.2f..2.5f,
-        )
-
-        // 页边距
-        Text("默认页边距：${marginPreview ?: prefs.pageMargin}", style = MaterialTheme.typography.bodyMedium)
-        Slider(
-            value = (marginPreview ?: prefs.pageMargin).toFloat(),
-            onValueChange = { marginPreview = it.toInt() },
-            onValueChangeFinished = {
-                val v = marginPreview
-                if (v != null) {
-                    scope.launch { ReaderSettings.save(context, prefs.copy(pageMargin = v)) }
-                    marginPreview = null
-                }
-            },
-            valueRange = 0f..48f,
-        )
-
-        Spacer(Modifier.height(24.dp))
-        // 云同步后端配置（WebDAV / 百度网盘授权）
-        val credentialStore = remember { CloudCredentialStore(context) }
-        CloudConfigSection(store = credentialStore)
-
-        Spacer(Modifier.height(16.dp))
-        BookUploadControls(cloudSync, uploadQueue, cloudLoading)
-
-        // 诊断摘要（方案 §13.2：最近 20 次同步/刷新任务的可执行诊断）
-        Spacer(Modifier.height(16.dp))
-        var diagnostics by remember { mutableStateOf<List<Pair<Long, Pair<String, com.yuezhou.reader.core.cloud.DiagnosticSummary>>>>(emptyList()) }
-        var showDiagnostics by remember { mutableStateOf(false) }
-        TextButton(
-            onClick = {
-                scope.launch {
-                    diagnostics = CloudSync(context).diagnosticSummaries()
-                    showDiagnostics = !showDiagnostics
-                }
-            },
+        SettingsCard(
+            title = "默认阅读排版",
+            expanded = showReading,
+            onToggle = { showReading = !showReading },
         ) {
-            Text(if (showDiagnostics) "收起诊断" else "查看诊断")
-        }
-        if (showDiagnostics) {
-            if (diagnostics.isEmpty()) {
-                Text(
-                    "暂无诊断记录（完成一次同步或刷新书库后生成）",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = YuezhouColors.TextSecondary,
-                )
-            } else {
-                // 倒序展示最近的在前面
-                diagnostics.reversed().forEach { (at, pair) ->
-                    val (kind, s) = pair
-                    val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-                        .format(java.util.Date(at))
-                    val phaseText = s.phasesMs.entries.joinToString(" ") { "${it.key}=${it.value}ms" }
+            // 主题
+            Text("主题", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("light" to "浅色", "sepia" to "护眼", "dark" to "深色").forEach { (value, label) ->
+                    val selected = prefs.theme == value
                     Text(
-                        "[$time] $kind · 请求${s.totalRequests} · ↑${s.bytesUp}B ↓${s.bytesDown}B · 缓存${s.cacheHits}" +
-                            (s.errorKind?.let { " · $it" } ?: "") + "\n$phaseText",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YuezhouColors.TextSecondary,
-                        modifier = Modifier.padding(vertical = 2.dp),
+                        label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+                            .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(theme = value)) } }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 }
+            }
+            Spacer(Modifier.height(4.dp))
+
+            // 翻页模式
+            Text("翻页模式", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(false to "左右翻页", true to "上下滚动").forEach { (value, label) ->
+                    val selected = prefs.vertical == value
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+                            .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(vertical = value)) } }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+
+            // 字号
+            Text("默认字号：${fontSizePreview ?: prefs.fontSize}", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = (fontSizePreview ?: prefs.fontSize).toFloat(),
+                onValueChange = { fontSizePreview = it.toInt() },
+                onValueChangeFinished = {
+                    val v = fontSizePreview
+                    if (v != null) {
+                        scope.launch { ReaderSettings.save(context, prefs.copy(fontSize = v)) }
+                        fontSizePreview = null
+                    }
+                },
+                valueRange = 12f..30f,
+            )
+
+            // 行距
+            Text("默认行距：${String.format("%.1f", lineHeightPreview ?: prefs.lineHeight)}", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
+                onValueChange = { lineHeightPreview = it.toDouble() },
+                onValueChangeFinished = {
+                    val v = lineHeightPreview
+                    if (v != null) {
+                        scope.launch { ReaderSettings.save(context, prefs.copy(lineHeight = v)) }
+                        lineHeightPreview = null
+                    }
+                },
+                valueRange = 1.2f..2.5f,
+            )
+
+            // 页边距
+            Text("默认页边距：${marginPreview ?: prefs.pageMargin}", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = (marginPreview ?: prefs.pageMargin).toFloat(),
+                onValueChange = { marginPreview = it.toInt() },
+                onValueChangeFinished = {
+                    val v = marginPreview
+                    if (v != null) {
+                        scope.launch { ReaderSettings.save(context, prefs.copy(pageMargin = v)) }
+                        marginPreview = null
+                    }
+                },
+                valueRange = 0f..48f,
+            )
+        }
+
+        SettingsCard("同步诊断") {
+            // 诊断摘要（方案 §13.2：最近 20 次同步/刷新任务的可执行诊断）
+            var diagnostics by remember { mutableStateOf<List<Pair<Long, Pair<String, com.yuezhou.reader.core.cloud.DiagnosticSummary>>>>(emptyList()) }
+            var showDiagnostics by remember { mutableStateOf(false) }
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        diagnostics = cloudSync.diagnosticSummaries()
+                        showDiagnostics = !showDiagnostics
+                    }
+                },
+            ) {
+                Text(if (showDiagnostics) "收起诊断" else "查看诊断")
+            }
+            if (showDiagnostics) {
+                if (diagnostics.isEmpty()) {
+                    Text(
+                        "暂无诊断记录（完成一次同步或刷新书库后生成）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                } else {
+                    // 倒序展示最近的在前面
+                    diagnostics.reversed().forEach { (at, pair) ->
+                        val (kind, s) = pair
+                        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+                            .format(java.util.Date(at))
+                        val phaseText = s.phasesMs.entries.joinToString(" ") { "${it.key}=${it.value}ms" }
+                        Text(
+                            "[$time] $kind · 请求${s.totalRequests} · ↑${s.bytesUp}B ↓${s.bytesDown}B · 缓存${s.cacheHits}" +
+                                (s.errorKind?.let { " · $it" } ?: "") + "\n$phaseText",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                            modifier = Modifier.padding(vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsCard(
+    title: String,
+    highlighted: Boolean = false,
+    expanded: Boolean = true,
+    onToggle: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    val color = if (highlighted) YuezhouColors.BrandContainer else YuezhouColors.Surface
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = color,
+        border = BorderStroke(1.dp, if (highlighted) YuezhouColors.Brand.copy(alpha = 0.20f) else YuezhouColors.Divider),
+    ) {
+        Column {
+            val header = Modifier.fillMaxWidth()
+            Row(
+                modifier = (if (onToggle != null) header.clickable(onClick = onToggle) else header)
+                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                if (onToggle != null) {
+                    Icon(
+                        if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = if (expanded) "收起" else "展开",
+                        tint = YuezhouColors.TextSecondary,
+                    )
+                }
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) { content() }
             }
         }
     }
