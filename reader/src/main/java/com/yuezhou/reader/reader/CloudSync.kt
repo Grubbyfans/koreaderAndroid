@@ -561,6 +561,24 @@ class CloudSync(private val context: Context) {
         }
     }
 
+    suspend fun deleteRemoteBook(bookId: String): SyncOutcome = withContext(Dispatchers.IO) {
+        try {
+            val backend = backend() ?: error("尚未配置云后端")
+            backend.ensureAuthorized()
+            try {
+                CloudService(backend).deleteBook(bookId)
+                SyncOutcome(true, "已删除云端书籍")
+            } finally {
+                PendingPublicationStore(context).remove(backend.backendId, bookId)
+                invalidateListCache()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SyncOutcome(false, e.message ?: "无法删除云端书籍")
+        }
+    }
+
     // region 进度同步（对齐方案 §5.6，锚点暂以 CFI 直传，XPointer 桥接待专项）
 
     /** 进度同步的信息展示：本机与云端的对照。 */

@@ -146,6 +146,8 @@ private fun BookshelfScreen() {
     // 待下载/详情选中的书
     var detailBook by remember { mutableStateOf<CloudSync.RemoteBook?>(null) }
     var downloading by remember { mutableStateOf(false) }
+    var confirmCloudDelete by remember { mutableStateOf(false) }
+    var deletingCloudBook by remember { mutableStateOf(false) }
 
     var importOptionsOpen by remember { mutableStateOf(false) }
 
@@ -485,7 +487,38 @@ private fun BookshelfScreen() {
 
     // 云端书籍详情弹窗：名称/大小/后端 + 下载（或已本地存在时打开）
     val detail = detailBook
-    if (detail != null) {
+    if (detail != null && confirmCloudDelete) {
+        AlertDialog(
+            onDismissRequest = { if (!deletingCloudBook) confirmCloudDelete = false },
+            title = { Text("删除云端书籍") },
+            text = { Text("将从${remoteBackendLabel ?: "云端"}删除《${detail.bookId}》的正文、封面和云端阅读进度。本机书籍及进度会保留。") },
+            confirmButton = {
+                TextButton(
+                    enabled = !deletingCloudBook,
+                    onClick = {
+                        deletingCloudBook = true
+                        scope.launch {
+                            try {
+                                val result = cloudSync.deleteRemoteBook(detail.bookId)
+                                confirmCloudDelete = false
+                                if (result.success) {
+                                    detailBook = null
+                                    remoteBooks = remoteBooks.filterNot { it.bookId == detail.bookId }
+                                    loadRemote(force = true)
+                                }
+                                snackbarHostState.showSnackbar(result.message)
+                            } finally {
+                                deletingCloudBook = false
+                            }
+                        }
+                    },
+                ) { Text(if (deletingCloudBook) "删除中…" else "删除云端", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(enabled = !deletingCloudBook, onClick = { confirmCloudDelete = false }) { Text("取消") }
+            },
+        )
+    } else if (detail != null) {
         AlertDialog(
             onDismissRequest = { if (!downloading) detailBook = null },
             title = { Text(detail.bookId, maxLines = 2, overflow = TextOverflow.Ellipsis) },
@@ -510,41 +543,40 @@ private fun BookshelfScreen() {
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (detail.local) YuezhouColors.Brand else YuezhouColors.TextSecondary,
                     )
+                    TextButton(
+                        enabled = !downloading && !deletingCloudBook && !uploadQueue.busy && !remoteLoading,
+                        onClick = { confirmCloudDelete = true },
+                    ) { Text("删除云端书籍", color = MaterialTheme.colorScheme.error) }
                 }
             },
             confirmButton = {
                 if (detail.local) {
-                    TextButton(
-                    enabled = !downloading,
-                    onClick = {
+                    TextButton(enabled = !downloading, onClick = {
                         detailBook = null
                         context.startActivity(
                             Intent(context, ReaderActivity::class.java).apply {
                                 putExtra(ReaderActivity.EXTRA_BOOK_ID, detail.bookId)
                             },
                         )
-                    },
-                ) { Text("打开") }
-            }
-            TextButton(
-                    enabled = !downloading,
-                    onClick = {
-                        scope.launch {
-                            downloading = true
-                            val result = cloudSync.downloadBook(detail, ReaderActivity::isBookOpen)
+                    }) { Text("打开") }
+                }
+                TextButton(enabled = !downloading, onClick = {
+                    downloading = true
+                    scope.launch {
+                        val result = try {
+                            cloudSync.downloadBook(detail, ReaderActivity::isBookOpen)
+                        } finally {
                             downloading = false
-                            if (result.isSuccess) {
-                                detailBook = null
-                                refreshKey++ // 刷新本地书库
-                                snackbarHostState.showSnackbar("已下载：${detail.bookId}")
-                            } else {
-                                snackbarHostState.showSnackbar(
-                                    "下载失败：${result.exceptionOrNull()?.message}",
-                                )
-                            }
                         }
-                    },
-                ) { Text(if (downloading) "下载中…" else if (detail.local) "重新下载" else "下载") }
+                        if (result.isSuccess) {
+                            detailBook = null
+                            refreshKey++
+                            snackbarHostState.showSnackbar("已下载：${detail.bookId}")
+                        } else {
+                            snackbarHostState.showSnackbar("下载失败：${result.exceptionOrNull()?.message}")
+                        }
+                    }
+                }) { Text(if (downloading) "下载中…" else if (detail.local) "重新下载" else "下载") }
             },
             dismissButton = {
                 TextButton(onClick = { detailBook = null }, enabled = !downloading) { Text("关闭") }

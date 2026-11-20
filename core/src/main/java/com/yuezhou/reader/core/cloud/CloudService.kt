@@ -4,6 +4,7 @@ import com.yuezhou.reader.core.protocol.BookNames
 import com.yuezhou.reader.core.protocol.LibraryCatalog
 import com.yuezhou.reader.core.protocol.LibraryBook
 import com.yuezhou.reader.core.protocol.LibraryCatalogData
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
@@ -199,21 +200,31 @@ class CloudService(private val backend: CloudBackend) {
         if (record.coverPath != null) paths.add(record.coverPath)
 
         val deleted = mutableListOf<String>()
-        for (p in paths) {
+        for (path in paths) {
             try {
-                backend.delete(p, Precondition.Unconditional)
-                deleted.add(p)
-            } catch (e: CloudException) {
-                if (e.code == ErrorCode.NOT_FOUND) continue
-                if (e.code == ErrorCode.CONFLICT) continue
+                backend.delete(path, Precondition.Unconditional)
+                deleted.add(path)
+            } catch (e: CancellationException) {
                 throw e
+            } catch (e: Exception) {
+                if (e is CloudException && e.code == ErrorCode.NOT_FOUND) continue
+                throw IncompleteDelete(deleted.size, "删除云端文件", e)
             }
         }
 
         val newIndex = index.copy(books = index.books.filter { it.bookId != bookId })
-        saveIndex(newIndex)
+        try {
+            saveIndex(newIndex)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw IncompleteDelete(deleted.size, "更新云端书库", e)
+        }
         return DeleteResult(record, deleted)
     }
+
+    class IncompleteDelete(val deletedCount: Int, val stage: String, cause: Exception) :
+        Exception("$stage 未完成，已确认删除 $deletedCount 个文件。请核对云端后重试。", cause)
 
     data class UploadResult(val record: LibraryBook, val published: Boolean)
     data class DeleteResult(val record: LibraryBook, val deleted: List<String>)
