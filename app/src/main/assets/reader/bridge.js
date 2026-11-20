@@ -32,6 +32,7 @@ window.__reader = {
             applyTheme()
             applyTextStyle()
             setFlow(currentSettings.vertical)
+            enablePageAnimation()
             await view.init({ lastLocation: restoreCfi || null, showTextStart: true })
             post('bookOpened', {
                 sections: currentBook?.sections?.length ?? 0,
@@ -254,6 +255,14 @@ function setFlow(vertical) {
     } else {
         renderer.removeAttribute('flow')
     }
+}
+
+// 开启翻页动画：给 foliate-paginator 加 animated 属性，
+// 使左右翻页（snap）与上下滚动（smooth）都用 300ms 缓动过渡，而非瞬时跳转。
+function enablePageAnimation() {
+    const renderer = view.renderer
+    if (!renderer) return
+    renderer.setAttribute('animated', '')
 }
 
 async function applyFlow(vertical) {

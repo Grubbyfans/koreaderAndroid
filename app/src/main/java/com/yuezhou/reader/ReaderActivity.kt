@@ -7,6 +7,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -594,7 +602,11 @@ private fun ReaderScreen(
             }
 
             // 沉浸式面板：顶部（返回+书名+章节）+ 底部（目录/进度/设置）
-            if (panelVisible) {
+            AnimatedVisibility(
+                visible = panelVisible,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(180)),
+            ) {
                 ReaderPanel(
                     title = title,
                     fraction = currentFraction,
@@ -761,93 +773,111 @@ private fun ReaderPanel(
     // 进度滑块拖动中的本地预览值；null 表示未在拖动（跟随真实 fraction）
     var fractionPreview by remember { mutableStateOf<Float?>(null) }
     Column(modifier = Modifier.fillMaxSize()) {
-        // 顶部栏
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
+        // 顶部栏：从上方滑入/滑出
+        AnimatedVisibility(
+            visible = true,
+            enter = slideInVertically(tween(220)) { -it } + fadeIn(tween(220)),
+            exit = slideOutVertically(tween(220)) { -it } + fadeOut(tween(220)),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                TextButton(onClick = onBack) { Text("返回") }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    if (totalSections > 0) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onBack) { Text("返回") }
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "${(sectionIndex ?: 0) + 1} / $totalSections 章",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium,
                         )
+                        if (totalSections > 0) {
+                            Text(
+                                "${(sectionIndex ?: 0) + 1} / $totalSections 章",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
+                    TextButton(onClick = onImport) { Text("导入") }
                 }
-                TextButton(onClick = onImport) { Text("导入") }
             }
         }
 
         Spacer(Modifier.weight(1f))
 
-        // 底部栏：进度 + 操作
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
+        // 底部栏：从下方滑入/滑出
+        AnimatedVisibility(
+            visible = true,
+            enter = slideInVertically(tween(240)) { it } + fadeIn(tween(240)),
+            exit = slideOutVertically(tween(240)) { it } + fadeOut(tween(240)),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(
-                modifier = Modifier
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                // 进度
-                if (fraction != null) {
-                    val shownFraction = fractionPreview ?: fraction
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "进度 ${(shownFraction * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Slider(
-                            value = shownFraction,
-                            onValueChange = { fractionPreview = it },
-                            onValueChangeFinished = {
-                                // 松手才真正跳转，避免拖动中连续重排全文
-                                val target = fractionPreview
-                                if (target != null) {
-                                    onFractionSeek(target)
-                                    fractionPreview = null
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
+                Column(
+                    modifier = Modifier
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    // 进度
+                    if (fraction != null) {
+                        val shownFraction = fractionPreview ?: fraction
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "进度 ${(shownFraction * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Slider(
+                                value = shownFraction,
+                                onValueChange = { fractionPreview = it },
+                                onValueChangeFinished = {
+                                    // 松手才真正跳转，避免拖动中连续重排全文
+                                    val target = fractionPreview
+                                    if (target != null) {
+                                        onFractionSeek(target)
+                                        fractionPreview = null
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    // 底部操作：目录 + 朗读 + 同步 + 设置（设置默认收起）
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
+                    ) {
+                        PanelAction("目录", onClick = onOpenToc)
+                        PanelAction(if (speaking) "停止朗读" else "朗读", onClick = onSpeak)
+                        PanelAction("同步", onClick = onSync)
+                        PanelAction(
+                            if (settingsExpanded) "收起设置" else "设置",
+                            onClick = { settingsExpanded = !settingsExpanded },
                         )
                     }
-                }
-                // 底部操作：目录 + 朗读 + 同步 + 设置（设置默认收起）
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
-                ) {
-                    PanelAction("目录", onClick = onOpenToc)
-                    PanelAction(if (speaking) "停止朗读" else "朗读", onClick = onSpeak)
-                    PanelAction("同步", onClick = onSync)
-                    PanelAction(
-                        if (settingsExpanded) "收起设置" else "设置",
-                        onClick = { settingsExpanded = !settingsExpanded },
-                    )
-                }
-                // 设置区（默认收起，点击「设置」展开）
-                if (settingsExpanded) {
-                    SettingsControls(prefs = prefs, voices = voices, onPrefsChange = onPrefsChange)
+                    // 设置区（默认收起，点击「设置」展开），垂直平滑展开/收起
+                    AnimatedVisibility(
+                        visible = settingsExpanded,
+                        enter = expandVertically(tween(240)) + fadeIn(tween(240)),
+                        exit = shrinkVertically(tween(220)) + fadeOut(tween(180)),
+                    ) {
+                        SettingsControls(prefs = prefs, voices = voices, onPrefsChange = onPrefsChange)
+                    }
                 }
             }
         }
