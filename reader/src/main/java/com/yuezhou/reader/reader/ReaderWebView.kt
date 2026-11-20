@@ -225,9 +225,14 @@ class ReaderWebView(context: Context) : WebView(context) {
         evaluateJavascript("window.__reader.getCurrentChapterText($cfiArg);", null)
     }
 
-    /** 朗读高亮：定位到文本节点 CFI + 节点内字符偏移处并选中。 */
-    fun highlight(cfi: String, offset: Int) = whenReaderReady {
-        evaluateJavascript("window.__reader.highlightRange(${jsonQuote(cfi)}, $offset).then(r => {});", null)
+    /** 朗读高亮：定位到「起止文本节点 CFI + 节点内字符偏移」形成的范围并高亮整句。 */
+    fun highlight(startCfi: String, startOffset: Int, endCfi: String?, endOffset: Int) = whenReaderReady {
+        evaluateJavascript(
+            "window.__reader.highlightRange(" +
+                "${jsonQuote(startCfi)}, $startOffset, ${jsonQuote(endCfi ?: "")}, $endOffset)" +
+                ".then(r => {});",
+            null,
+        )
     }
 
     /** 跳转到目录项（href 指向章节）。 */

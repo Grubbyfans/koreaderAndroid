@@ -21,13 +21,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         PendingPublicationEntity::class,
         DiagnosticEventEntity::class,
+        SpeechPositionEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pendingPublicationDao(): PendingPublicationDao
     abstract fun diagnosticEventDao(): DiagnosticEventDao
+    abstract fun speechPositionDao(): SpeechPositionDao
 
     companion object {
         private val isolatePublications = object : Migration(1, 2) {
@@ -50,6 +52,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val addSpeechPosition = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE speech_position (
+                        bookId TEXT NOT NULL,
+                        fileGeneration TEXT NOT NULL,
+                        chapterIndex INTEGER NOT NULL,
+                        segmentIndex INTEGER NOT NULL,
+                        charOffset INTEGER NOT NULL,
+                        savedAt INTEGER NOT NULL,
+                        PRIMARY KEY (bookId)
+                    )
+                """.trimIndent())
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -59,7 +77,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yuezhou_reader.db",
-                ).addMigrations(isolatePublications).build().also { instance = it }
+                ).addMigrations(isolatePublications, addSpeechPosition).build().also { instance = it }
             }
     }
 }

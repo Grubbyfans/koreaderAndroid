@@ -27,9 +27,11 @@ object SpeechProgressTracker {
      */
     data class Snapshot(
         val bookId: String,
+        val chapterIndex: Int = 0,
         val segmentIndex: Int,
         val charOffset: Int,
         val sourceAnchor: SourceAnchor?,
+        val endAnchor: SourceAnchor? = null,
     )
 
     private val _current = MutableStateFlow<Snapshot?>(null)
@@ -37,9 +39,16 @@ object SpeechProgressTracker {
     /** 当前已确认朗读位置；null 表示尚无进度或已停止。 */
     val current: StateFlow<Snapshot?> = _current.asStateFlow()
 
-    /** 服务在片段进度确认时调用。@param anchor 由片段 charToSource 映射回原文的锚点。 */
-    fun onProgress(bookId: String, segmentIndex: Int, charOffset: Int, anchor: SourceAnchor?) {
-        _current.value = Snapshot(bookId, segmentIndex, charOffset, anchor)
+    /** 服务在片段进度确认时调用。@param anchor 由片段 charToSource 映射回原文的锚点（段内当前点）。 */
+    fun onProgress(
+        bookId: String,
+        chapterIndex: Int,
+        segmentIndex: Int,
+        charOffset: Int,
+        anchor: SourceAnchor?,
+        endAnchor: SourceAnchor? = null,
+    ) {
+        _current.value = Snapshot(bookId, chapterIndex, segmentIndex, charOffset, anchor, endAnchor)
     }
 
     /** 停止/切书/作废时清空进度。 */

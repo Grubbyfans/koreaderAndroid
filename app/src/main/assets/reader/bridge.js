@@ -3,6 +3,7 @@
 // 采用 MIT 许可证的 foliate-js 作为阅读引擎（见 docs/third-party-notices.md）。
 
 import './view.js'
+import { Overlayer } from './overlayer.js'
 import * as XPointer from './xpointer.js'
 
 const view = document.getElementById('view')
@@ -113,28 +114,50 @@ window.__reader = {
         }
     },
 
-    // 朗读高亮：把「文本节点 CFI + 节点内字符偏移」定位并高亮到原文。
-    // offset 为相对该文本节点起始的字符数（0-based）。
-    async highlightRange(cfi, offset) {
+    // 朗读高亮：把「起止文本节点 CFI + 节点内字符偏移」定位成 range，用 overlayer 高亮整句。
+    // startCfi/endCfi 为文本节点级 CFI，startOffset/endOffset 为各自节点内的字符偏移（0-based）。
+    // 高亮块用固定 key（__tts_highlight__），下次调用自动覆盖旧块，实现「跟随朗读进度移动」。
+    async highlightRange(startCfi, startOffset, endCfi, endOffset) {
         try {
-            const resolved = view.resolveCFI?.(cfi)
-            if (!resolved) return false
-            const { index, anchor } = resolved
-            const { doc } = view.renderer?.getContents?.().find(c => c.index === index) || {}
+            const contents = view.renderer?.getContents?.()
+            if (!Array.isArray(contents) || contents.length === 0) return false
+            const startResolved = view.resolveCFI?.(startCfi)
+            if (!startResolved) return false
+            const { index, anchor } = startResolved
+            const item = contents.find(c => c.index === index)
+            const { doc, overlayer } = item || {}
             if (!doc || typeof anchor !== 'function') return false
             const range = anchor(doc)
             if (!range) return false
-            // 将 range 起点前进 offset 个字符（在同一文本节点内），终点对齐句尾由调用方给定；
-            // 此处仅高亮「当前已确认位置」的单点，避免抢占用户阅读选中态。
-            if (offset > 0 && range.startContainer) {
-                const node = range.startContainer
-                const start = Math.min((range.startOffset || 0) + offset, node.textContent?.length ?? 0)
-                try {
-                    range.setStart(node, start)
-                    range.collapse(true)
-                } catch (e) { /* 偏移越界时保持原位 */ }
+            // 起点：startContainer 前进 startOffset 个字符
+            const startNode = range.startContainer
+            const startBase = range.startOffset || 0
+            if (startNode) {
+                const s = Math.min(startBase + (startOffset || 0), startNode.textContent?.length ?? startBase)
+                range.setStart(startNode, s)
             }
-            await view.renderer?.scrollToAnchor?.(range, true)
+            // 终点：优先用 endCfi 反解到同一 doc 的文本节点 + endOffset；失败则退化为「起点后延到句尾」。
+            if (endCfi) {
+                const endResolved = view.resolveCFI?.(endCfi)
+                if (endResolved && endResolved.index === index && typeof endResolved.anchor === 'function') {
+                    const endRange = endResolved.anchor(doc)
+                    if (endRange && endRange.startContainer) {
+                        const endNode = endRange.startContainer
+                        const e = Math.min((endRange.startOffset || 0) + (endOffset || 0),
+                            endNode.textContent?.length ?? (endRange.startOffset || 0))
+                        try {
+                            range.setEnd(endNode, e)
+                        } catch (_) { /* 终点越界时保留原 range 终点 */ }
+                    }
+                }
+            }
+            // 用 overlayer 画高亮块（固定 key 覆盖旧块）；没有 overlayer 时退化为滚动到起点。
+            if (overlayer && typeof overlayer.add === 'function') {
+                overlayer.add('__tts_highlight__', range, Overlayer.highlight,
+                    { color: 'rgba(7, 193, 96, 0.28)' })
+            } else {
+                await view.renderer?.scrollToAnchor?.(range, true)
+            }
             return true
         } catch (e) {
             post('error', { message: String(e?.message ?? e) })

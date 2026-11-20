@@ -109,15 +109,21 @@ class SpeechService : Service() {
         playJob = scope.launch {
             val engine = ensureEngine() ?: return@launch handleStop("TTS 引擎初始化失败")
             applyConfig(engine)
-            playChapter(engine, nextRequest.plan)
+            playChapter(engine, nextRequest.plan, nextRequest.startSegment)
         }
     }
 
-    private fun playChapter(engine: TtsEngine, plan: SpeechPlan) {
+    private fun playChapter(engine: TtsEngine, plan: SpeechPlan, startSegment: Int = 0) {
         stateMachine.load(plan)
         sessionId++
         engine.listener = createProgressListener()
-        speakCurrent(engine)
+        speakFrom(engine, startSegment)
+    }
+
+    /** 从指定片段开始朗读（越界取边界）；0 表示从头。 */
+    private fun speakFrom(engine: TtsEngine, fromSegment: Int) {
+        val segment = stateMachine.play(fromSegment).getOrNull() ?: return
+        speak(engine, segment)
     }
 
     private fun clearChapterTransition() {
@@ -223,11 +229,6 @@ class SpeechService : Service() {
         }
     }
 
-    private fun speakCurrent(engine: TtsEngine) {
-        val segment = stateMachine.play().getOrNull() ?: return
-        speak(engine, segment)
-    }
-
     private fun speak(engine: TtsEngine, segment: SpeechSegment) {
         if (segment.text.isBlank()) {
             onSegmentDone()
@@ -272,11 +273,14 @@ class SpeechService : Service() {
         private fun confirm(segment: Int, charOffset: Int) {
             stateMachine.onProgress(segment, charOffset)
             val plan = stateMachine.plan ?: return
+            val currentSegment = plan.segmentAt(segment)
             SpeechProgressTracker.onProgress(
                 bookId = plan.bookId,
+                chapterIndex = plan.chapterIndex,
                 segmentIndex = segment,
                 charOffset = charOffset,
-                anchor = plan.segmentAt(segment)?.anchorAt(charOffset),
+                anchor = currentSegment?.anchorAt(charOffset),
+                endAnchor = currentSegment?.endAnchor,
             )
         }
     }

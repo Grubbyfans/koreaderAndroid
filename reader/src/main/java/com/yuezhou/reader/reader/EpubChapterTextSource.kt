@@ -5,6 +5,8 @@ import com.yuezhou.reader.core.speech.SentencePlanner
 import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechTextUnit
 import com.yuezhou.reader.core.speech.SourceAnchor
+import org.jsoup.Jsoup
+import org.jsoup.parser.Parser
 import java.io.File
 import java.net.URI
 import java.util.zip.ZipFile
@@ -89,40 +91,36 @@ class EpubChapterTextSource(
         fun locateSpine(zip: ZipFile): List<String>? {
             val container = zip.getEntry("META-INF/container.xml") ?: return null
             val containerText = zip.getInputStream(container).use { it.readBytes().toString(Charsets.UTF_8) }
-            val opfPath = Regex("<rootfile[^>]*full-path=[\"']([^\"']+)[\"']")
-                .find(containerText)?.groupValues?.get(1) ?: return null
+            // 用 jsoup XML parser 解析 container.xml，取第一个 rootfile 的 full-path。
+            val opfPath = runCatching {
+                val doc = Jsoup.parse(containerText, "", Parser.xmlParser())
+                doc.selectFirst("rootfile")?.attr("full-path")
+            }.getOrNull() ?: return null
             val opfEntry = zip.getEntry(opfPath) ?: return null
             val opfText = zip.getInputStream(opfEntry).use { it.readBytes().toString(Charsets.UTF_8) }
 
             val baseDir = opfPath.substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "$it/" }
 
-            // manifest：id -> href
-            val manifestText = Regex("<manifest[\\s\\S]*?</manifest>", RegexOption.IGNORE_CASE)
-                .find(opfText)?.value ?: ""
+            // 用 jsoup XML parser 解析 OPF：manifest 的 id->href 映射，spine 的 itemref 顺序。
+            val doc = runCatching {
+                Jsoup.parse(opfText, "", Parser.xmlParser())
+            }.getOrNull() ?: return null
+
             val idToHref = mutableMapOf<String, String>()
-            val itemRegex = Regex("<item[^>]*id=[\"']([^\"']+)[\"'][^>]*href=[\"']([^\"']+)[\"'][^>]*/?>", RegexOption.IGNORE_CASE)
-            for (m in itemRegex.findAll(manifestText)) {
-                idToHref[m.groupValues[1]] = m.groupValues[2]
-            }
-            // 兼容 href 在前、id 在后的写法。
-            val itemRegex2 = Regex("<item[^>]*href=[\"']([^\"']+)[\"'][^>]*id=[\"']([^\"']+)[\"'][^>]*/?>", RegexOption.IGNORE_CASE)
-            for (m in itemRegex2.findAll(manifestText)) {
-                idToHref[m.groupValues[2]] = m.groupValues[1]
+            doc.select("manifest > item").forEach { item ->
+                val id = item.attr("id")
+                val href = item.attr("href")
+                if (id.isNotEmpty() && href.isNotEmpty()) idToHref[id] = href
             }
 
-            // spine：itemref 顺序
-            val spineText = Regex("<spine[\\s\\S]*?</spine>", RegexOption.IGNORE_CASE)
-                .find(opfText)?.value ?: ""
-            val itemRefs = Regex("""<itemref\b[^>]*>""", RegexOption.IGNORE_CASE)
-            val idrefRegex = Regex("""\bidref\s*=\s*["']([^"']+)["']""")
-            val nonLinear = Regex("""\blinear\s*=\s*["']no["']""")
-            val hrefs = itemRefs.findAll(spineText).map { item ->
-                val id = idrefRegex.find(item.value)?.groupValues?.get(1)
+            val hrefs = doc.select("spine > itemref").map { itemref ->
+                val id = itemref.attr("idref")
+                val linear = itemref.attr("linear")
                 val href = idToHref[id]
                 // Preserve EPUB spine indices even for entries excluded from sequential reading.
-                if (href == null || nonLinear.containsMatchIn(item.value)) ""
+                if (href == null || linear.equals("no", ignoreCase = true)) ""
                 else resolve(baseDir, href)
-            }.toList()
+            }
             return if (hrefs.isEmpty()) null else hrefs
         }
 

@@ -29,7 +29,11 @@ data class SpeechConfig(
  */
 object SpeechPlanStore {
 
-    internal data class Request(val plan: SpeechPlan, val chapters: SpeechChapterSource)
+    internal data class Request(
+        val plan: SpeechPlan,
+        val chapters: SpeechChapterSource,
+        val startSegment: Int = 0,
+    )
 
     @Volatile
     private var current: Request? = null
@@ -57,9 +61,14 @@ object SpeechPlanStore {
 
     /** Starts a session whose chapter source is owned by the service until playback stops. */
     @Synchronized
-    fun startAndPlay(context: Context, plan: SpeechPlan, chapters: SpeechChapterSource) {
+    fun startAndPlay(
+        context: Context,
+        plan: SpeechPlan,
+        chapters: SpeechChapterSource,
+        startSegment: Int = 0,
+    ) {
         clear()
-        val request = Request(plan, chapters)
+        val request = Request(plan, chapters, startSegment)
         current = request
         try {
             context.startForegroundService(Intent(context, SpeechService::class.java).setAction(SpeechCommands.ACTION_PLAY))

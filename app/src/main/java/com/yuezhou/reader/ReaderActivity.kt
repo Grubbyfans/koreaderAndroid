@@ -88,6 +88,7 @@ import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.ReaderEvent
 import com.yuezhou.reader.reader.ReaderWebView
+import com.yuezhou.reader.reader.SpeechPositionStore
 import com.yuezhou.reader.reader.TocItem
 import com.yuezhou.reader.core.speech.SentencePlanner
 import com.yuezhou.reader.core.speech.SourceAnchor
@@ -338,16 +339,38 @@ private fun ReaderScreen(
         }
     }
 
-    // 朗读进度收集：服务写入 SpeechProgressTracker，这里反映到 UI（朗读中状态 + 高亮回写）
+    // 朗读进度收集：服务写入 SpeechProgressTracker，这里反映到 UI（朗读中状态 + 高亮回写 + 位置持久化）
+    var speechSaveJob by remember { mutableStateOf<Job?>(null) }
     LaunchedEffect(Unit) {
         SpeechProgressTracker.current.collect { snap ->
             speaking = snap != null
             // 朗读停止时同步清空「朗读请求中」标记
             if (snap == null) speakRequested = false
-            // 已确认朗读点 → 回写高亮到 WebView（CFI + 节点内偏移）
+            // 已确认朗读点 → 回写高亮到 WebView（起止锚点形成整句高亮）
             val anchor = snap?.sourceAnchor
             if (snap != null && snap.bookId == bookId && anchor?.nodeId?.startsWith("epubcfi(") == true) {
-                webView?.highlight(anchor.nodeId, anchor.offset)
+                val end = snap.endAnchor
+                webView?.highlight(
+                    anchor.nodeId,
+                    anchor.offset,
+                    end?.nodeId,
+                    end?.offset ?: 0,
+                )
+            }
+            // 去抖持久化朗读位置（片段级别，供跨进程恢复）
+            if (snap != null && snap.bookId == bookId) {
+                speechSaveJob?.cancel()
+                speechSaveJob = scope.launch {
+                    delay(800)
+                    SpeechPositionStore.save(
+                        context = context,
+                        bookId = snap.bookId,
+                        fileGeneration = "",
+                        chapterIndex = snap.chapterIndex,
+                        segmentIndex = snap.segmentIndex,
+                        charOffset = snap.charOffset,
+                    )
+                }
             }
         }
     }
@@ -386,9 +409,25 @@ private fun ReaderScreen(
             SpeechPlanStore.putConfig(
                 SpeechConfig(rate = readerPrefs.speechRate, voiceName = readerPrefs.speechVoice)
             )
-            SpeechPlanStore.startAndPlay(context, plan, EpubSpeechChapterSource(context, fileName, source))
-            speakRequested = true
-            status = "已开始朗读"
+            // 若本机有「本章」的朗读位置记录，从该片段续读（片段级别恢复）。
+            // load 为 suspend，须在协程中读取；读不到则从头开始。
+            scope.launch {
+                val restored = runCatching { SpeechPositionStore.load(context, id) }.getOrNull()
+                val resumeFrom = if (restored != null && restored.chapterIndex == chapterIndex) {
+                    restored.segmentIndex.coerceIn(0, segments.lastIndex)
+                } else 0
+                try {
+                    SpeechPlanStore.startAndPlay(
+                        context, plan,
+                        EpubSpeechChapterSource(context, fileName, source),
+                        startSegment = resumeFrom,
+                    )
+                    speakRequested = true
+                    status = if (resumeFrom > 0) "已从上次位置继续朗读" else "已开始朗读"
+                } catch (e: Exception) {
+                    status = "启动朗读失败：${e.message}"
+                }
+            }
         } catch (e: Exception) {
             status = "启动朗读失败：${e.message}"
         }
