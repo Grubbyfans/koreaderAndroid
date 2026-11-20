@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -43,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -96,6 +98,8 @@ private fun BookshelfScreen() {
     var currentTab by remember { mutableStateOf(Tab.书架) }
     // 管理态（多选删除）：非空表示进入管理态，集合为已勾选的 bookId
     var selecting by remember { mutableStateOf<Set<String>?>(null) }
+    // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
+    var pendingDelete by remember { mutableStateOf<Set<String>?>(null) }
 
     val store = remember { LibraryStore(context) }
 
@@ -168,12 +172,8 @@ private fun BookshelfScreen() {
                             else Color(0xFFE64340),
                             modifier = Modifier
                                 .clickable(enabled = selected.isNotEmpty()) {
-                                    scope.launch {
-                                        val removed = store.removeBooks(selected)
-                                        selecting = null
-                                        status = "已移除 ${removed.size} 本"
-                                        refreshKey++
-                                    }
+                                    // 二次确认：先弹框，确认后才真正删除
+                                    pendingDelete = selected
                                 }
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
@@ -250,6 +250,45 @@ private fun BookshelfScreen() {
                 Tab.设置 -> SettingsPage()
             }
         }
+    }
+
+    // 删除二次确认弹窗：列出将删除的书名，明确范围，确认后才执行
+    val toDelete = pendingDelete
+    if (toDelete != null && toDelete.isNotEmpty()) {
+        val titles = books.filter { it.bookId in toDelete }.map { it.title }
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除书籍") },
+            text = {
+                Text(
+                    buildString {
+                        append("将删除以下 ")
+                        append(toDelete.size)
+                        append(" 本本地书籍，正文与阅读进度一并移除，此操作不可撤销：\n\n")
+                        titles.take(5).forEach { append("· ").append(it).append('\n') }
+                        if (titles.size > 5) append("… 等共 ").append(titles.size).append(" 本")
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            val removed = store.removeBooks(toDelete)
+                            pendingDelete = null
+                            selecting = null
+                            status = "已移除 ${removed.size} 本"
+                            refreshKey++
+                        }
+                    },
+                ) {
+                    Text("删除", color = Color(0xFFE64340))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+        )
     }
 }
 
