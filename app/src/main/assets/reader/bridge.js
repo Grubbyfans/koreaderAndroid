@@ -13,6 +13,7 @@ let currentBook = null
 // 当前排版设置（字号/行距/边距/主题/翻页模式），供 applySettings 与 load 注入使用
 let currentSettings = {
     fontId: "book",
+    fontWeight: 0,
     fontSize: 18,        // px
     lineHeight: 1.6,     // 倍数
     pageMargin: 20,      // px（左右/上下边距）
@@ -345,6 +346,11 @@ function textStyle() {
             line-height: inherit;
         }
         ${fontStyle(s.fontId)}
+        ${s.fontWeight === 400 || s.fontWeight === 700 ? `
+            html body, html body :is(p, div, li, blockquote, td, th):not(:where(pre *, code *, svg *, math *)) {
+                font-weight: ${s.fontWeight} !important;
+            }
+        ` : ''}
     `
 }
 

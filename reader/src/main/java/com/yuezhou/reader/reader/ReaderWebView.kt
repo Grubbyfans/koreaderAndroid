@@ -292,6 +292,7 @@ class ReaderWebView(context: Context) : WebView(context) {
         theme: String,
         vertical: Boolean,
         fontId: String,
+        fontWeight: Int,
     ) {
         val settings = buildString {
             append("{fontSize:$fontSize,")
@@ -299,7 +300,8 @@ class ReaderWebView(context: Context) : WebView(context) {
             append("pageMargin:$pageMargin,")
             append("theme:${jsonQuote(theme)},")
             append("vertical:$vertical,")
-            append("fontId:${jsonQuote(fontId)}}")
+            append("fontId:${jsonQuote(fontId)},")
+            append("fontWeight:$fontWeight}")
         }
         if (readerSettings == settings) return
         readerSettings = settings

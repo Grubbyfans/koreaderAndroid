@@ -2,10 +2,13 @@ package com.yuezhou.reader
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,13 +36,20 @@ private val defaultFonts = listOf(
     ReaderFontStore.Font("mono", "系统等宽"),
 )
 
+private val fontWeights = mapOf(
+    0 to "书籍默认",
+    400 to "常规",
+    700 to "加粗",
+)
+
 @Composable
-internal fun ReaderFontPreference(selectedId: String) {
+internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(context) { ReaderFontStore(context) }
     var installed by remember(store) { mutableStateOf(store.installed()) }
     var selecting by remember { mutableStateOf(false) }
+    var showWeights by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -72,6 +82,25 @@ internal fun ReaderFontPreference(selectedId: String) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("字重", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Box {
+            TextButton(onClick = { showWeights = true }) {
+                Text(fontWeights[selectedWeight] ?: fontWeights.getValue(0))
+            }
+            DropdownMenu(expanded = showWeights, onDismissRequest = { showWeights = false }) {
+                for ((weight, label) in fontWeights) {
+                    DropdownMenuItem(
+                        text = { Text(if (weight == selectedWeight) "✓ $label" else label) },
+                        onClick = {
+                            showWeights = false
+                            scope.launch { ReaderSettings.selectFontWeight(context, weight) }
+                        },
+                    )
+                }
+            }
         }
     }
     error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
