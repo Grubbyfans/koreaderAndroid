@@ -24,8 +24,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -1046,6 +1049,12 @@ private fun SpeechVoiceOption(label: String, details: String?, selected: Boolean
 }
 
 
+private data class TocRow(
+    val key: String,
+    val item: TocItem,
+    val ancestors: List<String>,
+)
+
 @Composable
 private fun TocDrawer(
     items: List<TocItem>,
@@ -1056,21 +1065,30 @@ private fun TocDrawer(
 ) {
     val rows = remember(items) {
         buildList {
-            fun append(nodes: List<TocItem>, depth: Int) {
-                for (node in nodes) {
-                    add(node to depth)
-                    append(node.subitems, depth + 1)
+            fun append(nodes: List<TocItem>, ancestors: List<String>) {
+                nodes.forEachIndexed { index, node ->
+                    val key = ancestors.lastOrNull()?.let { "$it/$index" } ?: index.toString()
+                    add(TocRow(key, node, ancestors))
+                    append(node.subitems, ancestors + key)
                 }
             }
-            append(items, 0)
+            append(items, emptyList())
         }
     }
-    val activeRow = if (currentId != null) rows.indexOfFirst { it.first.id == currentId }
-    else if (!currentHref.isNullOrEmpty()) rows.indexOfFirst { it.first.href == currentHref }
-    else -1
+    val active = rows.firstOrNull { currentId != null && it.item.id == currentId }
+        ?: rows.firstOrNull { !currentHref.isNullOrEmpty() && it.item.href == currentHref }
+    var expanded by remember(items) { mutableStateOf(emptySet<String>()) }
+    val visible = remember(rows, expanded) {
+        rows.filter { row -> row.ancestors.all { it in expanded } }
+    }
     val listState = rememberLazyListState()
-    LaunchedEffect(isOpen, activeRow) {
-        if (isOpen && activeRow >= 0) listState.scrollToItem(activeRow)
+    LaunchedEffect(isOpen, active?.key, rows) {
+        if (isOpen && active != null) {
+            val revealed = expanded + active.ancestors
+            expanded = revealed
+            val index = rows.filter { row -> row.ancestors.all { it in revealed } }.indexOf(active)
+            if (index >= 0) listState.requestScrollToItem(index)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -1084,26 +1102,47 @@ private fun TocDrawer(
             )
         } else {
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-                itemsIndexed(rows) { index, (item, depth) ->
-                    val active = index == activeRow
+                items(visible, key = { it.key }) { row ->
+                    val item = row.item
+                    val depth = row.ancestors.size
+                    val current = row.key == active?.key
                     val colors = MaterialTheme.colorScheme
+                    val hasChildren = item.subitems.isNotEmpty()
+                    val isExpanded = row.key in expanded
+                    val toggle = {
+                        expanded = if (isExpanded) expanded - row.key else expanded + row.key
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth()
-                            .background(if (active) colors.primaryContainer else Color.Transparent)
-                            .clickable(enabled = item.href.isNotBlank()) { onSelect(item) }
-                            .padding(start = (16 + depth.coerceAtMost(6) * 12).dp, top = 12.dp, bottom = 12.dp, end = 16.dp),
+                            .background(if (current) colors.primaryContainer else Color.Transparent)
+                            .padding(start = (8 + depth.coerceAtMost(6) * 12).dp, end = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        if (hasChildren) {
+                            IconButton(onClick = toggle) {
+                                Icon(
+                                    if (isExpanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
+                                    contentDescription = if (isExpanded) "收起 ${item.label}" else "展开 ${item.label}",
+                                )
+                            }
+                        } else {
+                            Spacer(Modifier.width(48.dp))
+                        }
+
                         Text(
                             text = item.label,
                             style = if (depth == 0) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
-                            color = if (active) colors.onPrimaryContainer else colors.onSurface,
-                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier.weight(1f),
+                            color = if (current) colors.onPrimaryContainer else colors.onSurface,
+                            fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f)
+                                .clickable(enabled = item.href.isNotBlank() || hasChildren) {
+                                    if (item.href.isNotBlank()) onSelect(item) else toggle()
+                                }
+                                .padding(vertical = 12.dp),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        if (active) {
+                        if (current) {
                             Text(
                                 "在读",
                                 style = MaterialTheme.typography.labelSmall,
