@@ -24,13 +24,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -162,6 +162,8 @@ private fun ReaderScreen(
     var currentIndex by remember { mutableStateOf<Int?>(null) }
     var totalSections by remember { mutableStateOf(0) }
     var tocItems by remember { mutableStateOf<List<TocItem>>(emptyList()) }
+    var currentTocId by remember { mutableStateOf<Int?>(null) }
+    var currentTocHref by remember { mutableStateOf<String?>(null) }
     // 待打开的书：WebView 尚未创建时先暂存
     var pendingOpen by remember { mutableStateOf<Triple<String, String?, Uri?>?>(null) }
     var openedSource by remember { mutableStateOf<Pair<String, Uri?>?>(null) }
@@ -404,6 +406,8 @@ private fun ReaderScreen(
                 currentCfi = event.cfi
                 currentFraction = event.fraction
                 currentIndex = event.index
+                currentTocId = event.tocId
+                currentTocHref = event.tocHref
                 val cfi = event.cfi
                 val fraction = event.fraction
                 if (cfi != null && bookId != null && pendingJump == null && !leaving) {
@@ -502,14 +506,16 @@ private fun ReaderScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false, // 禁用边缘滑动手势，避免与翻页手势冲突；目录仅通过按钮打开
+        gesturesEnabled = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open,
         drawerContent = {
             ModalDrawerSheet(
                 modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             ) {
                 TocDrawer(
-                    title = title,
                     items = tocItems,
+                    isOpen = drawerState.isOpen,
+                    currentId = currentTocId,
+                    currentHref = currentTocHref,
                     onSelect = { item ->
                         scope.launch { drawerState.close() }
                         webView?.goToToc(item.href)
@@ -1042,17 +1048,34 @@ private fun SpeechVoiceOption(label: String, details: String?, selected: Boolean
 
 @Composable
 private fun TocDrawer(
-    title: String,
     items: List<TocItem>,
+    isOpen: Boolean,
+    currentId: Int?,
+    currentHref: String?,
     onSelect: (TocItem) -> Unit,
 ) {
+    val rows = remember(items) {
+        buildList {
+            fun append(nodes: List<TocItem>, depth: Int) {
+                for (node in nodes) {
+                    add(node to depth)
+                    append(node.subitems, depth + 1)
+                }
+            }
+            append(items, 0)
+        }
+    }
+    val activeRow = if (currentId != null) rows.indexOfFirst { it.first.id == currentId }
+    else if (!currentHref.isNullOrEmpty()) rows.indexOfFirst { it.first.href == currentHref }
+    else -1
+    val listState = rememberLazyListState()
+    LaunchedEffect(isOpen, activeRow) {
+        if (isOpen && activeRow >= 0) listState.scrollToItem(activeRow)
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            "目录",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(16.dp),
-        )
-        if (items.isEmpty()) {
+        Text("目录", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+        if (rows.isEmpty()) {
             Text(
                 "本书无目录",
                 style = MaterialTheme.typography.bodyMedium,
@@ -1060,33 +1083,37 @@ private fun TocDrawer(
                 modifier = Modifier.padding(16.dp),
             )
         } else {
-            val listState = rememberLazyListState()
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-                items(items) { item ->
-                    TocRow(item = item, depth = 0, onSelect = onSelect)
+                itemsIndexed(rows) { index, (item, depth) ->
+                    val active = index == activeRow
+                    val colors = MaterialTheme.colorScheme
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .background(if (active) colors.primaryContainer else Color.Transparent)
+                            .clickable(enabled = item.href.isNotBlank()) { onSelect(item) }
+                            .padding(start = (16 + depth.coerceAtMost(6) * 12).dp, top = 12.dp, bottom = 12.dp, end = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = item.label,
+                            style = if (depth == 0) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
+                            color = if (active) colors.onPrimaryContainer else colors.onSurface,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (active) {
+                            Text(
+                                "在读",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onPrimaryContainer,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun TocRow(item: TocItem, depth: Int, onSelect: (TocItem) -> Unit) {
-    Column {
-        Text(
-            text = item.label,
-            style = if (depth == 0) MaterialTheme.typography.bodyLarge
-            else MaterialTheme.typography.bodyMedium,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onSelect(item) }
-                .padding(start = (16 + depth * 16).dp, top = 12.dp, bottom = 12.dp, end = 16.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        item.subitems.forEach { child ->
-            TocRow(item = child, depth = depth + 1, onSelect = onSelect)
-        }
-        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
     }
 }

@@ -268,6 +268,7 @@ async function applyFlow(vertical) {
 // 把 foliate-js 的 toc 节点转成纯数据（label/href/subitems），避免序列化循环引用
 function toTocItem(node) {
     return {
+        id: node.id ?? null,
         label: node.label ?? node.title ?? '',
         href: node.href ?? '',
         subitems: Array.isArray(node.subitems) ? node.subitems.map(toTocItem) : [],
@@ -390,7 +391,7 @@ function injectStyle(doc, css) {
 
 // Save the start of the visible page, independent of its trailing boundary.
 view.addEventListener('relocate', ({ detail }) => {
-    const { cfi, section, fraction, range } = detail
+    const { cfi, section, fraction, range, tocItem } = detail
     const index = section?.current ?? null
     let pageStart = cfi
     if (range && index !== null) {
@@ -403,6 +404,8 @@ view.addEventListener('relocate', ({ detail }) => {
     post('relocate', {
         cfi: pageStart ?? null,
         index,
+        tocId: tocItem?.id ?? null,
+        tocHref: tocItem?.href ?? null,
         fraction: fraction ?? null,
     })
 })

@@ -350,6 +350,8 @@ class ReaderWebView(context: Context) : WebView(context) {
                     cfi = obj["cfi"] as? String,
                     index = (obj["index"] as? Number)?.toInt(),
                     fraction = (obj["fraction"] as? Number)?.toFloat(),
+                    tocId = (obj["tocId"] as? Number)?.toInt(),
+                    tocHref = obj["tocHref"] as? String,
                 )
             }
             "toc" -> {
@@ -397,6 +399,7 @@ class ReaderWebView(context: Context) : WebView(context) {
                     label = node.optString("label"),
                     href = node.optString("href"),
                     subitems = parseTocItems(node.opt("subitems")),
+                    id = (node.opt("id") as? Number)?.toInt(),
                 ),
             )
         }
