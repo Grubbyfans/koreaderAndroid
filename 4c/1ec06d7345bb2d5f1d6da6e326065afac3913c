@@ -1,0 +1,16 @@
+README.md
+  h_7f20b2a03eb3b6 7
+docs/sync-model.md
+  h_7f20b2a03eb3b6 1-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4c1ec06d7345bb2d5f1d6da6e326065afac3913c",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
