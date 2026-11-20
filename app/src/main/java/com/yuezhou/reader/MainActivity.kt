@@ -53,6 +53,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -160,6 +161,11 @@ private fun BookshelfScreen() {
     // 待下载/详情选中的书
     var detailBook by remember { mutableStateOf<CloudSync.RemoteBook?>(null) }
     var downloading by remember { mutableStateOf(false) }
+    // 下载进度：received/total 字节；total<=0 表示未知
+    var downloadReceived by remember { mutableStateOf(0L) }
+    var downloadTotal by remember { mutableStateOf(0L) }
+    // 下载协程 Job：用于取消下载
+    var downloadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var confirmCloudDelete by remember { mutableStateOf(false) }
     var deletingCloudBook by remember { mutableStateOf(false) }
 
@@ -602,6 +608,41 @@ private fun BookshelfScreen() {
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (detail.local) YuezhouColors.Brand else YuezhouColors.TextSecondary,
                     )
+                    // 下载进度：进度条 + 百分比 + 已下载/总大小
+                    if (downloading) {
+                        Spacer(Modifier.height(12.dp))
+                        val percent = if (downloadTotal > 0) {
+                            (downloadReceived * 100 / downloadTotal).toInt().coerceIn(0, 100)
+                        } else 0
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                progress = if (downloadTotal > 0) {
+                                    (downloadReceived.toFloat() / downloadTotal).coerceIn(0f, 1f)
+                                } else 0f,
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (downloadTotal > 0) "$percent%" else "下载中…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = YuezhouColors.Brand,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = if (downloadTotal > 0) {
+                                (downloadReceived.toFloat() / downloadTotal).coerceIn(0f, 1f)
+                            } else 0f,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "${formatSize(downloadReceived)} / ${formatSize(downloadTotal)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                        )
+                    }
                     TextButton(
                         enabled = !downloading && !deletingCloudBook && !uploadQueue.busy && !remoteLoading,
                         onClick = { confirmCloudDelete = true },
@@ -609,33 +650,50 @@ private fun BookshelfScreen() {
                 }
             },
             confirmButton = {
-                if (detail.local) {
-                    TextButton(enabled = !downloading, onClick = {
+                if (downloading) {
+                    // 下载中：显示「取消下载」按钮，点击取消并关闭弹窗
+                    TextButton(onClick = {
+                        downloadJob?.cancel()
+                        downloading = false
+                        downloadJob = null
                         detailBook = null
-                        context.startActivity(
-                            Intent(context, ReaderActivity::class.java).apply {
-                                putExtra(ReaderActivity.EXTRA_BOOK_ID, detail.bookId)
-                            },
-                        )
-                    }) { Text("打开") }
-                }
-                TextButton(enabled = !downloading, onClick = {
-                    downloading = true
-                    scope.launch {
-                        val result = try {
-                            cloudSync.downloadBook(detail, ReaderActivity::isBookOpen)
-                        } finally {
-                            downloading = false
-                        }
-                        if (result.isSuccess) {
+                        scope.launch { snackbarHostState.showSnackbar("已取消下载") }
+                    }) { Text("取消下载", color = MaterialTheme.colorScheme.error) }
+                } else {
+                    if (detail.local) {
+                        TextButton(onClick = {
                             detailBook = null
-                            refreshKey++
-                            snackbarHostState.showSnackbar("已下载：${detail.bookId}")
-                        } else {
-                            snackbarHostState.showSnackbar("下载失败：${result.exceptionOrNull()?.message}")
-                        }
+                            context.startActivity(
+                                Intent(context, ReaderActivity::class.java).apply {
+                                    putExtra(ReaderActivity.EXTRA_BOOK_ID, detail.bookId)
+                                },
+                            )
+                        }) { Text("打开") }
                     }
-                }) { Text(if (downloading) "下载中…" else if (detail.local) "重新下载" else "下载") }
+                    TextButton(onClick = {
+                        downloading = true
+                        downloadReceived = 0L
+                        downloadTotal = detail.size
+                        downloadJob = scope.launch {
+                            val result = try {
+                                cloudSync.downloadBook(detail, ReaderActivity::isBookOpen) { received, total ->
+                                    downloadReceived = received
+                                    downloadTotal = total
+                                }
+                            } finally {
+                                downloading = false
+                                downloadJob = null
+                            }
+                            if (result.isSuccess) {
+                                detailBook = null
+                                refreshKey++
+                                snackbarHostState.showSnackbar("已下载：${detail.bookId}")
+                            } else {
+                                snackbarHostState.showSnackbar("下载失败：${result.exceptionOrNull()?.message}")
+                            }
+                        }
+                    }) { Text(if (detail.local) "重新下载" else "下载") }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { detailBook = null }, enabled = !downloading) { Text("关闭") }

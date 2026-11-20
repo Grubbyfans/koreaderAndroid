@@ -524,8 +524,14 @@ class CloudSync(private val context: Context) {
      *
      * 对齐方案 §11.5 下载：下载正文到 files/epub/（临时文件 → 校验 → 发布），
      * 成功后提取封面/书名登记本地书库。返回最终落盘的文件名。
+     *
+     * @param onProgress 下载进度回调（received, total），供 UI 展示进度；total 可能为 0/-1（未知）。
      */
-    suspend fun downloadBook(book: RemoteBook, isOpen: (String) -> Boolean): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun downloadBook(
+        book: RemoteBook,
+        isOpen: (String) -> Boolean,
+        onProgress: ((received: Long, total: Long) -> Unit)? = null,
+    ): Result<String> = withContext(Dispatchers.IO) {
         downloadMutex.withLock {
             try {
                 require(BookNames.cloudId(book.fileName).first == book.bookId) {
@@ -547,7 +553,9 @@ class CloudSync(private val context: Context) {
                 check(target.parentFile?.usableSpace?.let { it >= book.size } == true) { "应用存储空间不足" }
                 val tmp = File.createTempFile("download-", ".part", target.parentFile)
                 try {
-                    backend.downloadTo("books/${book.fileName}", tmp, maxBytes = book.size)
+                    backend.downloadTo("books/${book.fileName}", tmp, maxBytes = book.size) { received, total ->
+                        onProgress?.invoke(received, if (total > 0) total else book.size)
+                    }
                     check(tmp.length() == book.size) { "下载大小与书库不符，请先更新书库" }
                     CoverExtractor.validatePackage(tmp)
                     check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }

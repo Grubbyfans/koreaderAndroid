@@ -10,6 +10,9 @@ import com.yuezhou.reader.core.cloud.EntryType
 import com.yuezhou.reader.core.cloud.ErrorCode
 import com.yuezhou.reader.core.cloud.ListResult
 import com.yuezhou.reader.core.cloud.Precondition
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -473,9 +476,14 @@ class BaiduBackend private constructor(
 
             var url = link.dlink
             var stale = false
+            // 在 suspend 上下文中捕获取消检查函数，供同步下载循环轮询
+            val ctx = currentCoroutineContext()
+            val isCancelled: () -> Boolean = { !ctx.isActive }
             for (redirect in 1..4) {
                 if (!trustedUrl(url)) throw fail(ErrorCode.TLS, "百度下载地址不是可信 HTTPS 地址")
-                val result = downloadOnce(tokenUrl(url), destination, max)
+                val result = downloadOnce(tokenUrl(url), destination, max, isCancelled) { received, total ->
+                    onProgress?.invoke(received, total)
+                }
                 when (result.status) {
                     200 -> {
                         val actual = result.received
@@ -502,7 +510,13 @@ class BaiduBackend private constructor(
 
     private data class DownloadResult(val status: Int, val bytes: ByteArray?, val location: String?, val received: Long)
 
-    private fun downloadOnce(url: String, destination: File?, maxBytes: Long): DownloadResult {
+    private fun downloadOnce(
+        url: String,
+        destination: File?,
+        maxBytes: Long,
+        isCancelled: () -> Boolean,
+        onProgress: ((Long, Long) -> Unit)?,
+    ): DownloadResult {
         val builder = Request.Builder().url(url).get()
         builder.header("User-Agent", "pan.baidu.com")
         val response = client.newCall(builder.build()).execute()
@@ -513,15 +527,18 @@ class BaiduBackend private constructor(
             if (r.code != 200) return DownloadResult(r.code, null, null, 0L)
             if (destination != null) {
                 var received = 0L
+                val total = r.body?.contentLength() ?: -1L
                 r.body?.source()?.use { source ->
                     destination.outputStream().use { out ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
+                            if (isCancelled()) throw CancellationException("下载已取消")
                             val n = source.read(buffer)
                             if (n == -1) break
                             received += n
                             if (received > maxBytes) throw fail(ErrorCode.INVALID_INPUT, "下载内容超过 $maxBytes 字节上限")
                             out.write(buffer, 0, n)
+                            onProgress?.invoke(received, total)
                         }
                     }
                 }

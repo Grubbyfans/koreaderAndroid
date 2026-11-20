@@ -11,6 +11,8 @@ import com.yuezhou.reader.core.cloud.ErrorCode
 import com.yuezhou.reader.core.cloud.ListResult
 import com.yuezhou.reader.core.cloud.Outcome
 import com.yuezhou.reader.core.cloud.Precondition
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -250,6 +252,7 @@ class WebDavBackend private constructor(
                     received += n
                     if (received > maxBytes) throw err(ErrorCode.INVALID_INPUT, "下载内容超过 $maxBytes 字节上限")
                     out.write(buffer, 0, n)
+                    if (!currentCoroutineContext().isActive) throw kotlinx.coroutines.CancellationException("下载已取消")
                     onProgress?.invoke(received, r.body?.contentLength() ?: -1)
                 }
             }
