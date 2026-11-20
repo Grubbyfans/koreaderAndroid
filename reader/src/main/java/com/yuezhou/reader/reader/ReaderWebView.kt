@@ -92,10 +92,6 @@ class ReaderWebView(context: Context) : WebView(context) {
         if (debuggable) {
             WebView.setWebContentsDebuggingEnabled(true)
         }
-        // 关键修复：部分设备（如三星 + Android 14/15）上 WebView 的独立 Surface 会浮在
-        // Compose 内容之上，把「选择 EPUB」按钮等控件盖住，导致进入阅读器后界面白屏。
-        // 用软件渲染层强制 WebView 与 Compose 共用同一渲染层，避免遮挡。
-        setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
         // Use system tap thresholds and leave drag, pinch and selection events with WebView.
         val taps = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(event: MotionEvent): Boolean = true
