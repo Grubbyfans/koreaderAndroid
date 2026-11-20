@@ -166,18 +166,9 @@ class CloudSync(private val context: Context) {
                                 { com.yuezhou.reader.core.protocol.CoverFile.encode(coverPng) }
                             } else null,
                         )
-                        // 上传进度（有进度才推）
-                        if (entry.location != null) {
-                            service.uploadProgress(
-                                bookId = entry.bookId,
-                                progress = ProgressPayload(
-                                    xpointer = entry.location,
-                                    percent = entry.percent,
-                                    size = entry.size,
-                                    deviceId = deviceId(),
-                                ),
-                            )
-                        }
+                        // 注意：进度上传不在此处进行。方案 §5.6 的进度同步是「逐书、在阅读页
+                        // 由用户主动触发的两步交互」，且 CFI→XPointer 转换依赖 WebView 真实 DOM，
+                        // 整库推送无 WebView 上下文。进度同步统一走阅读页「进度同步面板」。
                         // 全部成功 → 清理回执
                         receipts.remove(entry.bookId)
                     } catch (e: CloudException) {

@@ -183,7 +183,7 @@ private fun ReaderScreen(
         }
     }
 
-    // 应用云端进度：跳转到云端位置
+    // 应用云端进度：把云端 XPointer 转成 CFI 后跳转
     fun applyRemoteProgress() {
         val id = bookId ?: return
         val info = syncInfo ?: return
@@ -192,20 +192,36 @@ private fun ReaderScreen(
             syncBusy = true
             // 应用前保存旧位置（撤销用，lastPosition 已是当前本机位置）
             val cloud = CloudSync(context)
-            val location = cloud.fetchRemoteProgressLocation(id) ?: remote
+            val xpointer = cloud.fetchRemoteProgressLocation(id) ?: remote
             // 暂停朗读，避免旧回调覆盖新位置
             SpeechPlanStore.stop(context)
-            webView?.goToCfi(location)
-            // 提交本地状态（把云端位置写回本地进度）
-            val percent = info.remotePercent
-            store.saveProgress(id, location, percent)
-            syncBusy = false
-            syncDialogOpen = false
-            status = "已应用云端进度"
+            // XPointer → CFI（依赖 WebView 真实 DOM），失败则提示无法定位
+            val wv = webView
+            if (wv == null) {
+                syncBusy = false
+                status = "阅读器尚未就绪，无法应用云端进度"
+                return@launch
+            }
+            wv.xPointerToCfi(xpointer) { cfi ->
+                if (cfi == null) {
+                    syncBusy = false
+                    syncDialogOpen = false
+                    status = "云端进度无法定位到本书，已跳过"
+                    return@xPointerToCfi
+                }
+                scope.launch {
+                    wv.goToCfi(cfi)
+                    // 提交本地状态（把转换后的 CFI 写回本地进度）
+                    store.saveProgress(id, cfi, info.remotePercent)
+                    syncBusy = false
+                    syncDialogOpen = false
+                    status = "已应用云端进度"
+                }
+            }
         }
     }
 
-    // 上传本机进度到云端
+    // 上传本机进度到云端：先把 CFI 转 XPointer 再上传
     fun uploadLocalProgress() {
         val id = bookId ?: return
         val pos = lastPosition
@@ -213,12 +229,28 @@ private fun ReaderScreen(
             status = "本机暂无进度可上传"
             return
         }
+        val cfi = pos.first
+        val wv = webView
+        if (wv == null) {
+            status = "阅读器尚未就绪，无法上传进度"
+            return
+        }
         scope.launch {
             syncBusy = true
-            val err = CloudSync(context).uploadLocalProgress(id, pos.first, pos.second)
-            syncBusy = false
-            syncDialogOpen = false
-            status = err ?: "已上传本机进度"
+            wv.cfiToXPointer(cfi) { xpointer ->
+                if (xpointer == null) {
+                    syncBusy = false
+                    syncDialogOpen = false
+                    status = "当前阅读位置无法转换，已取消上传"
+                    return@cfiToXPointer
+                }
+                scope.launch {
+                    val err = CloudSync(context).uploadLocalProgress(id, xpointer, pos.second)
+                    syncBusy = false
+                    syncDialogOpen = false
+                    status = err ?: "已上传本机进度"
+                }
+            }
         }
     }
 

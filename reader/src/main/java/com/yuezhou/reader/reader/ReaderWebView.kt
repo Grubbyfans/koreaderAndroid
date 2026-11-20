@@ -207,6 +207,40 @@ class ReaderWebView(context: Context) : WebView(context) {
         evaluateJavascript("window.__reader.goToToc(${jsonQuote(href)}).then(r => {});", null)
     }
 
+    /**
+     * CFI → XPointer：把本地阅读位置（CFI）转成 KOReader/CREngine 的 XPointer。
+     * 结果异步回传（回调在主线程），转换失败回调 null。
+     */
+    fun cfiToXPointer(cfi: String, onResult: (String?) -> Unit) = whenReaderReady {
+        evaluateJavascript("window.__reader.cfiToXPointer(${jsonQuote(cfi)})") { result ->
+            // 结果形如 "xpointer-string" 或 "null"（JSON 字符串）
+            onResult(parseJsString(result))
+        }
+    }
+
+    /**
+     * XPointer → CFI：把云端（KOReader）的 XPointer 进度转成本地可定位的 CFI。
+     * 结果异步回传，转换失败回调 null。
+     */
+    fun xPointerToCfi(xpointer: String, onResult: (String?) -> Unit) = whenReaderReady {
+        evaluateJavascript("window.__reader.xPointerToCfi(${jsonQuote(xpointer)})") { result ->
+            onResult(parseJsString(result))
+        }
+    }
+
+    /** 解析 evaluateJavascript 返回的 JSON 字符串值（含引号包裹与 null）。 */
+    private fun parseJsString(raw: String?): String? {
+        if (raw == null) return null
+        val s = raw.trim()
+        if (s == "null" || s == "undefined" || s.isEmpty()) return null
+        return try {
+            org.json.JSONTokener(s).nextValue().let { if (it === org.json.JSONObject.NULL) null else it.toString() }
+        } catch (e: Exception) {
+            // 兜底：去掉首尾引号
+            s.removePrefix("\"").removeSuffix("\"")
+        }
+    }
+
     /** 跳到全书百分比进度（0..1）。 */
     fun goToFraction(frac: Float) = whenReaderReady {
         evaluateJavascript("window.__reader.goToFraction($frac).then(r => {});", null)

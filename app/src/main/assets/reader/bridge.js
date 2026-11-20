@@ -3,6 +3,7 @@
 // 采用 MIT 许可证的 foliate-js 作为阅读引擎（见 docs/third-party-notices.md）。
 
 import './view.js'
+import * as XPointer from './xpointer.js'
 
 const view = document.getElementById('view')
 
@@ -120,6 +121,30 @@ window.__reader = {
         } catch (e) {
             post('error', { message: String(e?.message ?? e) })
             return false
+        }
+    },
+
+    // CFI → XPointer：把本地阅读位置（CFI）转成 KOReader/CREngine 的 XPointer 格式，
+    // 供进度上传到云端时与 KOReader 精准对齐。失败返回 null。
+    cfiToXPointer(cfi) {
+        try {
+            const xp = XPointer.cfiToXPointer(view, cfi)
+            return xp ?? null
+        } catch (e) {
+            post('error', { message: String(e?.message ?? e) })
+            return null
+        }
+    },
+
+    // XPointer → CFI：把云端（KOReader）的 XPointer 进度转成本地可定位的 CFI。
+    // 失败返回 null。
+    xPointerToCfi(xpointer) {
+        try {
+            const cfi = XPointer.xPointerToCfi(view, xpointer)
+            return cfi ?? null
+        } catch (e) {
+            post('error', { message: String(e?.message ?? e) })
+            return null
         }
     },
 
