@@ -780,27 +780,37 @@ private enum class BookScope(val label: String) {
     云端("云端"),
 }
 
-/** 本地/云端切换条。 */
+/** 本地/云端切换条：胶囊滑块式分段控件。 */
 @Composable
 private fun BookScopeSwitch(current: BookScope, onSelect: (BookScope) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(YuezhouColors.Surface)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         BookScope.entries.forEach { scope ->
             val selected = current == scope
-            Text(
-                scope.label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (selected) Color.White else YuezhouColors.TextSecondary,
+            Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+                    .weight(1f)
+                    .clip(RoundedCornerShape(19.dp))
+                    .background(if (selected) YuezhouColors.Brand else Color.Transparent)
                     .clickable { onSelect(scope) }
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-            )
+                    .padding(vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    scope.label,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+                    color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                )
+            }
         }
     }
 }
@@ -1029,13 +1039,15 @@ private fun RecentReading(books: List<LibraryStore.Entry>) {
     val context = androidx.compose.ui.platform.LocalContext.current
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
         lazyItems(recent, key = { it.bookId }) { book ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(YuezhouColors.Surface)
                     .clickable {
                         context.startActivity(
                             Intent(context, ReaderActivity::class.java).apply {
@@ -1043,15 +1055,15 @@ private fun RecentReading(books: List<LibraryStore.Entry>) {
                             },
                         )
                     }
-                    .padding(vertical = 8.dp),
+                    .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // 小封面
                 Box(
                     modifier = Modifier
-                        .size(width = 44.dp, height = 58.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(YuezhouColors.Surface),
+                        .size(width = 48.dp, height = 64.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CoverPlaceholder.color(book.bookId)),
                     contentAlignment = Alignment.Center,
                 ) {
                     val cover = book.coverPng
@@ -1065,28 +1077,76 @@ private fun RecentReading(books: List<LibraryStore.Entry>) {
                         Text(
                             book.title.take(1),
                             style = MaterialTheme.typography.titleMedium,
-                            color = YuezhouColors.Brand,
+                            color = Color.White,
                         )
                     }
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         book.title,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        color = YuezhouColors.TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    book.percent?.let { p ->
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(1.5.dp))
+                                .background(YuezhouColors.Divider),
+                        ) {
+                            book.percent?.let { p ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(p.coerceIn(0.0, 1.0).coerceAtLeast(0.01).toFloat())
+                                        .height(3.dp)
+                                        .clip(RoundedCornerShape(1.5.dp))
+                                        .background(YuezhouColors.Brand),
+                                )
+                            }
+                        }
+                        book.percent?.let { p ->
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "已读 ${(p * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = YuezhouColors.TextSecondary,
+                            )
+                        }
+                    }
+                    book.lastReadAt?.let { ts ->
+                        Spacer(Modifier.height(4.dp))
                         Text(
-                            "已读 ${(p * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodySmall,
+                            formatReadAt(ts),
+                            style = MaterialTheme.typography.labelSmall,
                             color = YuezhouColors.TextSecondary,
-                            modifier = Modifier.padding(top = 2.dp),
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+/** 把阅读时间戳格式化为「刚刚 / N 分钟前 / 昨天 / MM-dd」等简短文案。 */
+private fun formatReadAt(millis: Long): String {
+    val now = System.currentTimeMillis()
+    val diff = now - millis
+    val minute = 60_000L
+    val hour = 60 * minute
+    val day = 24 * hour
+    return when {
+        diff < minute -> "刚刚"
+        diff < hour -> "${diff / minute} 分钟前"
+        diff < day -> "${diff / hour} 小时前"
+        diff < 2 * day -> "昨天"
+        else -> {
+            val fmt = java.text.SimpleDateFormat("MM-dd", java.util.Locale.getDefault())
+            fmt.format(java.util.Date(millis))
         }
     }
 }
