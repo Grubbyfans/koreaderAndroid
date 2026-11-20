@@ -1,0 +1,36 @@
+app/src/main/java/com/yuezhou/reader/CloudConfig.kt
+  h_7f20b2a03eb3b6 76,100
+core/build.gradle.kts
+  h_7f20b2a03eb3b6 43
+core/src/main/java/com/yuezhou/reader/core/cloud/CloudService.kt
+  h_7f20b2a03eb3b6 6,10-11,25,29,36,65,129
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduAuth.kt
+  h_7f20b2a03eb3b6 7,29,172
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduBackend.kt
+  h_7f20b2a03eb3b6 15,18,221,259,296,384,439,536,558
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduErrors.kt
+  h_7f20b2a03eb3b6 18-20,23-25,41
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduHttp.kt
+  h_7f20b2a03eb3b6 7,69
+core/src/main/java/com/yuezhou/reader/core/cloud/webdav/DavPath.kt
+  h_7f20b2a03eb3b6 45,49-50,55
+core/src/main/java/com/yuezhou/reader/core/cloud/webdav/WebDavBackend.kt
+  h_7f20b2a03eb3b6 15,326-327
+core/src/main/java/com/yuezhou/reader/core/speech/SentencePlanner.kt
+  h_7f20b2a03eb3b6 43-44
+gradle/libs.versions.toml
+  h_7f20b2a03eb3b6 22,52
+speech/src/main/java/com/yuezhou/reader/speech/SpeechService.kt
+  h_7f20b2a03eb3b6 10,254-255,264-265,272,315-319,384-386,392,398-402,410,412-413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b77922a46dbc38fa4787325f3f04a00502afce50",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
