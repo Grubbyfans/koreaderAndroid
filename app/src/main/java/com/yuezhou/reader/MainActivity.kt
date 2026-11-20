@@ -487,7 +487,7 @@ private fun BookshelfScreen() {
     val detail = detailBook
     if (detail != null) {
         AlertDialog(
-            onDismissRequest = { detailBook = null },
+            onDismissRequest = { if (!downloading) detailBook = null },
             title = { Text(detail.bookId, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text = {
                 Column {
@@ -515,39 +515,39 @@ private fun BookshelfScreen() {
             confirmButton = {
                 if (detail.local) {
                     TextButton(
-                        onClick = {
-                            detailBook = null
-                            context.startActivity(
-                                Intent(context, ReaderActivity::class.java).apply {
-                                    putExtra(ReaderActivity.EXTRA_BOOK_ID, detail.bookId)
-                                },
-                            )
-                        },
-                    ) { Text("打开") }
-                } else {
-                    TextButton(
-                        enabled = !downloading,
-                        onClick = {
-                            scope.launch {
-                                downloading = true
-                                val result = CloudSync(context).downloadBook(detail.fileName)
-                                downloading = false
-                                if (result.isSuccess) {
-                                    detailBook = null
-                                    refreshKey++ // 刷新本地书库
-                                    snackbarHostState.showSnackbar("已下载：${detail.bookId}")
-                                } else {
-                                    snackbarHostState.showSnackbar(
-                                        "下载失败：${result.exceptionOrNull()?.message}",
-                                    )
-                                }
+                    enabled = !downloading,
+                    onClick = {
+                        detailBook = null
+                        context.startActivity(
+                            Intent(context, ReaderActivity::class.java).apply {
+                                putExtra(ReaderActivity.EXTRA_BOOK_ID, detail.bookId)
+                            },
+                        )
+                    },
+                ) { Text("打开") }
+            }
+            TextButton(
+                    enabled = !downloading,
+                    onClick = {
+                        scope.launch {
+                            downloading = true
+                            val result = cloudSync.downloadBook(detail, ReaderActivity::isBookOpen)
+                            downloading = false
+                            if (result.isSuccess) {
+                                detailBook = null
+                                refreshKey++ // 刷新本地书库
+                                snackbarHostState.showSnackbar("已下载：${detail.bookId}")
+                            } else {
+                                snackbarHostState.showSnackbar(
+                                    "下载失败：${result.exceptionOrNull()?.message}",
+                                )
                             }
-                        },
-                    ) { Text(if (downloading) "下载中…" else "下载") }
-                }
+                        }
+                    },
+                ) { Text(if (downloading) "下载中…" else if (detail.local) "重新下载" else "下载") }
             },
             dismissButton = {
-                TextButton(onClick = { detailBook = null }) { Text("关闭") }
+                TextButton(onClick = { detailBook = null }, enabled = !downloading) { Text("关闭") }
             },
         )
     }

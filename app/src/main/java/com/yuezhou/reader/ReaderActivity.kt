@@ -88,6 +88,9 @@ class ReaderActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_BOOK_ID = "extra_book_id"
+        private val openReaders = java.util.concurrent.ConcurrentHashMap<ReaderActivity, String>()
+
+        fun isBookOpen(bookId: String): Boolean = openReaders.containsValue(bookId)
     }
 
     private var onEpubReady: ((Uri) -> Unit)? = null
@@ -97,6 +100,7 @@ class ReaderActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val bookId = intent.getStringExtra(EXTRA_BOOK_ID)
+        if (bookId != null) openReaders[this] = bookId
         val launcher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) onEpubReady?.invoke(uri)
         }
@@ -112,6 +116,12 @@ class ReaderActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        openReaders.remove(this)
+        super.onDestroy()
+    }
+
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -68,6 +68,15 @@ object CoverExtractor {
         }
     }
 
+    internal fun validatePackage(epubFile: File) {
+        ZipFile(epubFile).use { zip ->
+            val container = zip.getEntry("META-INF/container.xml")
+            require(container != null && container.size in 1..65536) { "EPUB 缺少有效的容器清单" }
+            val opf = locateOpf(zip)?.let(zip::getEntry)
+            require(opf != null && !opf.isDirectory && opf.size > 0) { "EPUB 缺少有效的书籍清单" }
+        }
+    }
+
     /** 定位 OPF 路径：读 container.xml 的 rootfile full-path。 */
     private fun locateOpf(zip: ZipFile): String? {
         val container = zip.getEntry("META-INF/container.xml") ?: return null

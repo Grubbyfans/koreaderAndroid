@@ -490,12 +490,14 @@ class CloudSync(private val context: Context) {
      * 对齐方案 §11.5 下载：下载正文到 files/epub/（临时文件 → 校验 → 发布），
      * 成功后提取封面/书名登记本地书库。返回最终落盘的文件名。
      */
-    suspend fun downloadBook(fileName: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun downloadBook(book: RemoteBook, isOpen: (String) -> Boolean): Result<String> = withContext(Dispatchers.IO) {
         downloadMutex.withLock {
             try {
-                require(BookNames.cloudId(fileName).first != null) {
+                require(BookNames.cloudId(book.fileName).first == book.bookId) {
                     "云端 EPUB 文件名无效"
                 }
+                check(book.size in 1..(1024L * 1024 * 1024)) { "书库记录中的文件大小无效，请先更新书库" }
+                check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
                 val directory = DownloadDirectory(context)
                 val destination = directory.uri
                 val backend = backend() ?: return@withLock Result.failure(
@@ -503,11 +505,17 @@ class CloudSync(private val context: Context) {
                 )
                 backend.ensureAuthorized()
 
+                val store = LibraryStore(context)
+                val fileName = store.snapshot().books.firstOrNull { it.bookId == book.bookId }?.fileName
+                    ?: book.fileName
                 val target = File(EpubImporter.epubDir(context), fileName)
+                check(target.parentFile?.usableSpace?.let { it >= book.size } == true) { "应用存储空间不足" }
                 val tmp = File.createTempFile("download-", ".part", target.parentFile)
                 try {
-                    backend.downloadTo("books/$fileName", tmp, maxBytes = 1024L * 1024 * 1024)
-                    check(tmp.length() > 0) { "下载内容为空" }
+                    backend.downloadTo("books/${book.fileName}", tmp, maxBytes = book.size)
+                    check(tmp.length() == book.size) { "下载大小与书库不符，请先更新书库" }
+                    CoverExtractor.validatePackage(tmp)
+                    check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
                     if (destination != null) directory.publish(destination, tmp, fileName)
                     Files.move(
                         tmp.toPath(), target.toPath(),
@@ -520,7 +528,7 @@ class CloudSync(private val context: Context) {
 
                 val cover = CoverExtractor.extract(target)
                 val title = CoverExtractor.extractTitle(target)
-                val registered = LibraryStore(context).registerBook(fileName, cover, title)
+                val registered = store.registerBook(fileName, cover, title)
                 invalidateListCache()
                 registered.map { fileName }
             } catch (e: CancellationException) {
