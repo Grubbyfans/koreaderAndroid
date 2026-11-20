@@ -1,0 +1,113 @@
+package com.yuezhou.reader.reader
+
+import com.yuezhou.reader.core.speech.ChapterTextSource
+import com.yuezhou.reader.core.speech.SpeechTextUnit
+import com.yuezhou.reader.core.speech.SourceAnchor
+import java.io.File
+import java.util.zip.ZipFile
+
+/**
+ * 原生 EPUB 章节文本源：从本地 EPUB 解包并按 spine 顺序提取纯文本，
+ * 产出 [SpeechTextUnit] 序列供分句器使用。
+ *
+ * 这是 §7.3「后台不能依赖 WebView」的正式方案——朗读前台服务可在
+ * WebView 被回收/锁屏冻结后，仍独立读取 EPUB 生成朗读计划。
+ *
+ * 关键设计：
+ *   - 从 META-INF/container.xml 定位 OPF，读 `<spine>` 的 itemref 顺序，
+ *     再经 `<manifest>` 映射到实际 XHTML 文件路径；
+ *   - 每个 XHTML 用 [HtmlTextExtractor] 剥离成纯文本，按段落（换行）切分，
+ *     每段作为一个 [SpeechTextUnit]；
+ *   - nodeId 用「章节文件序号 + 段内序号」构成稳定标识（如 `3:12`），
+ *     使原生解析结果自洽，供高亮回写与进度锚点使用（不与 foliate-js CFI 混用）。
+ *
+ * 本类无 Android UI 依赖，可在后台线程/服务中调用。
+ */
+class EpubChapterTextSource(
+    private val epubFile: File,
+    /** 目标章节序号（0-based，对应 spine 顺序）。 */
+    private val chapterIndex: Int,
+) : ChapterTextSource {
+
+    override fun extract(): List<SpeechTextUnit> {
+        return try {
+            ZipFile(epubFile).use { zip ->
+                val spineHrefs = locateSpine(zip) ?: return emptyList()
+                if (chapterIndex !in spineHrefs.indices) return emptyList()
+                val href = spineHrefs[chapterIndex]
+                val entry = zip.getEntry(href) ?: return emptyList()
+                val html = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
+                val text = HtmlTextExtractor.extract(html)
+                splitIntoUnits(text, chapterIndex)
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * 把一章纯文本按段落（换行）切分为 [SpeechTextUnit]，
+     * nodeId = `"$chapterIndex:$paraIndex"`，offset 为段内 0。
+     */
+    private fun splitIntoUnits(text: String, chapter: Int): List<SpeechTextUnit> {
+        val units = mutableListOf<SpeechTextUnit>()
+        var para = 0
+        for (paragraph in text.split('\n')) {
+            val cleaned = paragraph.trim()
+            if (cleaned.isEmpty()) continue
+            units.add(
+                SpeechTextUnit(
+                    text = cleaned,
+                    anchor = SourceAnchor(nodeId = "$chapter:$para", offset = 0),
+                )
+            )
+            para++
+        }
+        return units
+    }
+
+    companion object {
+
+        /** 定位并解析 OPF，返回按 spine 顺序排列的 XHTML 相对路径列表。 */
+        fun locateSpine(zip: ZipFile): List<String>? {
+            val container = zip.getEntry("META-INF/container.xml") ?: return null
+            val containerText = zip.getInputStream(container).use { it.readBytes().toString(Charsets.UTF_8) }
+            val opfPath = Regex("<rootfile[^>]*full-path=[\"']([^\"']+)[\"']")
+                .find(containerText)?.groupValues?.get(1) ?: return null
+            val opfEntry = zip.getEntry(opfPath) ?: return null
+            val opfText = zip.getInputStream(opfEntry).use { it.readBytes().toString(Charsets.UTF_8) }
+
+            val baseDir = opfPath.substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "$it/" }
+
+            // manifest：id -> href
+            val manifestText = Regex("<manifest[\\s\\S]*?</manifest>", RegexOption.IGNORE_CASE)
+                .find(opfText)?.value ?: ""
+            val idToHref = mutableMapOf<String, String>()
+            val itemRegex = Regex("<item[^>]*id=[\"']([^\"']+)[\"'][^>]*href=[\"']([^\"']+)[\"'][^>]*/?>", RegexOption.IGNORE_CASE)
+            for (m in itemRegex.findAll(manifestText)) {
+                idToHref[m.groupValues[1]] = m.groupValues[2]
+            }
+            // 兼容 href 在前、id 在后的写法。
+            val itemRegex2 = Regex("<item[^>]*href=[\"']([^\"']+)[\"'][^>]*id=[\"']([^\"']+)[\"'][^>]*/?>", RegexOption.IGNORE_CASE)
+            for (m in itemRegex2.findAll(manifestText)) {
+                idToHref[m.groupValues[2]] = m.groupValues[1]
+            }
+
+            // spine：itemref 顺序
+            val spineText = Regex("<spine[\\s\\S]*?</spine>", RegexOption.IGNORE_CASE)
+                .find(opfText)?.value ?: ""
+            val idrefRegex = Regex("idref=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
+            val hrefs = mutableListOf<String>()
+            for (m in idrefRegex.findAll(spineText)) {
+                val href = idToHref[m.groupValues[1]] ?: continue
+                hrefs.add(resolve(baseDir, href))
+            }
+            return if (hrefs.isEmpty()) null else hrefs
+        }
+
+        private fun resolve(baseDir: String, href: String): String {
+            val clean = href.substringBefore('#').substringBefore('?')
+            return if (clean.startsWith("/")) clean.removePrefix("/") else baseDir + clean
+        }
+    }
+}
