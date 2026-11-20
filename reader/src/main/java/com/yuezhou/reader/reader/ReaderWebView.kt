@@ -190,6 +190,11 @@ class ReaderWebView(context: Context) : WebView(context) {
         evaluateJavascript("window.__reader.getTableOfContents();", null)
     }
 
+    /** 请求当前章节正文文本（结果通过 ChapterText 事件回传，供朗读分句）。 */
+    fun requestChapterText() = whenReaderReady {
+        evaluateJavascript("window.__reader.getCurrentChapterText();", null)
+    }
+
     /** 跳转到目录项（href 指向章节）。 */
     fun goToToc(href: String) = whenReaderReady {
         evaluateJavascript("window.__reader.goToToc(${jsonQuote(href)}).then(r => {});", null)
@@ -271,6 +276,10 @@ class ReaderWebView(context: Context) : WebView(context) {
                 val obj = parseJson(data)
                 ReaderEvent.TocLoaded(parseTocItems(obj["items"]))
             }
+            "chapterText" -> {
+                val obj = parseJson(data)
+                ReaderEvent.ChapterText(parseChapterText(obj["items"]))
+            }
             "error" -> {
                 val obj = parseJson(data)
                 ReaderEvent.Error(obj["message"] as? String ?: "未知错误")
@@ -318,4 +327,18 @@ class ReaderWebView(context: Context) : WebView(context) {
         // 用 org.json 的 quote 正确处理引号、反斜杠、控制字符与 U+2028/U+2029，
         // 避免手写转义遗漏导致注入到 JS 字符串字面量时出错。
         org.json.JSONObject.quote(s)
+
+    /** 解析章节文本节点列表 [{cfi, text}]。 */
+    private fun parseChapterText(items: Any?): List<ChapterTextNode> {
+        if (items !is org.json.JSONArray) return emptyList()
+        val result = ArrayList<ChapterTextNode>()
+        for (i in 0 until items.length()) {
+            val node = items.optJSONObject(i) ?: continue
+            val cfi = node.optString("cfi")
+            val text = node.optString("text")
+            if (cfi.isBlank() || text.isBlank()) continue
+            result.add(ChapterTextNode(cfi = cfi, text = text))
+        }
+        return result
+    }
 }

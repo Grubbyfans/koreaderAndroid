@@ -99,6 +99,39 @@ window.__reader = {
         currentBook = null
     },
 
+    // 提取当前章节正文文本：返回 [{ cfi, text }] 列表，供朗读（TTS）分句使用。
+    // 按文档序遍历文本节点，跳过 script/style/隐藏装饰与导航文本；
+    // 每个文本节点生成其起始位置的 CFI，作为朗读偏移 → 原文位置的锚点。
+    getCurrentChapterText() {
+        try {
+            const contents = view.renderer?.getContents?.()
+            if (!Array.isArray(contents) || contents.length === 0) {
+                post('chapterText', { items: [] })
+                return false
+            }
+            // 取当前可见章节（第一项）；跨页可能有多项，但同一章节共享一个 index
+            const { doc, index } = contents[0]
+            const items = []
+            const walker = doc.createTreeWalker(doc.body || doc.documentElement, NodeFilter.SHOW_TEXT)
+            let node
+            while ((node = walker.nextNode())) {
+                const text = node.nodeValue
+                if (!text || !text.trim()) continue
+                const parent = node.parentElement
+                if (!parent || isNonReadable(parent)) continue
+                // 为文本节点生成起始位置 CFI（collapsed range 指向节点起始）
+                const cfi = getTextNodeCfi(index, node, doc)
+                if (!cfi) continue
+                items.push({ cfi, text: text.replace(/\u00a0/g, ' ') })
+            }
+            post('chapterText', { items, index })
+            return true
+        } catch (e) {
+            post('error', { message: String(e?.message ?? e) })
+            return false
+        }
+    },
+
     // 应用排版设置：{ fontSize, lineHeight, pageMargin, theme, vertical }
     async applySettings(settings) {
         try {
@@ -245,6 +278,31 @@ view.addEventListener('load', (e) => {
         injectStyle(doc, css)
     }
 })
+
+// 判断元素是否为不可朗读内容：脚本/样式/隐藏装饰/导航
+function isNonReadable(el) {
+    if (!el) return true
+    const tag = el.tagName
+    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return true
+    // 隐藏元素（display:none / visibility:hidden / 折叠）不朗读
+    const style = el.style
+    if (style && (style.display === 'none' || style.visibility === 'hidden')) return true
+    // 脚注链接的返回标记等 foliate 注入的装饰元素（如 foliate-footnote 序号）可跳过
+    return false
+}
+
+// 为文本节点生成其起始位置的 CFI；失败返回 null。
+// 复用 view.getCFI(index, range)：foliate 内部用 CFI.fromRange 计算到文本节点级偏移。
+function getTextNodeCfi(index, textNode, doc) {
+    try {
+        const range = doc.createRange()
+        range.setStart(textNode, 0)
+        range.collapse(true)
+        return view.getCFI(index, range) ?? null
+    } catch (e) {
+        return null
+    }
+}
 
 // 回传消息给 Android 层
 function post(type, data) {

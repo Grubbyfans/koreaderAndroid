@@ -10,9 +10,17 @@ sealed interface ReaderEvent {
     data class Relocated(val cfi: String?, val index: Int?, val fraction: Float?) : ReaderEvent
     /** 目录（TOC）已就绪，携带目录树。 */
     data class TocLoaded(val items: List<TocItem>) : ReaderEvent
+    /** 当前章节正文文本已提取（朗读用），携带 { cfi, text } 列表。 */
+    data class ChapterText(val items: List<ChapterTextNode>) : ReaderEvent
     /** 错误。 */
     data class Error(val message: String) : ReaderEvent
 }
+
+/** 章节中的一个文本节点：文本 + 其起始位置的 CFI 锚点。 */
+data class ChapterTextNode(
+    val cfi: String,
+    val text: String,
+)
 
 /** 目录项（对应 foliate-js book.toc 的层级结构）。 */
 data class TocItem(

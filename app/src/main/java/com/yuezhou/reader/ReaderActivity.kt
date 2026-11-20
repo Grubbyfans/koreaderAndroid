@@ -63,6 +63,12 @@ import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.ReaderEvent
 import com.yuezhou.reader.reader.ReaderWebView
 import com.yuezhou.reader.reader.TocItem
+import com.yuezhou.reader.core.speech.SentencePlanner
+import com.yuezhou.reader.core.speech.SourceAnchor
+import com.yuezhou.reader.core.speech.SpeechPlan
+import com.yuezhou.reader.core.speech.SpeechTextUnit
+import com.yuezhou.reader.speech.SpeechPlanStore
+import com.yuezhou.reader.speech.SpeechProgressTracker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -124,6 +130,10 @@ private fun ReaderScreen(
     var pendingOpen by remember { mutableStateOf<Pair<String, String?>?>(null) }
     // 沉浸式面板显隐
     var panelVisible by remember { mutableStateOf(false) }
+    // 朗读状态：是否正在朗读
+    var speaking by remember { mutableStateOf(false) }
+    // 朗读中，用于「朗读」按钮切换为「停止」
+    var speakRequested by remember { mutableStateOf(false) }
     // 目录抽屉
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
@@ -141,6 +151,43 @@ private fun ReaderScreen(
         val id = bookId
         if (pos != null && id != null) {
             scope.launch { store.saveProgress(id, pos.first, pos.second) }
+        }
+    }
+
+    // 朗读进度收集：服务写入 SpeechProgressTracker，这里反映到 UI（朗读中状态）
+    LaunchedEffect(Unit) {
+        SpeechProgressTracker.current.collect { snap ->
+            speaking = snap != null
+            // 朗读停止时同步清空「朗读请求中」标记
+            if (snap == null) speakRequested = false
+        }
+    }
+
+    // 从章节文本节点构造朗读计划并启动前台朗读服务。
+    fun startSpeech(nodes: List<com.yuezhou.reader.reader.ChapterTextNode>) {
+        val id = bookId ?: return
+        // 文本节点 → SpeechTextUnit：用 CFI 字符串作为 nodeId（跨章节唯一，映射回原文锚点）
+        val units = nodes.map { node ->
+            SpeechTextUnit(text = node.text, anchor = SourceAnchor(nodeId = node.cfi, offset = 0))
+        }
+        val segments = SentencePlanner().plan(units)
+        if (segments.isEmpty()) {
+            status = "本章无可朗读文本"
+            return
+        }
+        // fileGeneration 暂用空字符串（本地库无代次概念，见方案 §7.2 的 fileGeneration 语义）
+        val plan = SpeechPlan(
+            bookId = id,
+            fileGeneration = "",
+            chapterIndex = 0,
+            segments = segments,
+        )
+        try {
+            SpeechPlanStore.startAndPlay(context, plan)
+            speakRequested = true
+            status = "已开始朗读"
+        } catch (e: Exception) {
+            status = "启动朗读失败：${e.message}"
         }
     }
 
@@ -185,6 +232,14 @@ private fun ReaderScreen(
             }
             is ReaderEvent.TocLoaded -> {
                 tocItems = event.items
+            }
+            is ReaderEvent.ChapterText -> {
+                speakRequested = false
+                if (event.items.isEmpty()) {
+                    status = "本章无可朗读文本"
+                } else {
+                    startSpeech(event.items)
+                }
             }
             is ReaderEvent.Error -> {
                 loading = false
@@ -325,13 +380,25 @@ private fun ReaderScreen(
                     sectionIndex = currentIndex,
                     totalSections = totalSections,
                     prefs = readerPrefs,
+                    speaking = speaking || speakRequested,
                     onBack = onBack,
                     onOpenToc = { scope.launch { drawerState.open() } },
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
                     onPrefsChange = { p -> scope.launch { ReaderSettings.save(context, p) } },
                     onSync = { status = "云同步尚未接入，等待 P4/P5 后端就绪" },
-                    onSpeak = { status = "朗读尚未接入，等待 P2 TTS 后端就绪" },
+                    onSpeak = {
+                        if (speaking) {
+                            // 朗读中 → 停止
+                            SpeechPlanStore.stop(context)
+                            status = "已停止朗读"
+                        } else {
+                            // 请求当前章节文本，ChapterText 事件回传后启动朗读
+                            speakRequested = true
+                            status = "准备朗读…"
+                            webView?.requestChapterText()
+                        }
+                    },
                 )
             }
         }
@@ -352,6 +419,7 @@ private fun ReaderPanel(
     sectionIndex: Int?,
     totalSections: Int,
     prefs: ReaderPreferences,
+    speaking: Boolean,
     onBack: () -> Unit,
     onOpenToc: () -> Unit,
     onImport: () -> Unit,
@@ -442,7 +510,7 @@ private fun ReaderPanel(
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
                 ) {
                     PanelAction("目录", onClick = onOpenToc)
-                    PanelAction("朗读", onClick = onSpeak)
+                    PanelAction(if (speaking) "停止朗读" else "朗读", onClick = onSpeak)
                     PanelAction("同步", onClick = onSync)
                     PanelAction(
                         if (settingsExpanded) "收起设置" else "设置",
