@@ -1,0 +1,50 @@
+README.md
+  h_7f20b2a03eb3b6 6
+app/src/main/AndroidManifest.xml
+  h_7f20b2a03eb3b6 4-5
+core/src/main/java/com/yuezhou/reader/core/cloud/BackendCapabilities.kt
+  h_7f20b2a03eb3b6 1-35
+core/src/main/java/com/yuezhou/reader/core/cloud/CloudBackend.kt
+  h_7f20b2a03eb3b6 1-72
+core/src/main/java/com/yuezhou/reader/core/cloud/CloudEntry.kt
+  h_7f20b2a03eb3b6 1-34
+core/src/main/java/com/yuezhou/reader/core/cloud/CloudError.kt
+  h_7f20b2a03eb3b6 1-39
+core/src/main/java/com/yuezhou/reader/core/cloud/CloudService.kt
+  h_7f20b2a03eb3b6 1-179
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduBackend.kt
+  h_7f20b2a03eb3b6 1-610
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduErrors.kt
+  h_7f20b2a03eb3b6 1-58
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduForm.kt
+  h_7f20b2a03eb3b6 1-34
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduHttp.kt
+  h_7f20b2a03eb3b6 1-77
+core/src/main/java/com/yuezhou/reader/core/cloud/baidu/BaiduJson.kt
+  h_7f20b2a03eb3b6 1-76
+core/src/main/java/com/yuezhou/reader/core/cloud/webdav/DavPath.kt
+  h_7f20b2a03eb3b6 1-62
+core/src/main/java/com/yuezhou/reader/core/cloud/webdav/DavXml.kt
+  h_7f20b2a03eb3b6 1-106
+core/src/main/java/com/yuezhou/reader/core/cloud/webdav/WebDavBackend.kt
+  h_7f20b2a03eb3b6 1-364
+core/src/main/java/com/yuezhou/reader/core/protocol/LibraryCatalog.kt
+  h_7f20b2a03eb3b6 136-172
+core/src/test/java/com/yuezhou/reader/core/cloud/baidu/BaiduHelpersTest.kt
+  h_7f20b2a03eb3b6 1-73
+core/src/test/java/com/yuezhou/reader/core/cloud/webdav/DavPathTest.kt
+  h_7f20b2a03eb3b6 1-88
+docs/cloud-integration.md
+  h_7f20b2a03eb3b6 1-225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9b66fb155c752289fd8765e19dfde27a133cc09c",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
