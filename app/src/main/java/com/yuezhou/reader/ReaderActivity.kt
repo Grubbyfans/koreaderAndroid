@@ -160,6 +160,8 @@ private fun ReaderScreen(
     var syncInfo by remember { mutableStateOf<CloudSync.ProgressInfo?>(null) }
     var syncLoading by remember { mutableStateOf(false) }
     var syncBusy by remember { mutableStateOf(false) }
+    var undoPosition by remember(bookId) { mutableStateOf<Pair<String, Double?>?>(null) }
+    var pendingJump by remember { mutableStateOf<Pair<String, kotlinx.coroutines.CompletableDeferred<Boolean>>?>(null) }
 
     fun flushProgress() {
         val pos = lastPosition
@@ -183,40 +185,71 @@ private fun ReaderScreen(
         }
     }
 
-    // 应用云端进度：把云端 XPointer 转成 CFI 后跳转
+    suspend fun jumpAndSave(
+        id: String,
+        wv: ReaderWebView,
+        previous: Pair<String, Double?>,
+        target: Pair<String, Double?>,
+    ): Boolean {
+        val requestId = java.util.UUID.randomUUID().toString()
+        val result = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        saveJob?.cancel()
+        pendingJump = requestId to result
+        try {
+            wv.verifyJump(requestId, target.first, previous.first)
+            val verified = kotlinx.coroutines.withTimeoutOrNull(8_000) { result.await() }
+            if (verified == null) wv.goToCfi(previous.first)
+            if (verified != true) return false
+            store.saveProgress(id, target.first, target.second)
+            lastPosition = target
+            return true
+        } finally {
+            pendingJump = null
+        }
+    }
+
     fun applyRemoteProgress() {
         val id = bookId ?: return
         val info = syncInfo ?: return
         val remote = info.remoteLocation ?: return
+        val previous = lastPosition ?: return
+        val wv = webView ?: return
+        syncBusy = true
+        SpeechPlanStore.stop(context)
         scope.launch {
-            syncBusy = true
-            // 应用前保存旧位置（撤销用，lastPosition 已是当前本机位置）
-            val cloud = CloudSync(context)
-            val xpointer = cloud.fetchRemoteProgressLocation(id) ?: remote
-            // 暂停朗读，避免旧回调覆盖新位置
-            SpeechPlanStore.stop(context)
-            // XPointer → CFI（依赖 WebView 真实 DOM），失败则提示无法定位
-            val wv = webView
-            if (wv == null) {
+            try {
+                val cfi = kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                    kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                        wv.xPointerToCfi(remote) { value ->
+                            continuation.resumeWith(Result.success(value))
+                        }
+                    }
+                }
+                val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to info.remotePercent)
+                if (applied) undoPosition = previous
+                status = if (applied) "已应用云端进度，可在进度同步中撤销" else "无法确认云端落点，已保留本机进度"
+                syncDialogOpen = false
+            } finally {
                 syncBusy = false
-                status = "阅读器尚未就绪，无法应用云端进度"
-                return@launch
             }
-            wv.xPointerToCfi(xpointer) { cfi ->
-                if (cfi == null) {
-                    syncBusy = false
-                    syncDialogOpen = false
-                    status = "云端进度无法定位到本书，已跳过"
-                    return@xPointerToCfi
-                }
-                scope.launch {
-                    wv.goToCfi(cfi)
-                    // 提交本地状态（把转换后的 CFI 写回本地进度）
-                    store.saveProgress(id, cfi, info.remotePercent)
-                    syncBusy = false
-                    syncDialogOpen = false
-                    status = "已应用云端进度"
-                }
+        }
+    }
+
+    fun undoRemoteProgress() {
+        val id = bookId ?: return
+        val previous = lastPosition ?: return
+        val restore = undoPosition ?: return
+        val wv = webView ?: return
+        syncBusy = true
+        SpeechPlanStore.stop(context)
+        scope.launch {
+            try {
+                val restored = jumpAndSave(id, wv, previous, restore)
+                if (restored) undoPosition = null
+                status = if (restored) "已恢复到同步前位置" else "无法确认撤销位置"
+                syncDialogOpen = false
+            } finally {
+                syncBusy = false
             }
         }
     }
@@ -332,13 +365,16 @@ private fun ReaderScreen(
                 // 打开后拉取目录
                 webView?.requestToc()
             }
+            is ReaderEvent.JumpVerified -> {
+                pendingJump?.takeIf { it.first == event.requestId }?.second?.complete(event.verified)
+            }
             is ReaderEvent.Relocated -> {
                 currentCfi = event.cfi
                 currentFraction = event.fraction
                 currentIndex = event.index
                 val cfi = event.cfi
                 val fraction = event.fraction
-                if (cfi != null && bookId != null) {
+                if (cfi != null && bookId != null && pendingJump == null) {
                     lastPosition = cfi to fraction?.toDouble()
                     // 去抖：300ms 内的连续翻页合并成一次写
                     saveJob?.cancel()
@@ -530,6 +566,7 @@ private fun ReaderScreen(
                 busy = syncBusy,
                 onUpload = { uploadLocalProgress() },
                 onApply = { applyRemoteProgress() },
+                onUndo = if (undoPosition != null) ::undoRemoteProgress else null,
                 onDismiss = { syncDialogOpen = false },
             )
         }
@@ -544,6 +581,7 @@ private fun ProgressSyncDialog(
     busy: Boolean,
     onUpload: () -> Unit,
     onApply: () -> Unit,
+    onUndo: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -599,6 +637,9 @@ private fun ProgressSyncDialog(
             }
         },
         confirmButton = {
+            if (onUndo != null) {
+                TextButton(onClick = onUndo, enabled = !busy && !loading) { Text("撤销上次应用") }
+            }
             TextButton(
                 onClick = onApply,
                 enabled = !busy && !loading && info?.remoteLocation != null,

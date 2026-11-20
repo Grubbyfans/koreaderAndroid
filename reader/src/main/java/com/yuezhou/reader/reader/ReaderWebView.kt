@@ -182,6 +182,13 @@ class ReaderWebView(context: Context) : WebView(context) {
         }
     }
 
+    fun verifyJump(requestId: String, cfi: String, restoreCfi: String) = whenReaderReady {
+        evaluateJavascript(
+            "window.__reader.verifyJump(${jsonQuote(requestId)}, ${jsonQuote(cfi)}, ${jsonQuote(restoreCfi)})",
+            null,
+        )
+    }
+
     fun nextPage() = whenReaderReady { evaluateJavascript("window.__reader.next();", null) }
     fun prevPage() = whenReaderReady { evaluateJavascript("window.__reader.prev();", null) }
 
@@ -304,6 +311,10 @@ class ReaderWebView(context: Context) : WebView(context) {
                     sections = (obj["sections"] as? Number)?.toInt() ?: 0,
                     title = obj["title"] as? String ?: "",
                 )
+            }
+            "jumpVerified" -> {
+                val obj = parseJson(data)
+                ReaderEvent.JumpVerified(obj["requestId"] as? String ?: "", obj["verified"] == true)
             }
             "relocate" -> {
                 val obj = parseJson(data)

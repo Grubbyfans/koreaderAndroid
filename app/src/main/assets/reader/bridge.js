@@ -56,6 +56,23 @@ window.__reader = {
         }
     },
 
+    async verifyJump(requestId, cfi, restoreCfi) {
+        let verified = false
+        try {
+            const target = await view.goTo(cfi)
+            const visible = view.lastLocation?.range
+            const contents = view.renderer?.getContents?.().find(item => item.index === target?.index)
+            if (contents && visible && typeof target.anchor === 'function') {
+                const range = target.anchor(contents.doc)
+                verified = !!range && visible.isPointInRange(range.startContainer, range.startOffset)
+            }
+        } catch {
+            // Navigation and DOM-range failures are reported as an unverified jump.
+        }
+        if (!verified && restoreCfi) await view.goTo(restoreCfi).catch(() => {})
+        post('jumpVerified', { requestId, verified })
+    },
+
     // 下一页 / 上一页
     async next() { await view.next(); return true },
     async prev() { await view.prev(); return true },
