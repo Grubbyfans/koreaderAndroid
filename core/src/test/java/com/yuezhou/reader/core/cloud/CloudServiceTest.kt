@@ -83,6 +83,20 @@ class CloudServiceTest {
     }
 
     @Test
+    fun `同名上传沿用已登记的大写扩展名路径`() = runTest {
+        val backend = FakeBackend()
+        val service = CloudService(backend)
+        service.uploadBook(epub("first"), "测试书.EPUB")
+        var confirmedName: String? = null
+        val result = service.uploadBook(epub("updated"), "测试书.epub", onBodyUploaded = { confirmedName = it })
+
+        assertEquals("测试书.EPUB", confirmedName)
+        assertEquals("books/测试书.EPUB", result.record.path)
+        assertEquals("updated", backend.files.getValue(result.record.path).decodeToString())
+        assertTrue("books/测试书.epub" !in backend.files)
+    }
+
+    @Test
     fun `上传后列表可读且 bookId 正确`() = runTest {
         val backend = FakeBackend()
         val svc = CloudService(backend)

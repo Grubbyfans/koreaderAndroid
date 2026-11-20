@@ -45,6 +45,7 @@ class CloudService(private val backend: CloudBackend) {
         epubFile: File,
         fileName: String,
         onProgress: ((UploadPhase, Int?) -> Unit)? = null,
+        onBodyUploaded: ((String) -> Unit)? = null,
         makeCover: (suspend (File) -> String?)? = null,
     ): UploadResult {
         onProgress?.invoke(UploadPhase.Preparing, null)
@@ -52,6 +53,9 @@ class CloudService(private val backend: CloudBackend) {
             ?: throw CloudException(ErrorCode.INVALID_INPUT, "不是合法的 EPUB 文件名")
 
         val index = index()
+        val previous = index.books.find { it.bookId == bookId }
+        val remoteFileName = previous?.fileName ?: fileName
+        val remotePath = previous?.path ?: "books/$remoteFileName"
         // 首次建库：确保 books/、covers/ 目录存在
         if (index.coverDirectoryReady == null) {
             runCatching { backend.mkdir("books") }
@@ -60,24 +64,24 @@ class CloudService(private val backend: CloudBackend) {
 
         // 上传正文（同名覆盖）
         var lastPercent: Int? = null
-        backend.upload("books/$fileName", epubFile, Precondition.Unconditional) { sent, total ->
+        backend.upload(remotePath, epubFile, Precondition.Unconditional) { sent, total ->
             val percent = if (total > 0) (sent.toDouble() / total * 100).toInt().coerceIn(0, 100) else null
             if (percent != lastPercent || percent == null) {
                 lastPercent = percent
                 onProgress?.invoke(UploadPhase.Transferring, percent)
             }
         }
+        onBodyUploaded?.invoke(remoteFileName)
         onProgress?.invoke(UploadPhase.Publishing, null)
 
         // 构造列表条目，保留旧封面
-        val previous = index.books.find { it.bookId == bookId }
         val coverPath = previous?.coverPath
         val coverVersion = previous?.coverVersion
 
         val uploadedAt = OffsetDateTime.now().truncatedTo(ChronoUnit.SECONDS).toString()
         var record = LibraryCatalog.buildBookEntry(
             bookId = bookId,
-            fileName = fileName,
+            fileName = remoteFileName,
             size = epubFile.length(),
             uploadedAt = uploadedAt,
             coverPath = coverPath,
@@ -92,7 +96,7 @@ class CloudService(private val backend: CloudBackend) {
                     backend.uploadSmallJson("covers/$bookId.json", cover, Precondition.Unconditional)
                     record = LibraryCatalog.buildBookEntry(
                         bookId = bookId,
-                        fileName = fileName,
+                        fileName = remoteFileName,
                         size = epubFile.length(),
                         uploadedAt = uploadedAt,
                         coverPath = "covers/$bookId.json",

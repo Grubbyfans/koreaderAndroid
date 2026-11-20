@@ -196,7 +196,7 @@ class CloudSync(private val context: Context) {
                 val bookStart = System.currentTimeMillis()
                 val epub = File(EpubImporter.epubDir(context), entry.fileName)
                 val size = epub.length()
-                var bodyUploaded = false
+                var uploadedFileName: String? = null
                 var transferStarted = false
                 onProgress(entry.bookId, BookUploadProgress(UploadStatus.Preparing))
                 try {
@@ -211,14 +211,12 @@ class CloudSync(private val context: Context) {
                                     transferStarted = true
                                     UploadStatus.Uploading
                                 }
-                                CloudService.UploadPhase.Publishing -> {
-                                    bodyUploaded = true
-                                    UploadStatus.Publishing
-                                }
+                                CloudService.UploadPhase.Publishing -> UploadStatus.Publishing
                             }
                             if (isStopped(entry.bookId)) throw UploadStopped()
                             onProgress(entry.bookId, BookUploadProgress(status, percent))
                         },
+                        onBodyUploaded = { uploadedFileName = it },
                         makeCover = entry.coverPng?.let { png ->
                             { com.yuezhou.reader.core.protocol.CoverFile.encode(png) }
                         },
@@ -229,12 +227,13 @@ class CloudSync(private val context: Context) {
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    val confirmedFileName = uploadedFileName
                     val status = when {
-                        bodyUploaded -> {
+                        confirmedFileName != null -> {
                             receipts.upsert(PendingPublication(
                                 backendId = selectedBackend.backendId,
                                 bookId = entry.bookId,
-                                fileName = entry.fileName,
+                                fileName = confirmedFileName,
                                 size = size,
                                 coverPath = null,
                                 coverVersion = null,
