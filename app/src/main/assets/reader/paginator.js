@@ -39,14 +39,11 @@ const smoothScroll = (element, property, target, signal) => new Promise(resolve 
 })
 
 // Animate the chapter layer, then commit the real scroll offset in the same frame.
-const slidePage = async (element, content, property, target, signal) => {
+// mode 决定翻页动效：'slide' 平滑滑动 | 'simulate' 3D 仿真卷页 | 'ripple' 水波纹涟漪。
+const slidePage = async (element, content, property, target, signal, mode = 'slide') => {
     const delta = element[property] - target
-    const transform = property === 'scrollLeft'
-        ? `translateX(${delta}px)` : `translateY(${delta}px)`
-    const animation = content.animate(
-        [{ transform: 'none' }, { transform }],
-        { duration: 220, easing: 'cubic-bezier(.2,.65,.35,1)', fill: 'forwards' },
-    )
+    const horizontal = property === 'scrollLeft'
+    const animation = pageAnimation(content, horizontal, delta, mode)
     const cancel = () => animation.cancel()
     signal.addEventListener('abort', cancel, { once: true })
     try {
@@ -61,7 +58,47 @@ const slidePage = async (element, content, property, target, signal) => {
     } finally {
         signal.removeEventListener('abort', cancel)
         animation.cancel()
+        content.style.transform = ''
+        content.style.transformOrigin = ''
+        content.style.filter = ''
     }
+}
+
+// 按模式构造翻页关键帧动画：
+// - slide：横向/纵向平移，轻盈滑动。
+// - simulate：perspective + rotateY 卷页，页面像纸张一样绕书脊翻转并带阴影。
+// - ripple：平移叠加 SVG 水波滤镜（feTurbulence + feDisplacementMap），字随波纹荡漾。
+const pageAnimation = (content, horizontal, delta, mode) => {
+    if (mode === 'simulate') {
+        const axis = horizontal ? 'rotateY' : 'rotateX'
+        const translate = horizontal
+            ? `translateX(${delta}px)` : `translateY(${delta}px)`
+        const back = horizontal ? 'perspective(1200px)' : 'perspective(1200px)'
+        // 卷页方向跟随翻页方向：delta 为当前偏移 - 目标偏移，正值表示向右翻（下一页在左）。
+        const sign = Math.sign(delta) || 1
+        content.style.transformOrigin = sign < 0 ? 'left center' : 'right center'
+        return content.animate(
+            [
+                { transform: `perspective(1200px) rotateY(0deg)`, filter: 'brightness(1)' },
+                { transform: `perspective(1200px) ${axis}(${sign * 32}deg)`, filter: 'brightness(0.96)' },
+                { transform: `perspective(1200px) ${axis}(0deg) ${translate}`, filter: 'brightness(1)' },
+            ],
+            { duration: 380, easing: 'cubic-bezier(.3,.6,.3,1)', fill: 'forwards' },
+        )
+    }
+    if (mode === 'ripple') {
+        const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
+        content.style.filter = 'url(#__yuezhou_ripple__)'
+        return content.animate(
+            [{ transform: 'none' }, { transform: translate }],
+            { duration: 420, easing: 'cubic-bezier(.25,.55,.3,1)', fill: 'forwards' },
+        )
+    }
+    const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
+    return content.animate(
+        [{ transform: 'none' }, { transform: translate }],
+        { duration: 220, easing: 'cubic-bezier(.2,.65,.35,1)', fill: 'forwards' },
+    )
 }
 
 // collapsed range doesn't return client rects sometimes (or always?)
@@ -957,8 +994,9 @@ export class Paginator extends HTMLElement {
                 const scroll = new AbortController()
                 this.#pageScroll = scroll
                 const content = this.#view?.element
+                const mode = this.getAttribute('animated') || 'slide'
                 const completed = !this.scrolled && typeof content?.animate === 'function'
-                    ? await slidePage(element, content, scrollProp, offset, scroll.signal)
+                    ? await slidePage(element, content, scrollProp, offset, scroll.signal, mode)
                     : await smoothScroll(element, scrollProp, offset, scroll.signal)
                 if (!completed || this.#pageScroll !== scroll) return
                 this.#pageScroll = null

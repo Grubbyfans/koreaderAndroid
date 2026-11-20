@@ -11,6 +11,12 @@
     </style>
 </head>
 <body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <filter id="__yuezhou_ripple__">
+            <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="2" seed="3" result="noise"/>
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="22" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+    </svg>
     <div id="reader">
         <foliate-view id="view"></foliate-view>
     </div>

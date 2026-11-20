@@ -1034,7 +1034,12 @@ private fun SettingsControls(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("动画", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.width(12.dp))
-            listOf("none" to "无", "slide" to "滑动", "simulate" to "仿真").forEach { (value, label) ->
+            listOf(
+                "none" to "无",
+                "slide" to "滑动",
+                "simulate" to "仿真",
+                "ripple" to "水波",
+            ).forEach { (value, label) ->
                 TextButton(onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) }) {
                     Text(
                         label,

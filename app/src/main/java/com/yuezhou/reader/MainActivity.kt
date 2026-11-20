@@ -1272,7 +1272,12 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             Text("翻页动画", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("none" to "无动画", "slide" to "平滑滑动", "simulate" to "仿真翻页").forEach { (value, label) ->
+                listOf(
+                    "none" to "无动画",
+                    "slide" to "平滑滑动",
+                    "simulate" to "仿真翻页",
+                    "ripple" to "水波纹",
+                ).forEach { (value, label) ->
                     val selected = prefs.pageAnimation == value
                     Text(
                         label,
