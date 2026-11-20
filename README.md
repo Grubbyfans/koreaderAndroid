@@ -4,6 +4,7 @@
 
 - 技术方案：[Android阅读App_技术方案.md](Android阅读App_技术方案.md)
 - 云端对接流程：[docs/cloud-integration.md](docs/cloud-integration.md)（WebDAV / 百度网盘）
+- 同步冲突模型：[docs/sync-model.md](docs/sync-model.md)（冲突检测 / 裁决 / 待发布恢复）
 - 兼容基线：BaiduPanSync 0.10.8/0.10.9 现行 `schemaVersion=2` 云端协议（见方案 §4）
 - 应用名：阅舟；包名：`com.yuezhou.reader`
 - 首版范围与实施阶段：见方案 §1.2、§16（P0→P6）
