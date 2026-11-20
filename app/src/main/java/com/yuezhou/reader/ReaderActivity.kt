@@ -330,6 +330,8 @@ private fun ReaderScreen(
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
                     onPrefsChange = { p -> scope.launch { ReaderSettings.save(context, p) } },
+                    onSync = { status = "云同步尚未接入，等待 P4/P5 后端就绪" },
+                    onSpeak = { status = "朗读尚未接入，等待 P2 TTS 后端就绪" },
                 )
             }
         }
@@ -355,6 +357,8 @@ private fun ReaderPanel(
     onImport: () -> Unit,
     onFractionSeek: (Float) -> Unit,
     onPrefsChange: (ReaderPreferences) -> Unit,
+    onSync: () -> Unit,
+    onSpeak: () -> Unit,
 ) {
     // 设置区折叠状态
     var settingsExpanded by remember { mutableStateOf(false) }
@@ -432,12 +436,14 @@ private fun ReaderPanel(
                         )
                     }
                 }
-                // 底部操作：目录 + 设置（设置默认收起）
+                // 底部操作：目录 + 朗读 + 同步 + 设置（设置默认收起）
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
                 ) {
                     PanelAction("目录", onClick = onOpenToc)
+                    PanelAction("朗读", onClick = onSpeak)
+                    PanelAction("同步", onClick = onSync)
                     PanelAction(
                         if (settingsExpanded) "收起设置" else "设置",
                         onClick = { settingsExpanded = !settingsExpanded },
