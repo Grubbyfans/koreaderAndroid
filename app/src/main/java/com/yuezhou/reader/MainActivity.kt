@@ -147,7 +147,14 @@ private fun BookshelfScreen() {
 
     val store = remember { LibraryStore(context) }
     var hiddenBooks by remember { mutableStateOf(store.hiddenBookIds()) }
-    val visibleBooks = books.filter { it.bookId !in hiddenBooks }
+    // 书架排序：新添加（无阅读记录）在最前，其余按最近阅读时间倒序
+    val visibleBooks = remember(books, hiddenBooks) {
+        books.filter { it.bookId !in hiddenBooks }
+            .sortedWith(
+                compareByDescending<LibraryStore.Entry> { it.lastReadAt != null } // 有阅读记录的排后
+                    .thenByDescending { it.lastReadAt ?: 0L }, // 无记录按 0，有记录按时间倒序
+            )
+    }
     val removedBooks = books.filter { it.bookId in hiddenBooks }
     val cloudSync = remember { CloudSync(context) }
 
@@ -1179,12 +1186,13 @@ private fun BookshelfContent(
     }
 }
 
-/** 最近阅读：按最近阅读时间倒序，仅展示有阅读记录的书。 */
+/** 最近阅读：按最近阅读时间倒序，仅展示有阅读记录的书，最多 5 本。 */
 @Composable
 private fun RecentReading(books: List<LibraryStore.Entry>) {
     val recent = remember(books) {
         books.filter { it.lastReadAt != null }
             .sortedByDescending { it.lastReadAt }
+            .take(5)
     }
     if (recent.isEmpty()) {
         EmptyState(

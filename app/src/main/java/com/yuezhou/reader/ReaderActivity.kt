@@ -176,6 +176,13 @@ private fun ReaderScreen(
     var title by remember { mutableStateOf(bookId ?: "阅读") }
     var loading by remember { mutableStateOf(true) }
     var status by remember { mutableStateOf<String?>(null) }
+    // 顶部提示自动消失：设置后 3 秒清除，避免残留
+    LaunchedEffect(status) {
+        if (status != null) {
+            delay(3000)
+            status = null
+        }
+    }
     var currentCfi by remember { mutableStateOf<String?>(null) }
     var currentFraction by remember { mutableStateOf<Float?>(null) }
     var currentIndex by remember { mutableStateOf<Int?>(null) }
