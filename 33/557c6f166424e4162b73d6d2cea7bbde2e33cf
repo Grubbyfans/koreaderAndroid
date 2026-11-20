@@ -1,0 +1,18 @@
+app/build.gradle.kts
+  h_7f20b2a03eb3b6 46
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  h_7f20b2a03eb3b6 37-40,45,48-50,68,303-306,599-601,603-641
+gradle/libs.versions.toml
+  h_7f20b2a03eb3b6 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "33557c6f166424e4162b73d6d2cea7bbde2e33cf",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
