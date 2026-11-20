@@ -85,7 +85,9 @@ import com.yuezhou.reader.reader.CloudCredentialStore
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
+import com.yuezhou.reader.reader.DownloadDirectory
 import com.yuezhou.reader.reader.LocalScanner
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -990,6 +992,27 @@ private fun SettingsPage() {
         initial = ReaderPreferences(),
     )
 
+    val downloadDirectory = remember(context) { DownloadDirectory(context) }
+    var downloadLabel by remember { mutableStateOf(downloadDirectory.label()) }
+    var downloadError by remember { mutableStateOf<String?>(null) }
+    val chooseDownloadDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        downloadDirectory.select(uri)
+                    }
+                    downloadLabel = downloadDirectory.label()
+                    downloadError = null
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    downloadError = "无法设置下载目录，请选择可读写的文件夹"
+                }
+            }
+        }
+    }
+
     // 松手才保存的预览值（避免拖动中频繁写 DataStore）
     var fontSizePreview by remember { mutableStateOf<Int?>(null) }
     var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
@@ -1002,6 +1025,26 @@ private fun SettingsPage() {
             .padding(16.dp),
     ) {
         Text("设置", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(16.dp))
+
+        Text("下载目录", style = MaterialTheme.typography.titleMedium)
+        Text(downloadLabel, style = MaterialTheme.typography.bodyMedium)
+        Text("云端下载会保存到所选目录，同时在应用内保留阅读副本。")
+        Row {
+            TextButton(onClick = { chooseDownloadDirectory.launch(downloadDirectory.uri) }) {
+                Text("选择目录")
+            }
+            if (downloadDirectory.uri != null) {
+                TextButton(onClick = {
+                    downloadDirectory.reset()
+                    downloadLabel = downloadDirectory.label()
+                    downloadError = null
+                }) {
+                    Text("恢复默认")
+                }
+            }
+        }
+        downloadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.height(16.dp))
 
         // 主题

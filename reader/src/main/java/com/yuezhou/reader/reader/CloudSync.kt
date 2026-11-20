@@ -10,9 +10,18 @@ import com.yuezhou.reader.core.cloud.ProgressPayload
 import com.yuezhou.reader.core.cloud.BackendKind
 import com.yuezhou.reader.core.cloud.baidu.BaiduBackend
 import com.yuezhou.reader.core.cloud.webdav.WebDavBackend
+import com.yuezhou.reader.core.protocol.BookNames
 import com.yuezhou.reader.core.protocol.LibraryCatalog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+
+private val downloadMutex = Mutex()
 
 /**
  * 云同步桥接层：把本地 [CloudCredentials] 转成具体的 [CloudBackend]，
@@ -456,38 +465,43 @@ class CloudSync(private val context: Context) {
      * 成功后提取封面/书名登记本地书库。返回最终落盘的文件名。
      */
     suspend fun downloadBook(fileName: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val backend = backend() ?: return@withContext Result.failure(
-                IllegalStateException("尚未配置云后端"),
-            )
-            backend.ensureAuthorized()
-
-            val target = java.io.File(EpubImporter.epubDir(context), fileName)
-            // 下载到临时文件，成功后原子改名，避免中断留下半成品
-            val tmp = java.io.File(target.parentFile, "$fileName.downloading")
+        downloadMutex.withLock {
             try {
-                backend.downloadTo("books/$fileName", tmp, maxBytes = 1024L * 1024 * 1024)
-                if (!tmp.isFile || tmp.length() <= 0) {
-                    return@withContext Result.failure(IllegalStateException("下载内容为空"))
+                require(BookNames.cloudId(fileName).first != null) {
+                    "云端 EPUB 文件名无效"
                 }
-                if (!tmp.renameTo(target)) {
-                    // 跨文件系统 rename 失败时回退拷贝
-                    tmp.copyTo(target, overwrite = true)
+                val directory = DownloadDirectory(context)
+                val destination = directory.uri
+                val backend = backend() ?: return@withLock Result.failure(
+                    IllegalStateException("尚未配置云后端"),
+                )
+                backend.ensureAuthorized()
+
+                val target = File(EpubImporter.epubDir(context), fileName)
+                val tmp = File.createTempFile("download-", ".part", target.parentFile)
+                try {
+                    backend.downloadTo("books/$fileName", tmp, maxBytes = 1024L * 1024 * 1024)
+                    check(tmp.length() > 0) { "下载内容为空" }
+                    if (destination != null) directory.publish(destination, tmp, fileName)
+                    Files.move(
+                        tmp.toPath(), target.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                } finally {
                     tmp.delete()
                 }
-            } finally {
-                tmp.delete()
-            }
 
-            // 提取封面 + 书名并登记本地书库（失败不阻断正文落盘）
-            val cover = CoverExtractor.extract(target)
-            val title = CoverExtractor.extractTitle(target)
-            val registered = LibraryStore(context).registerBook(fileName, cover, title)
-            // 下载后该书 local 状态变化，失效列表缓存
-            invalidateListCache()
-            registered.map { fileName }
-        } catch (e: Exception) {
-            Result.failure(e)
+                val cover = CoverExtractor.extract(target)
+                val title = CoverExtractor.extractTitle(target)
+                val registered = LibraryStore(context).registerBook(fileName, cover, title)
+                invalidateListCache()
+                registered.map { fileName }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
     }
 
