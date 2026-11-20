@@ -839,48 +839,53 @@ export class Paginator extends HTMLElement {
         const touch = e.changedTouches[0]
         this.#touchState = {
             x: touch?.screenX, y: touch?.screenY,
-            t: e.timeStamp,
-            vx: 0, xy: 0,
+            t: e.timeStamp, vx: 0, vy: 0, moved: false, pinched: false,
         }
     }
+
     #onTouchMove(e) {
         const state = this.#touchState
-        if (state.pinched) return
-        state.pinched = globalThis.visualViewport.scale > 1
-        if (this.scrolled || state.pinched) return
-        if (e.touches.length > 1) {
+        if (!state || state.pinched) return
+        state.pinched = globalThis.visualViewport.scale > 1 || e.touches.length > 1
+        if (state.pinched) {
             if (this.#touchScrolled) e.preventDefault()
             return
         }
-        e.preventDefault()
         const touch = e.changedTouches[0]
         const x = touch.screenX, y = touch.screenY
         const dx = state.x - x, dy = state.y - y
+        // Leave minor finger motion to the Android tap detector.
+        if (!state.moved && Math.hypot(dx, dy) < 8) return
+        state.moved = true
+        if (this.scrolled) return
+
+        e.preventDefault()
         const dt = e.timeStamp - state.t
         state.x = x
         state.y = y
         state.t = e.timeStamp
-        state.vx = dx / dt
-        state.vy = dy / dt
+        state.vx = dt > 0 ? dx / dt : 0
+        state.vy = dt > 0 ? dy / dt : 0
         this.#touchScrolled = true
         this.scrollBy(dx, dy)
     }
+
     #onTouchEnd() {
+        const state = this.#touchState
+        const dragged = this.#touchScrolled
+        this.#touchState = null
         this.#touchScrolled = false
+        if (!state || state.pinched || !state.moved) return
         if (this.scrolled) {
-            // 上下滚动模式跨章节：foliate 默认 scrolled 不跨章节，滚动到章节
-            // 顶部/底部就停住。这里在触摸结束时检测是否已到边界，若到边界则
-            // 切到相邻章节（顶部→上一章末尾，底部→下一章开头）。
+            // Scrolling to either boundary can continue in the adjacent chapter.
             this.#checkScrolledBoundary()
             return
         }
+        if (!dragged) return
 
-        // XXX: Firefox seems to report scale as 1... sometimes...?
-        // at this point I'm basically throwing `requestAnimationFrame` at
-        // anything that doesn't work
         requestAnimationFrame(() => {
             if (globalThis.visualViewport.scale === 1)
-                this.snap(this.#touchState.vx, this.#touchState.vy)
+                this.snap(state.vx, state.vy)
         })
     }
     // allows one to process rects as if they were LTR and horizontal

@@ -3,6 +3,8 @@ package com.yuezhou.reader.reader
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -84,14 +86,6 @@ class ReaderWebView(context: Context) : WebView(context) {
     /** 是否为上下滚动模式（滚动模式下左右点击不翻页）。 */
     var verticalMode = false
 
-    // 单击判定：记录按下时的位置与时间，抬起时若位移/时长在阈值内则视为单击
-    private var downX = 0f
-    private var downY = 0f
-    private var downTime = 0L
-
-    private val tapSlop = 12 // px，超过视为滑动
-    private val tapTimeout = 300L // ms，超过视为长按
-
     init {
         // debug 构建开启 WebView 远程调试，便于用 Chrome chrome://inspect 排查白屏
         val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -102,37 +96,26 @@ class ReaderWebView(context: Context) : WebView(context) {
         // Compose 内容之上，把「选择 EPUB」按钮等控件盖住，导致进入阅读器后界面白屏。
         // 用软件渲染层强制 WebView 与 Compose 共用同一渲染层，避免遮挡。
         setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
-        // 单击检测：WebView 会消费触摸事件，Compose 的 clickable 收不到。
-        // 这里手动判定「单击」，并按屏幕横向三分区域分发：
-        //   左 1/3 → 上一页，右 1/3 → 下一页（左右翻页模式），中间 1/3 → 呼出/收起面板。
-        // 上下滚动模式下左右区域不再翻页，仅中间点击呼出面板；滑动始终交给 WebView 处理。
-        setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    downX = event.x
-                    downY = event.y
-                    downTime = event.eventTime
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    val dx = kotlin.math.abs(event.x - downX)
-                    val dy = kotlin.math.abs(event.y - downY)
-                    val dt = event.eventTime - downTime
-                    if (dx <= tapSlop && dy <= tapSlop && dt <= tapTimeout) {
-                        val w = width.toFloat()
-                        if (w > 0f) {
-                            val rel = event.x / w
-                            if (!verticalMode && rel < 0.33f) {
-                                onPageTap?.invoke(-1)
-                            } else if (!verticalMode && rel > 0.67f) {
-                                onPageTap?.invoke(+1)
-                            } else {
-                                onTap?.invoke()
-                            }
-                        }
+        // Use system tap thresholds and leave drag, pinch and selection events with WebView.
+        val taps = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(event: MotionEvent): Boolean = true
+
+            override fun onSingleTapUp(event: MotionEvent): Boolean {
+                if (width <= 0) return false
+                val position = event.x / width
+                post {
+                    when {
+                        !verticalMode && position < 1f / 3f -> onPageTap?.invoke(-1)
+                        !verticalMode && position > 2f / 3f -> onPageTap?.invoke(1)
+                        else -> onTap?.invoke()
                     }
                 }
+                return true
             }
-            false // 返回 false，让 WebView 继续处理滑动翻页/滚动
+        })
+        setOnTouchListener { _, event ->
+            taps.onTouchEvent(event)
+            false
         }
         settings.apply {
             javaScriptEnabled = true
