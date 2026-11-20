@@ -23,6 +23,8 @@ data class ReaderPreferences(
     val theme: String = "light",
     /** 翻页模式：false=左右翻页，true=上下滚动。 */
     val vertical: Boolean = false,
+    /** 翻页动画方式：none=无动画（瞬时），slide=平滑滑动，simulate=仿真翻页。 */
+    val pageAnimation: String = "slide",
     /** 朗读语速（TextToSpeech 范围约 0.5..2.0，1.0 为正常）。 */
     val speechRate: Float = 1.0f,
     /** 朗读音色名（TextToSpeech.setVoice 入参）；空串表示用引擎默认音色。 */
@@ -42,6 +44,7 @@ object ReaderSettings {
     private val KEY_PAGE_MARGIN = intPreferencesKey("page_margin")
     private val KEY_THEME = stringPreferencesKey("theme")
     private val KEY_VERTICAL = booleanPreferencesKey("vertical")
+    private val KEY_PAGE_ANIMATION = stringPreferencesKey("page_animation")
     private val KEY_SPEECH_RATE = floatPreferencesKey("speech_rate")
     private val KEY_SPEECH_VOICE = stringPreferencesKey("speech_voice")
 
@@ -56,6 +59,7 @@ object ReaderSettings {
                 pageMargin = prefs[KEY_PAGE_MARGIN] ?: 12,
                 theme = prefs[KEY_THEME] ?: "light",
                 vertical = prefs[KEY_VERTICAL] ?: false,
+                pageAnimation = prefs[KEY_PAGE_ANIMATION] ?: "slide",
                 speechRate = prefs[KEY_SPEECH_RATE] ?: 1.0f,
                 speechVoice = prefs[KEY_SPEECH_VOICE] ?: "",
             )
@@ -77,6 +81,7 @@ object ReaderSettings {
             it[KEY_PAGE_MARGIN] = prefs.pageMargin
             it[KEY_THEME] = prefs.theme
             it[KEY_VERTICAL] = prefs.vertical
+            it[KEY_PAGE_ANIMATION] = prefs.pageAnimation
             it[KEY_SPEECH_RATE] = prefs.speechRate
             it[KEY_SPEECH_VOICE] = prefs.speechVoice
         }

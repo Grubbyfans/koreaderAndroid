@@ -1268,6 +1268,26 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             }
             Spacer(Modifier.height(4.dp))
 
+            // 翻页动画方式
+            Text("翻页动画", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("none" to "无动画", "slide" to "平滑滑动", "simulate" to "仿真翻页").forEach { (value, label) ->
+                    val selected = prefs.pageAnimation == value
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
+                            .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(pageAnimation = value)) } }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+
             ReaderFontPreference(prefs.fontId, prefs.fontWeight)
 
             // 字号

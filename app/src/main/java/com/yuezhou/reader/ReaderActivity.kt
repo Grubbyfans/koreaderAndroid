@@ -514,6 +514,7 @@ private fun ReaderScreen(
             vertical = prefs.vertical,
             fontId = prefs.fontId,
             fontWeight = prefs.fontWeight,
+            pageAnimation = prefs.pageAnimation,
         )
         pendingOpen?.let { (fileName, restoreCfi, source) ->
             pendingOpen = null
@@ -988,6 +989,21 @@ private fun SettingsControls(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = if (prefs.vertical) FontWeight.Bold else FontWeight.Normal,
                 )
+            }
+        }
+        // 翻页动画方式
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("动画", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(12.dp))
+            listOf("none" to "无", "slide" to "滑动", "simulate" to "仿真").forEach { (value, label) ->
+                TextButton(onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) }) {
+                    Text(
+                        label,
+                        color = if (prefs.pageAnimation == value) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (prefs.pageAnimation == value) FontWeight.Bold else FontWeight.Normal,
+                    )
+                }
             }
         }
         // 朗读语速

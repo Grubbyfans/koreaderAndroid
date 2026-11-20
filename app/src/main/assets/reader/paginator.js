@@ -16,7 +16,18 @@ const debounce = (f, wait, immediate) => {
 
 const lerp = (min, max, x) => x * (max - min) + min
 const easeOutQuad = x => 1 - (1 - x) * (1 - x)
+const easeOutCubic = x => 1 - Math.pow(1 - x, 3)
 const animate = (a, b, duration, ease, render) => new Promise(resolve => {
+    if (document.hidden) {
+        render(lerp(a, b, 1))
+        return resolve()
+    }
+    // 优先走浏览器原生平滑滚动（GPU 合成，不逐帧改 scrollLeft 触发重排），
+    // 兜底降级为 requestAnimationFrame 逐帧插值。
+    if (typeof render._nativeScroll === 'function') {
+        render._nativeScroll(a, b, duration, ease, resolve)
+        return
+    }
     let start
     const step = now => {
         if (document.hidden) {
@@ -28,10 +39,6 @@ const animate = (a, b, duration, ease, render) => new Promise(resolve => {
         render(lerp(a, b, ease(fraction)))
         if (fraction < 1) requestAnimationFrame(step)
         else resolve()
-    }
-    if (document.hidden) {
-        render(lerp(a, b, 1))
-        return resolve()
     }
     requestAnimationFrame(step)
 })
@@ -507,6 +514,8 @@ export class Paginator extends HTMLElement {
             grid-column: 2 / 5;
             grid-row: 2;
             overflow: hidden;
+            will-change: scroll-position;
+            scroll-behavior: auto;
         }
         :host([flow="scrolled"]) #container {
             grid-column: 1 / -1;
@@ -924,13 +933,39 @@ export class Paginator extends HTMLElement {
         }
         // FIXME: vertical-rl only, not -lr
         if (this.scrolled && this.#vertical) offset = -offset
-        if ((reason === 'snap' || smooth) && this.hasAttribute('animated')) return animate(
-            element[scrollProp], offset, 300, easeOutQuad,
-            x => element[scrollProp] = x,
-        ).then(() => {
-            this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size]
-            this.#afterScroll(reason)
-        })
+        if ((reason === 'snap' || smooth) && this.hasAttribute('animated')) {
+            const finish = () => {
+                this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size]
+                this.#afterScroll(reason)
+            }
+            const from = element[scrollProp]
+            const to = offset
+            // 用浏览器原生平滑滚动（GPU 合成），替代逐帧写 scrollLeft/scrollTop 触发重排，
+            // 显著降低翻页卡顿；不支持时降级为 rAF 插值。
+            if (typeof element.scrollTo === 'function'
+                && typeof element.scrollBy === 'function'
+                && Math.abs(to - from) > 1) {
+                const opts = { behavior: 'smooth' }
+                if (scrollProp === 'scrollLeft') opts.left = to
+                else opts.top = to
+                try {
+                    element.scrollTo(opts)
+                } catch (e) {
+                    element[scrollProp] = to
+                }
+                // 原生平滑滚动结束后回调；超时兜底 400ms。
+                const done = debounce(finish, 120)
+                const onEnd = () => { done(); cleanup() }
+                const cleanup = () => {
+                    element.removeEventListener('scroll', onEnd)
+                    clearTimeout(timer)
+                }
+                element.addEventListener('scroll', onEnd)
+                const timer = setTimeout(() => { done(); cleanup() }, 400)
+                return
+            }
+            return animate(from, to, 200, easeOutCubic, x => element[scrollProp] = x).then(finish)
+        }
         else {
             element[scrollProp] = offset
             this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size]
