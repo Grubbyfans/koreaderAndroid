@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -22,9 +23,9 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
@@ -962,58 +963,82 @@ private fun SettingsControls(
                 modifier = Modifier.weight(1f),
             )
         }
-        // 朗读音色
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("音色", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.width(12.dp))
-            Text(
-                "默认",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (prefs.speechVoice.isBlank()) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = if (prefs.speechVoice.isBlank()) FontWeight.Bold else FontWeight.Normal,
-                modifier = Modifier.clickable { onPrefsChange(prefs.copy(speechVoice = "")) },
-            )
-        }
-        // 音色列表（横向滚动，便于选择男声/女声等）
-        if (voices.isNotEmpty()) {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                items(voices) { voice ->
-                    val selected = prefs.speechVoice == voice.name
-                    val genderTag = when (voice.gender) {
-                        TtsVoice.Gender.MALE -> "男声"
-                        TtsVoice.Gender.FEMALE -> "女声"
-                        else -> null
-                    }
-                    val label = buildString {
-                        append(voice.displayName)
-                        if (genderTag != null) append("·$genderTag")
-                        if (!voice.isOfflineCapable) append("(需联网)")
-                    }
-                    Surface(
-                        shape = MaterialTheme.shapes.small,
-                        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier
-                            .padding(end = 8.dp)
-                            .clickable { onPrefsChange(prefs.copy(speechVoice = voice.name)) },
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        )
-                    }
-                }
-            }
+        SpeechVoicePreference(voices, prefs.speechVoice) { name ->
+            onPrefsChange(prefs.copy(speechVoice = name))
         }
     }
 }
+
+@Composable
+private fun SpeechVoicePreference(voices: List<TtsVoice>, selectedName: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val labels = remember(voices) {
+        val chinese = java.util.Locale.SIMPLIFIED_CHINESE
+        voices.groupBy { it.locale.toLanguageTag() }.values.flatMap { byLocale ->
+            byLocale.sortedBy { it.name }.mapIndexed { index, voice ->
+                val localeName = voice.locale.getDisplayName(chinese).ifBlank { "语言未知" }
+                voice to "$localeName · 音色 ${index + 1}"
+            }
+        }.sortedWith(compareBy(
+            { it.first.locale.language != "zh" },
+            { !it.first.isOfflineCapable },
+            { it.first.locale.toLanguageTag() },
+            { it.first.name },
+        ))
+    }
+    val selectedLabel = when {
+        selectedName.isBlank() -> "系统默认"
+        else -> labels.firstOrNull { it.first.name == selectedName }?.second ?: "已选音色"
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("音色", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = { open = true }) { Text(selectedLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    }
+
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text("朗读音色") },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                    item {
+                        SpeechVoiceOption("系统默认", null, selectedName.isBlank()) {
+                            open = false
+                            onSelect("")
+                        }
+                    }
+                    items(labels, key = { it.first.name }) { (voice, label) ->
+                        val availability = when {
+                            voice.isOfflineCapable -> "离线"
+                            voice.isNetworkConnectionRequired -> "需要联网"
+                            else -> "语音数据未安装"
+                        }
+                        SpeechVoiceOption(label, "$availability · ${voice.displayName}", voice.name == selectedName) {
+                            open = false
+                            onSelect(voice.name)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("关闭") } },
+        )
+    }
+}
+
+@Composable
+private fun SpeechVoiceOption(label: String, details: String?, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            details?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    }
+}
+
 
 @Composable
 private fun TocDrawer(
