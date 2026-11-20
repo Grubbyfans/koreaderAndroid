@@ -38,6 +38,32 @@ const smoothScroll = (element, property, target, signal) => new Promise(resolve 
     }
 })
 
+// Animate the chapter layer, then commit the real scroll offset in the same frame.
+const slidePage = async (element, content, property, target, signal) => {
+    const delta = element[property] - target
+    const transform = property === 'scrollLeft'
+        ? `translateX(${delta}px)` : `translateY(${delta}px)`
+    const animation = content.animate(
+        [{ transform: 'none' }, { transform }],
+        { duration: 220, easing: 'cubic-bezier(.2,.65,.35,1)', fill: 'forwards' },
+    )
+    const cancel = () => animation.cancel()
+    signal.addEventListener('abort', cancel, { once: true })
+    try {
+        await animation.finished
+        if (signal.aborted) return false
+        element[property] = target
+        return true
+    } catch {
+        if (signal.aborted) return false
+        element[property] = target
+        return true
+    } finally {
+        signal.removeEventListener('abort', cancel)
+        animation.cancel()
+    }
+}
+
 // collapsed range doesn't return client rects sometimes (or always?)
 // try make get a non-collapsed range or element
 const uncollapse = range => {
@@ -930,7 +956,11 @@ export class Paginator extends HTMLElement {
             if (!document.hidden && (reason === 'snap' || smooth) && this.hasAttribute('animated')) {
                 const scroll = new AbortController()
                 this.#pageScroll = scroll
-                if (!await smoothScroll(element, scrollProp, offset, scroll.signal)) return
+                const content = this.#view?.element
+                const completed = !this.scrolled && typeof content?.animate === 'function'
+                    ? await slidePage(element, content, scrollProp, offset, scroll.signal)
+                    : await smoothScroll(element, scrollProp, offset, scroll.signal)
+                if (!completed || this.#pageScroll !== scroll) return
                 this.#pageScroll = null
             } else {
                 element[scrollProp] = offset
