@@ -39,6 +39,7 @@ import kotlinx.coroutines.launch
 /** Tied to the bookshelf rather than the settings tab so uploads continue across tab switches. */
 internal class BookUploadQueue(private val sync: CloudSync, private val scope: CoroutineScope) {
     class Task(val title: String) {
+        val stopRequested = MutableStateFlow(false)
         val progress = MutableStateFlow(BookUploadProgress(UploadStatus.Queued))
     }
 
@@ -54,7 +55,7 @@ internal class BookUploadQueue(private val sync: CloudSync, private val scope: C
         val byId = books.associate { it.bookId to Task(it.title) }
         tasks = byId.values.toList()
         runTask {
-            sync.pushLocal(selection.backendId, books) { id, progress ->
+            sync.pushLocal(selection.backendId, books, isStopped = { byId.getValue(it).stopRequested.value }) { id, progress ->
                 byId.getValue(id).progress.value = progress
             }.message
         }
@@ -180,7 +181,7 @@ private fun UploadSelectionDialog(
                 if (selection.books.isEmpty()) {
                     Text("本地书架没有可上传的书籍")
                 } else {
-                    Text("按云端书库中的书名和大小分组。同名上传会覆盖云端正文。")
+                    Text("已同步表示书名与文件大小相同，内容仍可能不同。同名上传会覆盖云端正文。")
                     LazyColumn(modifier = Modifier.heightIn(max = 340.dp)) {
                         for ((label, books) in groups) {
                             item { Text("$label（${books.size}）", style = MaterialTheme.typography.titleSmall) }
@@ -217,6 +218,7 @@ private fun UploadSelectionDialog(
 @Composable
 private fun UploadTaskRow(task: BookUploadQueue.Task) {
     val progress by task.progress.collectAsState()
+    val stopping by task.stopRequested.collectAsState()
     val label = when (progress.status) {
         UploadStatus.Queued -> "排队中"
         UploadStatus.Preparing -> "预上传"
@@ -226,6 +228,7 @@ private fun UploadTaskRow(task: BookUploadQueue.Task) {
         UploadStatus.Failed -> "上传失败"
         UploadStatus.Uncertain -> "结果未知，请检查云端"
         UploadStatus.PendingPublication -> "正文已上传，待补全发布"
+        UploadStatus.Cancelled -> "已取消"
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(task.title, style = MaterialTheme.typography.bodyMedium)
@@ -233,6 +236,16 @@ private fun UploadTaskRow(task: BookUploadQueue.Task) {
         Text(if (percent == null) label else "$label $percent%", style = MaterialTheme.typography.bodySmall)
         if (percent != null) {
             LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
+        }
+        when (progress.status) {
+            UploadStatus.Queued, UploadStatus.Preparing, UploadStatus.Uploading -> {
+                TextButton(enabled = !stopping, onClick = { task.stopRequested.value = true }) {
+                    Text(if (stopping) "正在停止…" else if (progress.status == UploadStatus.Queued) "移出队列" else "停止上传")
+                }
+            }
+            UploadStatus.Failed -> Text("可从「立即同步」重新选择此书。", style = MaterialTheme.typography.bodySmall)
+            UploadStatus.PendingPublication -> Text("可从「补全待发布」继续。", style = MaterialTheme.typography.bodySmall)
+            else -> Unit
         }
         progress.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }

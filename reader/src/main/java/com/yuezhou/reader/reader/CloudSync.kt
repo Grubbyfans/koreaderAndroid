@@ -147,7 +147,7 @@ class CloudSync(private val context: Context) {
         val syncedIds: Set<String>,
     )
 
-    enum class UploadStatus { Queued, Preparing, Uploading, Publishing, Done, Failed, Uncertain, PendingPublication }
+    enum class UploadStatus { Queued, Preparing, Uploading, Publishing, Done, Failed, Uncertain, PendingPublication, Cancelled }
 
     data class BookUploadProgress(
         val status: UploadStatus,
@@ -164,10 +164,13 @@ class CloudSync(private val context: Context) {
         UploadSelection(backend.backendId, backendLabelOf(backend), books, syncedIds)
     }
 
+    private class UploadStopped : java.io.IOException("已请求停止上传")
+
     /** 仅上传所选正文与封面，逐本发布书库条目。 */
     suspend fun pushLocal(
         backendId: String,
         books: List<LibraryStore.Entry>,
+        isStopped: (String) -> Boolean,
         onProgress: (String, BookUploadProgress) -> Unit,
     ): SyncOutcome = withContext(Dispatchers.IO) {
         val collector = DiagnosticCollector()
@@ -177,6 +180,7 @@ class CloudSync(private val context: Context) {
         var failed = 0
         var uncertain = 0
         var pending = 0
+        var cancelled = 0
         try {
             val backend = backend(collector)
             check(backend?.backendId == backendId) { "云后端已变更，请重新选择书籍" }
@@ -184,10 +188,16 @@ class CloudSync(private val context: Context) {
             selectedBackend.ensureAuthorized()
             val service = CloudService(selectedBackend)
             for (entry in books) {
+                if (isStopped(entry.bookId)) {
+                    cancelled++
+                    onProgress(entry.bookId, BookUploadProgress(UploadStatus.Cancelled))
+                    continue
+                }
                 val bookStart = System.currentTimeMillis()
                 val epub = File(EpubImporter.epubDir(context), entry.fileName)
                 val size = epub.length()
                 var bodyUploaded = false
+                var transferStarted = false
                 onProgress(entry.bookId, BookUploadProgress(UploadStatus.Preparing))
                 try {
                     check(epub.isFile && size > 0L) { "本地 EPUB 不存在或为空" }
@@ -197,12 +207,16 @@ class CloudSync(private val context: Context) {
                         onProgress = { phase, percent ->
                             val status = when (phase) {
                                 CloudService.UploadPhase.Preparing -> UploadStatus.Preparing
-                                CloudService.UploadPhase.Transferring -> UploadStatus.Uploading
+                                CloudService.UploadPhase.Transferring -> {
+                                    transferStarted = true
+                                    UploadStatus.Uploading
+                                }
                                 CloudService.UploadPhase.Publishing -> {
                                     bodyUploaded = true
                                     UploadStatus.Publishing
                                 }
                             }
+                            if (isStopped(entry.bookId)) throw UploadStopped()
                             onProgress(entry.bookId, BookUploadProgress(status, percent))
                         },
                         makeCover = entry.coverPng?.let { png ->
@@ -229,6 +243,14 @@ class CloudSync(private val context: Context) {
                             pending++
                             UploadStatus.PendingPublication
                         }
+                        isStopped(entry.bookId) && transferStarted -> {
+                            uncertain++
+                            UploadStatus.Uncertain
+                        }
+                        e is UploadStopped -> {
+                            cancelled++
+                            UploadStatus.Cancelled
+                        }
                         e is CloudException && (e.code == ErrorCode.UNCERTAIN || e.outcome == Outcome.Uncertain) -> {
                             uncertain++
                             UploadStatus.Uncertain
@@ -248,6 +270,7 @@ class CloudSync(private val context: Context) {
             if (failed > 0) counts.add("失败 $failed 本")
             if (uncertain > 0) counts.add("结果未知 $uncertain 本")
             if (pending > 0) counts.add("待发布 $pending 本")
+            if (cancelled > 0) counts.add("已取消 $cancelled 本")
             if (pending + uncertain > 0) collector.markOutcome(Outcome.Uncertain)
             else if (failed > 0) collector.markOutcome(Outcome.Failed)
             SyncOutcome(done == books.size, counts.joinToString("，"))
