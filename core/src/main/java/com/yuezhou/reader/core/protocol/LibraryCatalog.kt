@@ -133,4 +133,41 @@ object LibraryCatalog {
         ProtocolChecks.requireBytes(text, MAX_BYTES.toLong())
         return text
     }
+
+    /**
+     * 构造一条 schemaVersion=2 的书籍条目（含正确的 [LibraryBook.raw]）。
+     * 供上层（如 CloudService 上传书籍）在写入列表前构造条目，避免手动拼 raw。
+     *
+     * @param bookId 书名（书名 = 文件名去扩展名）。
+     * @param fileName 实际 EPUB 文件名（含扩展名）。
+     * @param size 字节数。
+     * @param uploadedAt 显式偏移时间戳。
+     * @param coverPath 可选封面路径（"covers/<bookId>.json"）。
+     * @param coverVersion 封面缓存版本（有 coverPath 时必填）。
+     */
+    fun buildBookEntry(
+        bookId: String,
+        fileName: String,
+        size: Long,
+        uploadedAt: String,
+        coverPath: String? = null,
+        coverVersion: String? = null,
+    ): LibraryBook {
+        val raw = buildJsonObject {
+            put("schemaVersion", 2)
+            put("status", "ready")
+            put("bookId", bookId)
+            put("title", bookId)
+            put("fileName", fileName)
+            put("path", "books/$fileName")
+            put("size", size)
+            put("uploadedAt", uploadedAt)
+            if (coverPath != null && coverVersion != null) {
+                put("coverPath", coverPath)
+                put("coverVersion", coverVersion)
+            }
+        }
+        // 经 decodeBook 严格校验后再返回，保证 raw 字段合法。
+        return decodeBook(raw)
+    }
 }
