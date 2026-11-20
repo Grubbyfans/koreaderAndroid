@@ -433,13 +433,15 @@ class SpeechService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        sessionId++
+        scope.cancel()
+        SpeechProgressTracker.clear()
         releaseAudioFocus()
         tts?.shutdown()
         tts = null
         SpeechVoices.clear()
         mediaSession?.release()
         mediaSession = null
-        scope.cancel()
     }
 
     companion object {

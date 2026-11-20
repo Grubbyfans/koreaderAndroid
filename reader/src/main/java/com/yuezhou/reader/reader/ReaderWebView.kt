@@ -12,7 +12,10 @@ import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewAssetLoader.AssetsPathHandler
 import androidx.webkit.WebViewAssetLoader.InternalStoragePathHandler
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.util.UUID
 
 /**
  * 阅读器 WebView 封装：
@@ -214,37 +217,28 @@ class ReaderWebView(context: Context) : WebView(context) {
         evaluateJavascript("window.__reader.goToToc(${jsonQuote(href)}).then(r => {});", null)
     }
 
-    /**
-     * CFI → XPointer：把本地阅读位置（CFI）转成 KOReader/CREngine 的 XPointer。
-     * 结果异步回传（回调在主线程），转换失败回调 null。
-     */
-    fun cfiToXPointer(cfi: String, onResult: (String?) -> Unit) = whenReaderReady {
-        evaluateJavascript("window.__reader.cfiToXPointer(${jsonQuote(cfi)})") { result ->
-            // 结果形如 "xpointer-string" 或 "null"（JSON 字符串）
-            onResult(parseJsString(result))
-        }
-    }
+    private val pendingConversions = mutableMapOf<String, CompletableDeferred<String?>>()
 
-    /**
-     * XPointer → CFI：把云端（KOReader）的 XPointer 进度转成本地可定位的 CFI。
-     * 结果异步回传，转换失败回调 null。
-     */
-    fun xPointerToCfi(xpointer: String, onResult: (String?) -> Unit) = whenReaderReady {
-        evaluateJavascript("window.__reader.xPointerToCfi(${jsonQuote(xpointer)})") { result ->
-            onResult(parseJsString(result))
-        }
-    }
+    suspend fun cfiToXPointer(cfi: String): String? = convertPosition("cfiToXPointer", cfi)
 
-    /** 解析 evaluateJavascript 返回的 JSON 字符串值（含引号包裹与 null）。 */
-    private fun parseJsString(raw: String?): String? {
-        if (raw == null) return null
-        val s = raw.trim()
-        if (s == "null" || s == "undefined" || s.isEmpty()) return null
+    suspend fun xPointerToCfi(xpointer: String): String? = convertPosition("xPointerToCfi", xpointer)
+
+    private suspend fun convertPosition(method: String, position: String): String? {
+        val requestId = UUID.randomUUID().toString()
+        val result = CompletableDeferred<String?>()
+        pendingConversions[requestId] = result
         return try {
-            org.json.JSONTokener(s).nextValue().let { if (it === org.json.JSONObject.NULL) null else it.toString() }
-        } catch (e: Exception) {
-            // 兜底：去掉首尾引号
-            s.removePrefix("\"").removeSuffix("\"")
+            whenReaderReady {
+                if (requestId in pendingConversions) {
+                    evaluateJavascript(
+                        "window.__reader.$method(${jsonQuote(requestId)}, ${jsonQuote(position)})",
+                        null,
+                    )
+                }
+            }
+            withTimeoutOrNull(5_000) { result.await() }
+        } finally {
+            pendingConversions.remove(requestId)
         }
     }
 
@@ -304,6 +298,12 @@ class ReaderWebView(context: Context) : WebView(context) {
     }
 
     private fun dispatchEvent(type: String, data: String) {
+        if (type == "positionConverted") {
+            val obj = parseJson(data)
+            val requestId = obj["requestId"] as? String ?: return
+            pendingConversions[requestId]?.complete(obj["value"] as? String)
+            return
+        }
         val event: ReaderEvent = when (type) {
             "bookOpened" -> {
                 val obj = parseJson(data)

@@ -73,6 +73,8 @@ object SpeechPlanStore {
 
     /** 停止朗读并退出前台。 */
     fun stop(context: Context) {
-        context.startForegroundService(Intent(context, SpeechService::class.java).setAction(SpeechCommands.ACTION_STOP_FOREGROUND))
+        clear()
+        SpeechProgressTracker.clear()
+        context.stopService(Intent(context, SpeechService::class.java))
     }
 }

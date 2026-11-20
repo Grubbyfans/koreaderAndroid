@@ -209,14 +209,14 @@ function buildSteps(body, element) {
  * 依赖 view.resolveCFI 反解 CFI 得到 { index, anchor }，anchor(doc) 得到 Range，
  * 再基于真实 DOM 计算 XPointer 元素路径 + 折叠后偏移。
  */
-export function cfiToXPointer(view, cfi) {
+export async function cfiToXPointer(view, cfi) {
     if (!cfi) return null
     try {
         const resolved = view.resolveCFI(cfi)
         if (!resolved) return null
         const { index, anchor } = resolved
         // 拿到该章节的 document（优先用已渲染内容，否则独立加载）
-        const doc = getChapterDoc(view, index)
+        const doc = await getChapterDoc(view, index)
         if (!doc || typeof anchor !== 'function') return null
         const range = anchor(doc)
         if (!range) return null
@@ -231,7 +231,7 @@ export function cfiToXPointer(view, cfi) {
  * 解析 XPointer 得到 spine 序号 + 元素路径 + 文本偏移，在对应章节 document 上
  * 定位 DOM 节点与偏移，再用 CFI.fromRange 生成 CFI。
  */
-export function xPointerToCfi(view, xpointer) {
+export async function xPointerToCfi(view, xpointer) {
     if (!xpointer) return null
     try {
         const path = parseXPointer(xpointer)
@@ -239,12 +239,11 @@ export function xPointerToCfi(view, xpointer) {
         const { spineIndex, steps, text } = path
 
         // 定位章节根：book.sections[spineIndex] 的 body
-        const section = view.book?.sections?.[spineIndex]
-        if (!section) return null
-        const doc = section.createDocument()
-        if (!doc || !doc.body) return null
+        const doc = await getChapterDoc(view, spineIndex)
+        const body = doc?.body ?? doc?.querySelector('body')
+        if (!body) return null
 
-        const element = resolveElement(doc.body, steps)
+        const element = resolveElement(body, steps)
         if (!element) return null
 
         let node, offset
@@ -288,7 +287,7 @@ export function xPointerToCfi(view, xpointer) {
 }
 
 /** 获取某章节的 document：优先用已渲染内容，否则独立 createDocument。 */
-function getChapterDoc(view, index) {
+async function getChapterDoc(view, index) {
     try {
         const contents = view.renderer?.getContents?.()
         if (Array.isArray(contents)) {
@@ -297,7 +296,7 @@ function getChapterDoc(view, index) {
         }
         const section = view.book?.sections?.[index]
         if (section && typeof section.createDocument === 'function') {
-            return section.createDocument()
+            return await section.createDocument()
         }
         return null
     } catch (e) {
@@ -307,13 +306,15 @@ function getChapterDoc(view, index) {
 
 /** 从 DOM Range 计算 XPointer（元素路径 + 折叠偏移）。 */
 function rangeToXPointer(index, doc, range) {
+    const body = doc.body ?? doc.querySelector('body')
+    if (!body) return null
     const startContainer = range.startContainer
     const startOffset = range.startOffset || 0
 
     if (isTextNode(startContainer)) {
         const parent = startContainer.parentNode
         if (!parent) return null
-        const steps = buildSteps(doc.body, parent)
+        const steps = buildSteps(body, parent)
         const siblings = crengineTextChildren(parent)
         const pos = siblings.indexOf(startContainer)
         if (pos < 0) {
@@ -326,7 +327,7 @@ function rangeToXPointer(index, doc, range) {
             : { textNodeIndex: pos + 1, offset: collapsed }
         return buildXPointer(index, steps, text)
     } else if (isElement(startContainer)) {
-        const steps = buildSteps(doc.body, startContainer)
+        const steps = buildSteps(body, startContainer)
         return buildXPointer(index, steps, null)
     }
     return null

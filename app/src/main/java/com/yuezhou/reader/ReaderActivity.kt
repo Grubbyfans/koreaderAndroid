@@ -228,13 +228,7 @@ private fun ReaderScreen(
         SpeechPlanStore.stop(context)
         scope.launch {
             try {
-                val cfi = kotlinx.coroutines.withTimeoutOrNull(5_000) {
-                    kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                        wv.xPointerToCfi(remote) { value ->
-                            continuation.resumeWith(Result.success(value))
-                        }
-                    }
-                }
+                val cfi = wv.xPointerToCfi(remote)
                 val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to info.remotePercent)
                 if (applied) undoPosition = previous
                 status = if (applied) "已应用云端进度，可在进度同步中撤销" else "无法确认云端落点，已保留本机进度"
@@ -278,21 +272,18 @@ private fun ReaderScreen(
             status = "阅读器尚未就绪，无法上传进度"
             return
         }
+        syncBusy = true
         scope.launch {
-            syncBusy = true
-            wv.cfiToXPointer(cfi) { xpointer ->
-                if (xpointer == null) {
-                    syncBusy = false
-                    syncDialogOpen = false
-                    status = "当前阅读位置无法转换，已取消上传"
-                    return@cfiToXPointer
+            try {
+                val xpointer = wv.cfiToXPointer(cfi)
+                status = if (xpointer == null) {
+                    "当前阅读位置无法转换，已取消上传"
+                } else {
+                    CloudSync(context).uploadLocalProgress(id, xpointer, pos.second) ?: "已上传本机进度"
                 }
-                scope.launch {
-                    val err = CloudSync(context).uploadLocalProgress(id, xpointer, pos.second)
-                    syncBusy = false
-                    syncDialogOpen = false
-                    status = err ?: "已上传本机进度"
-                }
+                syncDialogOpen = false
+            } finally {
+                syncBusy = false
             }
         }
     }
