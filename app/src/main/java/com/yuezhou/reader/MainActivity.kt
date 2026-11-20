@@ -88,6 +88,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -160,12 +161,11 @@ private fun BookshelfScreen() {
     var remoteFromCache by remember { mutableStateOf(false) }
     // 待下载/详情选中的书
     var detailBook by remember { mutableStateOf<CloudSync.RemoteBook?>(null) }
-    var downloading by remember { mutableStateOf(false) }
-    // 下载进度：received/total 字节；total<=0 表示未知
-    var downloadReceived by remember { mutableStateOf(0L) }
-    var downloadTotal by remember { mutableStateOf(0L) }
-    // 下载协程 Job：用于取消下载
+    // 当前下载任务（同一时间最多一个）；null 表示无任务
+    var downloadTask by remember { mutableStateOf<DownloadTask?>(null) }
+    // 下载协程 Job：用于取消后台下载
     var downloadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var downloadTasksOpen by remember { mutableStateOf(false) }
     var confirmCloudDelete by remember { mutableStateOf(false) }
     var deletingCloudBook by remember { mutableStateOf(false) }
 
@@ -369,6 +369,16 @@ private fun BookshelfScreen() {
                     actions = {
                         if (currentTab == Tab.书架 && bookScope == BookScope.本地 && removedBooks.isNotEmpty()) {
                             TextButton(onClick = { showHiddenBooks = true }) { Text("已移除") }
+                        }
+                        // 下载任务入口：有任务时显示下载图标，点击查看任务状态
+                        if (downloadTask != null) {
+                            IconButton(onClick = { downloadTasksOpen = true }) {
+                                Icon(
+                                    DownloadIcon,
+                                    contentDescription = "下载任务",
+                                    tint = YuezhouColors.Brand,
+                                )
+                            }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -584,8 +594,9 @@ private fun BookshelfScreen() {
             },
         )
     } else if (detail != null) {
+        val taskRunning = downloadTask?.status == DownloadStatus.Downloading
         AlertDialog(
-            onDismissRequest = { if (!downloading) detailBook = null },
+            onDismissRequest = { detailBook = null },
             title = { Text(detail.bookId, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text = {
                 Column {
@@ -608,95 +619,143 @@ private fun BookshelfScreen() {
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (detail.local) YuezhouColors.Brand else YuezhouColors.TextSecondary,
                     )
-                    // 下载进度：进度条 + 百分比 + 已下载/总大小
-                    if (downloading) {
-                        Spacer(Modifier.height(12.dp))
-                        val percent = if (downloadTotal > 0) {
-                            (downloadReceived * 100 / downloadTotal).toInt().coerceIn(0, 100)
-                        } else 0
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                progress = if (downloadTotal > 0) {
-                                    (downloadReceived.toFloat() / downloadTotal).coerceIn(0f, 1f)
-                                } else 0f,
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                if (downloadTotal > 0) "$percent%" else "下载中…",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = YuezhouColors.Brand,
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(
-                            progress = if (downloadTotal > 0) {
-                                (downloadReceived.toFloat() / downloadTotal).coerceIn(0f, 1f)
-                            } else 0f,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "${formatSize(downloadReceived)} / ${formatSize(downloadTotal)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = YuezhouColors.TextSecondary,
-                        )
-                    }
                     TextButton(
-                        enabled = !downloading && !deletingCloudBook && !uploadQueue.busy && !remoteLoading,
+                        enabled = !taskRunning && !deletingCloudBook && !uploadQueue.busy && !remoteLoading,
                         onClick = { confirmCloudDelete = true },
                     ) { Text("删除云端书籍", color = MaterialTheme.colorScheme.error) }
                 }
             },
             confirmButton = {
-                if (downloading) {
-                    // 下载中：显示「取消下载」按钮，点击取消并关闭弹窗
+                if (detail.local) {
                     TextButton(onClick = {
-                        downloadJob?.cancel()
-                        downloading = false
-                        downloadJob = null
                         detailBook = null
-                        scope.launch { snackbarHostState.showSnackbar("已取消下载") }
-                    }) { Text("取消下载", color = MaterialTheme.colorScheme.error) }
-                } else {
-                    if (detail.local) {
-                        TextButton(onClick = {
-                            detailBook = null
-                            context.startActivity(
-                                Intent(context, ReaderActivity::class.java).apply {
-                                    putExtra(ReaderActivity.EXTRA_BOOK_ID, detail.bookId)
-                                },
-                            )
-                        }) { Text("打开") }
-                    }
-                    TextButton(onClick = {
-                        downloading = true
-                        downloadReceived = 0L
-                        downloadTotal = detail.size
-                        downloadJob = scope.launch {
-                            val result = try {
-                                cloudSync.downloadBook(detail, ReaderActivity::isBookOpen) { received, total ->
-                                    downloadReceived = received
-                                    downloadTotal = total
-                                }
-                            } finally {
-                                downloading = false
-                                downloadJob = null
+                        context.startActivity(
+                            Intent(context, ReaderActivity::class.java).apply {
+                                putExtra(ReaderActivity.EXTRA_BOOK_ID, detail.bookId)
+                            },
+                        )
+                    }) { Text("打开") }
+                }
+                TextButton(enabled = !taskRunning, onClick = {
+                    detailBook = null
+                    // 后台启动下载，不阻塞阅读；同时只有一个任务
+                    downloadTask = DownloadTask(
+                        bookId = detail.bookId,
+                        fileName = detail.fileName,
+                        total = detail.size,
+                    )
+                    downloadJob = scope.launch {
+                        val result = try {
+                            cloudSync.downloadBook(detail, ReaderActivity::isBookOpen) { received, total ->
+                                downloadTask = downloadTask?.copy(received = received, total = total)
                             }
-                            if (result.isSuccess) {
-                                detailBook = null
-                                refreshKey++
-                                snackbarHostState.showSnackbar("已下载：${detail.bookId}")
-                            } else {
-                                snackbarHostState.showSnackbar("下载失败：${result.exceptionOrNull()?.message}")
+                        } catch (e: CancellationException) {
+                            downloadTask = null
+                            downloadJob = null
+                            return@launch
+                        }
+                        if (result.isSuccess) {
+                            downloadTask = downloadTask?.copy(status = DownloadStatus.Done, received = downloadTask?.total ?: detail.size)
+                            refreshKey++
+                            snackbarHostState.showSnackbar("已下载：${detail.bookId}")
+                        } else {
+                            downloadTask = downloadTask?.copy(
+                                status = DownloadStatus.Failed,
+                                error = result.exceptionOrNull()?.message,
+                            )
+                            snackbarHostState.showSnackbar("下载失败：${result.exceptionOrNull()?.message}")
+                        }
+                        downloadJob = null
+                    }
+                }) { Text(if (taskRunning) "下载中…" else if (detail.local) "重新下载" else "下载") }
+            },
+            dismissButton = {
+                TextButton(onClick = { detailBook = null }) { Text("关闭") }
+            },
+        )
+    }
+
+    // 下载任务弹窗：顶部下载图标点击后展示当前任务状态
+    if (downloadTasksOpen) {
+        val task = downloadTask
+        AlertDialog(
+            onDismissRequest = { downloadTasksOpen = false },
+            title = { Text("下载任务") },
+            text = {
+                if (task == null) {
+                    Text("暂无下载任务", color = YuezhouColors.TextSecondary)
+                } else {
+                    Column {
+                        Text(task.fileName, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(8.dp))
+                        when (task.status) {
+                            DownloadStatus.Downloading -> {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        progress = if (task.total > 0) {
+                                            (task.received.toFloat() / task.total).coerceIn(0f, 1f)
+                                        } else 0f,
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        if (task.total > 0) "${task.percent}%" else "下载中…",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = YuezhouColors.Brand,
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                LinearProgressIndicator(
+                                    progress = if (task.total > 0) {
+                                        (task.received.toFloat() / task.total).coerceIn(0f, 1f)
+                                    } else 0f,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "${formatSize(task.received)} / ${formatSize(task.total)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = YuezhouColors.TextSecondary,
+                                )
+                            }
+                            DownloadStatus.Done -> {
+                                Text("下载完成", style = MaterialTheme.typography.bodyMedium, color = YuezhouColors.Brand)
+                            }
+                            DownloadStatus.Failed -> {
+                                Text("下载失败", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                                task.error?.let {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(it, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+                                }
                             }
                         }
-                    }) { Text(if (detail.local) "重新下载" else "下载") }
+                    }
+                }
+            },
+            confirmButton = {
+                // 下载完成后可清除任务；下载中可取消
+                when (task?.status) {
+                    DownloadStatus.Downloading -> {
+                        TextButton(onClick = {
+                            downloadJob?.cancel()
+                            downloadTask = null
+                            downloadJob = null
+                            downloadTasksOpen = false
+                            scope.launch { snackbarHostState.showSnackbar("已取消下载") }
+                        }) { Text("取消下载", color = MaterialTheme.colorScheme.error) }
+                    }
+                    DownloadStatus.Done, DownloadStatus.Failed -> {
+                        TextButton(onClick = {
+                            downloadTask = null
+                            downloadTasksOpen = false
+                        }) { Text("清除") }
+                    }
+                    null -> {}
                 }
             },
             dismissButton = {
-                TextButton(onClick = { detailBook = null }, enabled = !downloading) { Text("关闭") }
+                TextButton(onClick = { downloadTasksOpen = false }) { Text("关闭") }
             },
         )
     }
@@ -836,6 +895,47 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 private enum class BookScope(val label: String) {
     本地("本地"),
     云端("云端"),
+}
+
+/** 单一下载任务状态（同一时间最多一个任务）。 */
+private data class DownloadTask(
+    val bookId: String,
+    val fileName: String,
+    val total: Long,
+    val received: Long = 0L,
+    val status: DownloadStatus = DownloadStatus.Downloading,
+    val error: String? = null,
+) {
+    val percent: Int
+        get() = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0
+}
+
+private enum class DownloadStatus { Downloading, Done, Failed }
+
+/** 自绘下载图标（material-icons-core 无 Download，用描边路径绘制向下箭头+托盘）。 */
+private val DownloadIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        name = "Download",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).apply {
+        path(
+            stroke = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.Black),
+            strokeLineWidth = 2f,
+            strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+            strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
+        ) {
+            moveTo(12f, 4f)
+            lineTo(12f, 14f)
+            moveTo(8f, 10f)
+            lineTo(12f, 14f)
+            lineTo(16f, 10f)
+            moveTo(4f, 19f)
+            lineTo(20f, 19f)
+        }
+    }.build()
 }
 
 /** 本地/云端切换条：胶囊滑块式分段控件。 */
