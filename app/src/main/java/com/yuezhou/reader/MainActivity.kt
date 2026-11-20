@@ -57,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -72,7 +73,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 书架主界面：本地书库列表（封面卡片网格）+ 导入入口 + 底部导航占位。
@@ -402,17 +405,11 @@ private fun RecentReading(books: List<LibraryStore.Entry>) {
                 ) {
                     val cover = book.coverPng
                     if (cover != null) {
-                        val bmp = remember(cover) {
-                            BitmapFactory.decodeByteArray(cover, 0, cover.size)?.asImageBitmap()
-                        }
-                        if (bmp != null) {
-                            Image(
-                                bitmap = bmp,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
+                        CoverImage(
+                            bytes = cover,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                        )
                     } else {
                         Text(
                             book.title.take(1),
@@ -488,17 +485,11 @@ private fun BookCard(
         ) {
             val cover = book.coverPng
             if (cover != null) {
-                val bmp = remember(cover) {
-                    BitmapFactory.decodeByteArray(cover, 0, cover.size)?.asImageBitmap()
-                }
-                if (bmp != null) {
-                    Image(
-                        bitmap = bmp,
-                        contentDescription = book.title,
-                        contentScale = ContentScale.FillBounds,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+                CoverImage(
+                    bytes = cover,
+                    contentDescription = book.title,
+                    contentScale = ContentScale.FillBounds,
+                )
             } else {
                 // 无封面：书名文字占位（渐变色底 + 书名）
                 Text(
@@ -555,6 +546,47 @@ private fun BookCard(
             )
         }
     }
+}
+
+/** 封面图片：后台解码 + 限尺寸降采样，避免大图在主线程解码导致掉帧。 */
+@Composable
+private fun CoverImage(
+    bytes: ByteArray,
+    contentDescription: String?,
+    contentScale: ContentScale,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
+    val bmp by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = null,
+        bytes,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            decodeCoverDownsampled(bytes)?.asImageBitmap()
+        }
+    }
+    if (bmp != null) {
+        Image(
+            bitmap = bmp!!,
+            contentDescription = contentDescription,
+            contentScale = contentScale,
+            modifier = modifier,
+        )
+    }
+}
+
+/**
+ * 封面解码：先仅读边界得到原尺寸，再按目标边长（默认 512px）计算 inSampleSize 降采样，
+ * 限制解码后的内存占用，避免超大封面位图占用过多内存。
+ */
+private fun decodeCoverDownsampled(bytes: ByteArray, targetPx: Int = 512): android.graphics.Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
+    while (maxDim / (sample * 2) >= targetPx) sample *= 2
+    val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
 }
 
 /** 封面占位：根据 bookId 生成稳定的渐变底色。 */
