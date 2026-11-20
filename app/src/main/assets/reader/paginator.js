@@ -966,7 +966,8 @@ export class Paginator extends HTMLElement {
                 element[scrollProp] = offset
             }
         }
-        this.#scrollBounds = [element[scrollProp], this.atStart ? 0 : size, this.atEnd ? 0 : size]
+        // Keep paginated bounds aligned to the target grid. WebView may round the physical scroll offset.
+        this.#scrollBounds = [this.scrolled ? element[scrollProp] : offset, this.atStart ? 0 : size, this.atEnd ? 0 : size]
         this.#afterScroll(reason)
     }
     async #scrollToPage(page, reason, smooth) {
