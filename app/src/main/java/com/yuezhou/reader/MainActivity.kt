@@ -28,21 +28,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -59,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -293,10 +300,10 @@ private fun BookshelfScreen() {
 }
 
 /** 底部导航的三个 tab。 */
-private enum class Tab(val label: String) {
-    书架("书库"),
-    最近阅读("最近阅读"),
-    设置("设置"),
+private enum class Tab(val label: String, val icon: ImageVector) {
+    书架("书库", Icons.Filled.List),
+    最近阅读("最近阅读", Icons.Filled.Star),
+    设置("设置", Icons.Filled.Settings),
 }
 
 @Composable
@@ -589,31 +596,48 @@ private fun EmptyLibrary(onImport: () -> Unit) {
 
 @Composable
 private fun BottomNavBar(current: Tab, onSelect: (Tab) -> Unit) {
-    Surface(
-        color = YuezhouColors.Surface,
+    NavigationBar(
+        containerColor = YuezhouColors.Surface,
+        windowInsets = WindowInsets.safeDrawing,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            NavItem("书库", selected = current == Tab.书架) { onSelect(Tab.书架) }
-            NavItem("最近阅读", selected = current == Tab.最近阅读) { onSelect(Tab.最近阅读) }
-            NavItem("设置", selected = current == Tab.设置) { onSelect(Tab.设置) }
-        }
+        NavigationBarItem(
+            selected = current == Tab.书架,
+            onClick = { onSelect(Tab.书架) },
+            icon = { Icon(Tab.书架.icon, contentDescription = Tab.书架.label) },
+            label = { Text(Tab.书架.label) },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = YuezhouColors.Brand,
+                selectedTextColor = YuezhouColors.Brand,
+                unselectedIconColor = YuezhouColors.TextSecondary,
+                unselectedTextColor = YuezhouColors.TextSecondary,
+                indicatorColor = YuezhouColors.Brand.copy(alpha = 0.12f),
+            ),
+        )
+        NavigationBarItem(
+            selected = current == Tab.最近阅读,
+            onClick = { onSelect(Tab.最近阅读) },
+            icon = { Icon(Tab.最近阅读.icon, contentDescription = Tab.最近阅读.label) },
+            label = { Text(Tab.最近阅读.label) },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = YuezhouColors.Brand,
+                selectedTextColor = YuezhouColors.Brand,
+                unselectedIconColor = YuezhouColors.TextSecondary,
+                unselectedTextColor = YuezhouColors.TextSecondary,
+                indicatorColor = YuezhouColors.Brand.copy(alpha = 0.12f),
+            ),
+        )
+        NavigationBarItem(
+            selected = current == Tab.设置,
+            onClick = { onSelect(Tab.设置) },
+            icon = { Icon(Tab.设置.icon, contentDescription = Tab.设置.label) },
+            label = { Text(Tab.设置.label) },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = YuezhouColors.Brand,
+                selectedTextColor = YuezhouColors.Brand,
+                unselectedIconColor = YuezhouColors.TextSecondary,
+                unselectedTextColor = YuezhouColors.TextSecondary,
+                indicatorColor = YuezhouColors.Brand.copy(alpha = 0.12f),
+            ),
+        )
     }
-}
-
-@Composable
-private fun NavItem(label: String, selected: Boolean, onClick: () -> Unit) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelLarge,
-        color = if (selected) YuezhouColors.Brand else YuezhouColors.TextSecondary,
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    )
 }
