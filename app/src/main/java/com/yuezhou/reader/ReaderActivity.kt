@@ -1299,13 +1299,13 @@ private fun TocDrawer(
                             Box(
                                 modifier = Modifier.padding(start = 8.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(YuezhouColors.Brand)
+                                    .background(YuezhouColors.BrandContainer)
                                     .padding(horizontal = 8.dp, vertical = 3.dp),
                             ) {
                                 Text(
                                     "在读",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White,
+                                    color = YuezhouColors.BrandDark,
                                 )
                             }
                         }

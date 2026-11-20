@@ -391,7 +391,7 @@ private fun BookshelfScreen() {
                         containerColor = YuezhouColors.Brand,
                         contentColor = Color.White,
                     ) {
-                        Text("↻", style = MaterialTheme.typography.headlineMedium)
+                        Text("刷新", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
                     }
                 }
             }
@@ -798,7 +798,7 @@ private fun BookScopeSwitch(current: BookScope, onSelect: (BookScope) -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(19.dp))
-                    .background(if (selected) YuezhouColors.Brand else Color.Transparent)
+                    .background(if (selected) YuezhouColors.BrandContainer else Color.Transparent)
                     .clickable { onSelect(scope) }
                     .padding(vertical = 7.dp),
                 contentAlignment = Alignment.Center,
@@ -808,7 +808,7 @@ private fun BookScopeSwitch(current: BookScope, onSelect: (BookScope) -> Unit) {
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                     ),
-                    color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                    color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
                 )
             }
         }
@@ -1237,10 +1237,10 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
                     Text(
                         label,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                        color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+                            .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
                             .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(theme = value)) } }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
@@ -1257,10 +1257,10 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
                     Text(
                         label,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                        color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+                            .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
                             .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(vertical = value)) } }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
@@ -1642,14 +1642,14 @@ private fun EmptyState(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(22.dp))
-                        .background(YuezhouColors.Brand)
+                        .background(YuezhouColors.BrandContainer)
                         .clickable(onClick = onAction)
                         .padding(horizontal = 28.dp, vertical = 10.dp),
                 ) {
                     Text(
                         text = actionLabel,
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = Color.White,
+                        color = YuezhouColors.BrandDark,
                     )
                 }
             }

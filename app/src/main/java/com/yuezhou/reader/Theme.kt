@@ -15,7 +15,7 @@ object YuezhouColors {
     /** 品牌主色：微信读书标志性的青绿色。 */
     val Brand = Color(0xFF07C160)
 
-    /** 主色深色变体（按压/强调）。 */
+    /** 主色深色变体（文字/按压/强调）。 */
     val BrandDark = Color(0xFF06AD56)
 
     /** 背景：微信读书的米白底色。 */
@@ -26,6 +26,9 @@ object YuezhouColors {
 
     /** 浅青绿容器（选中态/强调背景）。 */
     val BrandContainer = Color(0xFFE7F8EF)
+
+    /** 更浅的青绿（次级选中背景，几乎无存在感）。 */
+    val BrandContainerSoft = Color(0xFFF2FBF6)
 
     /** 主文字：近黑。 */
     val TextPrimary = Color(0xFF1A1A1A)

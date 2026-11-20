@@ -225,10 +225,10 @@ private fun BackendChoiceChip(label: String, selected: Boolean, onClick: () -> U
     Text(
         label,
         style = MaterialTheme.typography.bodyMedium,
-        color = if (selected) Color.White else YuezhouColors.TextSecondary,
+        color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+            .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
     )
