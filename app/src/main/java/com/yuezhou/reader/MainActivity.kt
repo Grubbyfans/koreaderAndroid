@@ -210,6 +210,8 @@ private fun BookshelfScreen() {
         loading = false
     }
 
+    val uploadQueue = remember(cloudSync, scope) { BookUploadQueue(cloudSync, scope) }
+
     // 云端书库：进入云端 tab 时加载（带缓存，短时间复用；显式刷新走 force）
     fun loadRemote(force: Boolean = false) {
         scope.launch {
@@ -232,6 +234,7 @@ private fun BookshelfScreen() {
 
     // 主动更新书库（方案 §10）：强制刷新列表 + 枚举 books/ 登记外部上传 EPUB
     fun refreshRemoteLibrary() {
+        if (uploadQueue.busy || remoteLoading) return
         scope.launch {
             remoteLoading = true
             remoteError = null
@@ -421,7 +424,7 @@ private fun BookshelfScreen() {
                     }
                 }
                 Tab.最近阅读 -> RecentReading(visibleBooks)
-                Tab.设置 -> SettingsPage()
+                Tab.设置 -> SettingsPage(cloudSync, uploadQueue, remoteLoading)
             }
         }
     }
@@ -744,7 +747,7 @@ private fun CloudBookshelfContent(
                     Text("云端书库为空", color = YuezhouColors.TextSecondary)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "在本地导入书后点「立即同步」即可上传",
+                        "在设置中点「立即同步」选择要上传的书籍",
                         style = MaterialTheme.typography.bodySmall,
                         color = YuezhouColors.TextSecondary,
                     )
@@ -1001,7 +1004,7 @@ private fun RecentReading(books: List<LibraryStore.Entry>) {
 
 /** 设置页：全局阅读默认值（主题/翻页/字号/行距/页边距）+ 云同步与朗读的占位说明。 */
 @Composable
-private fun SettingsPage() {
+private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, cloudLoading: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs by ReaderSettings.flow(context).collectAsState(
@@ -1153,51 +1156,8 @@ private fun SettingsPage() {
         val credentialStore = remember { CloudCredentialStore(context) }
         CloudConfigSection(store = credentialStore)
 
-        // 立即同步（推送本地书库到已配置的云端）
         Spacer(Modifier.height(16.dp))
-        var syncMessage by remember { mutableStateOf<String?>(null) }
-        var syncing by remember { mutableStateOf(false) }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(
-                enabled = !syncing,
-                onClick = {
-                    scope.launch {
-                        syncing = true
-                        syncMessage = null
-                        val sync = CloudSync(context)
-                        val backendLabel = sync.activeBackendLabel()
-                        val outcome = sync.pushLocal()
-                        syncMessage = if (outcome.success && backendLabel != null) {
-                            "${outcome.message}（$backendLabel）"
-                        } else {
-                            outcome.message
-                        }
-                        syncing = false
-                    }
-                },
-            ) {
-                Text(if (syncing) "同步中…" else "立即同步")
-            }
-            // 补全待发布回执（方案 §11.6：正文已传但列表发布失败时的补救）
-            TextButton(
-                enabled = !syncing,
-                onClick = {
-                    scope.launch {
-                        syncing = true
-                        syncMessage = null
-                        val repaired = CloudSync(context).repairPendingPublications()
-                        syncMessage = if (repaired > 0) "已补全 $repaired 本" else "无待补全记录"
-                        syncing = false
-                    }
-                },
-            ) {
-                Text("补全待发布")
-            }
-            syncMessage?.let {
-                Spacer(Modifier.width(12.dp))
-                Text(it, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
-            }
-        }
+        BookUploadControls(cloudSync, uploadQueue, cloudLoading)
 
         // 诊断摘要（方案 §13.2：最近 20 次同步/刷新任务的可执行诊断）
         Spacer(Modifier.height(16.dp))

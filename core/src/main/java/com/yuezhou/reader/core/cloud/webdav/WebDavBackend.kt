@@ -281,6 +281,7 @@ class WebDavBackend private constructor(
             override fun contentLength(): Long = localFile.length()
             override fun writeTo(sink: okio.BufferedSink) {
                 var sent = 0L
+                onProgress?.invoke(0, contentLength())
                 localFile.inputStream().use { input ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {

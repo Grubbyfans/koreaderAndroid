@@ -6,6 +6,7 @@ import com.yuezhou.reader.core.cloud.CloudException
 import com.yuezhou.reader.core.cloud.CloudService
 import com.yuezhou.reader.core.cloud.DiagnosticCollector
 import com.yuezhou.reader.core.cloud.ErrorCode
+import com.yuezhou.reader.core.cloud.Outcome
 import com.yuezhou.reader.core.cloud.ProgressPayload
 import com.yuezhou.reader.core.cloud.BackendKind
 import com.yuezhou.reader.core.cloud.baidu.BaiduBackend
@@ -139,105 +140,129 @@ class CloudSync(private val context: Context) {
         }
     }
 
-    /**
-     * 执行一次「本地 → 云端」同步：
-     * 1. 上传书库所有正文（同名覆盖，保留封面与进度）；
-     * 2. 上传每本书的阅读进度。
-     *
-     * 首版为单向推送，不做远端拉取合并（方案 §4 的完整双向同步依赖 Room 索引，后续实现）。
-     *
-     * @param onBookProgress 单本书上传进度的回调（用于 UI 展示进度），可为 null。
-     */
-    suspend fun pushLocal(onBookProgress: ((done: Int, total: Int) -> Unit)? = null): SyncOutcome =
-        withContext(Dispatchers.IO) {
-            val collector = DiagnosticCollector()
-            val start = System.currentTimeMillis()
-            try {
-                val backend = backend(collector)
-                    ?: return@withContext SyncOutcome(false, "尚未配置云后端，请先在设置页配置 WebDAV 或百度网盘")
-                // 授权就绪检查（百度校验 token 未过期、WebDAV 校验凭据可用）
-                backend.ensureAuthorized()
-                val service = CloudService(backend)
-                val receipts = PendingPublicationStore(context)
+    data class UploadSelection(
+        val backendId: String,
+        val backendLabel: String,
+        val books: List<LibraryStore.Entry>,
+        val syncedIds: Set<String>,
+    )
 
-                val store = LibraryStore(context)
-                val snapshot = store.snapshot()
-                if (snapshot.books.isEmpty()) {
-                    collector.recordPhase("读列表", System.currentTimeMillis() - start)
-                    collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Failed)
-                    diagnostics.append("同步", collector.snapshot())
-                    return@withContext SyncOutcome(true, "本地书库为空，无需同步")
-                }
+    enum class UploadStatus { Queued, Preparing, Uploading, Publishing, Done, Failed, Uncertain, PendingPublication }
 
-                val total = snapshot.books.size
-                var done = 0
-                var pending = 0
-                for (entry in snapshot.books) {
-                    val epub = java.io.File(EpubImporter.epubDir(context), entry.fileName)
-                    if (!epub.exists()) continue
-                    // 上传前先登记待发布回执（正文成功后清理；失败保留以便补全，方案 §11.6）
-                    receipts.upsert(
-                        PendingPublication(
-                            bookId = entry.bookId,
-                            fileName = entry.fileName,
-                            size = entry.size,
-                            coverPath = null,
-                            coverVersion = null,
-                            savedAt = System.currentTimeMillis(),
-                        )
+    data class BookUploadProgress(
+        val status: UploadStatus,
+        val percent: Int? = null,
+        val message: String? = null,
+    )
+
+    suspend fun uploadSelection(): UploadSelection = withContext(Dispatchers.IO) {
+        val backend = backend() ?: throw CloudException(ErrorCode.INVALID_INPUT, "请先配置云同步后端")
+        backend.ensureAuthorized()
+        val catalog = CloudService(backend).index().books.associateBy { it.bookId }
+        val books = LibraryStore(context).snapshot().books
+        val syncedIds = books.filter { catalog[it.bookId]?.size == it.size }.map { it.bookId }.toSet()
+        UploadSelection(backend.backendId, backendLabelOf(backend), books, syncedIds)
+    }
+
+    /** 仅上传所选正文与封面，逐本发布书库条目。 */
+    suspend fun pushLocal(
+        backendId: String,
+        books: List<LibraryStore.Entry>,
+        onProgress: (String, BookUploadProgress) -> Unit,
+    ): SyncOutcome = withContext(Dispatchers.IO) {
+        val collector = DiagnosticCollector()
+        val start = System.currentTimeMillis()
+        val receipts = PendingPublicationStore(context)
+        var done = 0
+        var failed = 0
+        var uncertain = 0
+        var pending = 0
+        try {
+            val backend = backend(collector)
+            check(backend?.backendId == backendId) { "云后端已变更，请重新选择书籍" }
+            val selectedBackend = checkNotNull(backend)
+            selectedBackend.ensureAuthorized()
+            val service = CloudService(selectedBackend)
+            for (entry in books) {
+                val bookStart = System.currentTimeMillis()
+                val epub = File(EpubImporter.epubDir(context), entry.fileName)
+                val size = epub.length()
+                var bodyUploaded = false
+                onProgress(entry.bookId, BookUploadProgress(UploadStatus.Preparing))
+                try {
+                    check(epub.isFile && size > 0L) { "本地 EPUB 不存在或为空" }
+                    service.uploadBook(
+                        epub,
+                        entry.fileName,
+                        onProgress = { phase, percent ->
+                            val status = when (phase) {
+                                CloudService.UploadPhase.Preparing -> UploadStatus.Preparing
+                                CloudService.UploadPhase.Transferring -> UploadStatus.Uploading
+                                CloudService.UploadPhase.Publishing -> {
+                                    bodyUploaded = true
+                                    UploadStatus.Publishing
+                                }
+                            }
+                            onProgress(entry.bookId, BookUploadProgress(status, percent))
+                        },
+                        makeCover = entry.coverPng?.let { png ->
+                            { com.yuezhou.reader.core.protocol.CoverFile.encode(png) }
+                        },
                     )
-                    val bookStart = System.currentTimeMillis()
-                    try {
-                        // 上传正文（同名覆盖），封面回传本地已提取的 PNG（无封面则返回 null，不写 coverPath）
-                        val coverPng = entry.coverPng
-                        service.uploadBook(
-                            epub,
-                            entry.fileName,
-                            makeCover = if (coverPng != null) {
-                                { com.yuezhou.reader.core.protocol.CoverFile.encode(coverPng) }
-                            } else null,
-                        )
-                        // 注意：进度上传不在此处进行。方案 §5.6 的进度同步是「逐书、在阅读页
-                        // 由用户主动触发的两步交互」，且 CFI→XPointer 转换依赖 WebView 真实 DOM，
-                        // 整库推送无 WebView 上下文。进度同步统一走阅读页「进度同步面板」。
-                        // 全部成功 → 清理回执
-                        receipts.remove(entry.bookId)
-                    } catch (e: CloudException) {
-                        if (e.code == ErrorCode.UNCERTAIN) {
-                            // 正文已上传但列表发布失败 → 保留回执，供后续补全
+                    receipts.remove(entry.bookId)
+                    done++
+                    onProgress(entry.bookId, BookUploadProgress(UploadStatus.Done))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val status = when {
+                        bodyUploaded -> {
+                            receipts.upsert(PendingPublication(
+                                bookId = entry.bookId,
+                                fileName = entry.fileName,
+                                size = size,
+                                coverPath = null,
+                                coverVersion = null,
+                                savedAt = System.currentTimeMillis(),
+                            ))
                             pending++
-                            collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Uncertain, e.code)
-                        } else {
-                            // 其他失败（正文可能未传成功）也保留回执，补全时 stat 确认后再补
-                            pending++
-                            collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Failed, e.code)
+                            UploadStatus.PendingPublication
+                        }
+                        e is CloudException && (e.code == ErrorCode.UNCERTAIN || e.outcome == Outcome.Uncertain) -> {
+                            uncertain++
+                            UploadStatus.Uncertain
+                        }
+                        else -> {
+                            failed++
+                            UploadStatus.Failed
                         }
                     }
-                    collector.recordPhase("上传《${entry.bookId}》", System.currentTimeMillis() - bookStart)
-                    done++
-                    onBookProgress?.invoke(done, total)
+                    onProgress(entry.bookId, BookUploadProgress(status, message = e.message))
+                } finally {
+                    collector.recordPhase("上传书籍", System.currentTimeMillis() - bookStart)
                 }
-
-                // 同步成功，云端书库已变化，失效列表缓存以便下次进入时重新拉取
-                invalidateListCache()
-                collector.recordPhase("总耗时", System.currentTimeMillis() - start)
-                diagnostics.append("同步", collector.snapshot())
-                if (pending > 0) {
-                    SyncOutcome(true, "同步完成：$done/$total 本，$pending 本待补全（可在设置中重试）")
-                } else {
-                    SyncOutcome(true, "同步完成：$done/$total 本")
-                }
-            } catch (e: CloudException) {
-                collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Failed, e.code)
-                collector.recordPhase("总耗时", System.currentTimeMillis() - start)
-                diagnostics.append("同步", collector.snapshot())
-                SyncOutcome(false, "同步失败：${e.message}")
-            } catch (e: Exception) {
-                collector.recordPhase("总耗时", System.currentTimeMillis() - start)
-                diagnostics.append("同步", collector.snapshot())
-                SyncOutcome(false, "同步失败：${e.message ?: e.toString()}")
             }
+
+            val counts = mutableListOf("已上传 $done 本")
+            if (failed > 0) counts.add("失败 $failed 本")
+            if (uncertain > 0) counts.add("结果未知 $uncertain 本")
+            if (pending > 0) counts.add("待发布 $pending 本")
+            if (pending + uncertain > 0) collector.markOutcome(Outcome.Uncertain)
+            else if (failed > 0) collector.markOutcome(Outcome.Failed)
+            SyncOutcome(done == books.size, counts.joinToString("，"))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            collector.markOutcome(Outcome.Failed, (e as? CloudException)?.code)
+            val message = e.message ?: "无法连接云端"
+            books.forEach { onProgress(it.bookId, BookUploadProgress(UploadStatus.Failed, message = message)) }
+            SyncOutcome(false, "上传失败：$message")
+        } finally {
+            if (done + uncertain + pending > 0) invalidateListCache()
+            collector.recordPhase("总耗时", System.currentTimeMillis() - start)
+            diagnostics.append("上传书籍", collector.snapshot())
         }
+    }
 
     /**
      * 补全待发布回执：对每条回执只读取最新列表并合并条目，不重传正文（方案 §11.6）。

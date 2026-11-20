@@ -371,6 +371,7 @@ class BaiduBackend private constructor(
         var sent = 0L
         if (pre.returnType == 1) {
             val host = uploadHost(pre.uploadid, targetPath)
+            onProgress?.invoke(0, size)
             for (idx in pre.blockList) {
                 val (partOffset, partSize) = parts[idx]
                 val partBytes = ByteArray(partSize.toInt())

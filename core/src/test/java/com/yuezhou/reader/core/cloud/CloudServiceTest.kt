@@ -36,6 +36,30 @@ class CloudServiceTest {
     }
 
     @Test
+    fun `正文传输百分比与书库发布阶段独立`() = runTest {
+        val backend = FakeBackend()
+        val events = mutableListOf<Pair<CloudService.UploadPhase, Int?>>()
+
+        CloudService(backend).uploadBook(epub(), "测试书.epub", onProgress = { phase, percent ->
+            events.add(phase to percent)
+            if (phase == CloudService.UploadPhase.Publishing) {
+                assertTrue("books/测试书.epub" in backend.files)
+                assertTrue("library.json" !in backend.files)
+            }
+        })
+
+        assertEquals(
+            listOf(
+                CloudService.UploadPhase.Preparing to null,
+                CloudService.UploadPhase.Transferring to 100,
+                CloudService.UploadPhase.Publishing to null,
+            ),
+            events,
+        )
+        assertTrue("library.json" in backend.files)
+    }
+
+    @Test
     fun `同名覆盖保留旧封面`() = runTest {
         val backend = FakeBackend()
         val svc = CloudService(backend)

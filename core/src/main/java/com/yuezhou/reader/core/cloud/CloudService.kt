@@ -21,6 +21,8 @@ import java.time.temporal.ChronoUnit
  */
 class CloudService(private val backend: CloudBackend) {
 
+    enum class UploadPhase { Preparing, Transferring, Publishing }
+
     /** 读最新列表；不存在时返回空目录。 */
     suspend fun index(): LibraryCatalogData {
         val raw = try {
@@ -42,8 +44,10 @@ class CloudService(private val backend: CloudBackend) {
     suspend fun uploadBook(
         epubFile: File,
         fileName: String,
+        onProgress: ((UploadPhase, Int?) -> Unit)? = null,
         makeCover: (suspend (File) -> String?)? = null,
     ): UploadResult {
+        onProgress?.invoke(UploadPhase.Preparing, null)
         val bookId = BookNames.cloudId(fileName).first
             ?: throw CloudException(ErrorCode.INVALID_INPUT, "不是合法的 EPUB 文件名")
 
@@ -55,7 +59,15 @@ class CloudService(private val backend: CloudBackend) {
         }
 
         // 上传正文（同名覆盖）
-        backend.upload("books/$fileName", epubFile, Precondition.Unconditional)
+        var lastPercent: Int? = null
+        backend.upload("books/$fileName", epubFile, Precondition.Unconditional) { sent, total ->
+            val percent = if (total > 0) (sent.toDouble() / total * 100).toInt().coerceIn(0, 100) else null
+            if (percent != lastPercent || percent == null) {
+                lastPercent = percent
+                onProgress?.invoke(UploadPhase.Transferring, percent)
+            }
+        }
+        onProgress?.invoke(UploadPhase.Publishing, null)
 
         // 构造列表条目，保留旧封面
         val previous = index.books.find { it.bookId == bookId }
