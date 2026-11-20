@@ -38,6 +38,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -146,7 +147,9 @@ private fun BookshelfScreen() {
     var detailBook by remember { mutableStateOf<CloudSync.RemoteBook?>(null) }
     var downloading by remember { mutableStateOf(false) }
 
-    // —— 本地目录扫描（方案 §8.3：点击「检查本机书籍」才扫描）——
+    var importOptionsOpen by remember { mutableStateOf(false) }
+
+    // 本地目录只在用户选择扫描时检查。
     var scanResult by remember { mutableStateOf<LocalScanner.ScanResult?>(null) }
     var scanDialogOpen by remember { mutableStateOf(false) }
     var scanning by remember { mutableStateOf(false) }
@@ -326,11 +329,13 @@ private fun BookshelfScreen() {
             if (currentTab == Tab.书架) {
                 if (bookScope == BookScope.本地) {
                     FloatingActionButton(
-                        onClick = { pickEpub.launch(arrayOf("application/epub+zip")) },
+                        onClick = {
+                            if (!scanning && !importing) importOptionsOpen = true
+                        },
                         containerColor = YuezhouColors.Brand,
                         contentColor = Color.White,
                     ) {
-                        Text("+", style = MaterialTheme.typography.headlineMedium)
+                        Icon(Icons.Filled.Add, contentDescription = "导入书籍")
                     }
                 } else {
                     // 云端：主动刷新按钮（主动更新：强制拉列表 + 发现外部上传）
@@ -381,29 +386,21 @@ private fun BookshelfScreen() {
                     BookScopeSwitch(current = bookScope, onSelect = { bookScope = it })
                     when (bookScope) {
                         BookScope.本地 -> {
-                            // 检查本机书籍入口（方案 §8.3：正常进入不扫描，点击才扫描）
-                            if (!scanning) {
-                                TextButton(
-                                    onClick = { pickDirectory.launch(null) },
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                ) {
-                                    Text("检查本机书籍", color = YuezhouColors.Brand)
-                                }
-                            } else {
+                            if (scanning) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("扫描本机书籍中…", style = MaterialTheme.typography.bodyMedium)
+                                    Text("扫描文件夹中…", style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                             BookshelfContent(
                                 books = visibleBooks,
                                 loading = loading,
                                 selecting = selecting,
-                                onPickEpub = { pickEpub.launch(arrayOf("application/epub+zip")) },
+                                onImport = { if (!scanning && !importing) importOptionsOpen = true },
                                 onEnterSelect = { selecting = setOf(it) },
                                 onToggleSelect = { id ->
                                     val cur = selecting ?: emptySet()
@@ -552,6 +549,25 @@ private fun BookshelfScreen() {
         )
     }
 
+    if (importOptionsOpen) {
+        AlertDialog(
+            onDismissRequest = { importOptionsOpen = false },
+            title = { Text("导入书籍") },
+            dismissButton = {
+                TextButton(onClick = {
+                    importOptionsOpen = false
+                    pickDirectory.launch(null)
+                }) { Text("扫描指定文件夹") }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    importOptionsOpen = false
+                    pickEpub.launch(arrayOf("application/epub+zip"))
+                }) { Text("选择书籍") }
+            },
+        )
+    }
+
     // 扫描结果弹窗（方案 §8.3：列出发现的 EPUB + 同名冲突位置，不自动选）
     val scan = scanResult
     if (scanDialogOpen && scan != null) {
@@ -589,7 +605,7 @@ private fun ScanResultDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("检查本机书籍") },
+        title = { Text("扫描结果") },
         text = {
             Column {
                 when {
@@ -857,7 +873,7 @@ private fun BookshelfContent(
     books: List<LibraryStore.Entry>,
     loading: Boolean,
     selecting: Set<String>?,
-    onPickEpub: () -> Unit,
+    onImport: () -> Unit,
     onEnterSelect: (String) -> Unit,
     onToggleSelect: (String) -> Unit,
 ) {
@@ -869,7 +885,7 @@ private fun BookshelfContent(
             }
         }
         books.isEmpty() -> {
-            EmptyLibrary(onImport = { onPickEpub() })
+            EmptyLibrary(onImport = onImport)
         }
         else -> {
             LazyVerticalGrid(
