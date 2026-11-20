@@ -39,11 +39,15 @@ const smoothScroll = (element, property, target, signal) => new Promise(resolve 
 })
 
 // Animate the chapter layer, then commit the real scroll offset in the same frame.
-// mode 决定翻页动效：'slide' 平滑滑动 | 'simulate' 仿真卷页。
-const slidePage = async (element, content, property, target, signal, mode = 'slide') => {
+// 平滑滑动翻页：对章节层做横向/纵向平移。
+const slidePage = async (element, content, property, target, signal) => {
     const delta = element[property] - target
     const horizontal = property === 'scrollLeft'
-    const animation = pageAnimation(content, horizontal, delta, mode)
+    const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
+    const animation = content.animate(
+        [{ transform: 'none' }, { transform: translate }],
+        { duration: 220, easing: 'cubic-bezier(.2,.65,.35,1)', fill: 'forwards' },
+    )
     const cancel = () => animation.cancel()
     signal.addEventListener('abort', cancel, { once: true })
     try {
@@ -63,34 +67,6 @@ const slidePage = async (element, content, property, target, signal, mode = 'sli
         content.style.filter = ''
         content.style.boxShadow = ''
     }
-}
-
-// 按模式构造翻页关键帧动画：
-// - slide：横向/纵向平移，轻盈滑动。
-// - simulate：平移 + 方向性阴影 + 轻微亮度变化，模拟纸张翻起的厚度与层次（覆盖式翻页）。
-//   注：foliate 分页是 CSS multi-column 并排，对章节层做 skew/rotate 会撕裂相邻列，
-//   因此仿真翻页不做几何形变，改用「滑动 + 阴影层次」呈现，文字始终清晰不变形。
-const pageAnimation = (content, horizontal, delta, mode) => {
-    if (mode === 'simulate') {
-        const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
-        // 覆盖式翻页：整页平移，滑动过程中页面整体略暗（模拟纸张遮住下层），
-        // 前缘用 box-shadow 营造纸张厚度。不做几何形变，避免撕裂多栏文字。
-        const shadowX = horizontal ? `${Math.sign(delta || 1) * 24}px 0 32px -8px rgba(0,0,0,0.35)` : '0 0 0 rgba(0,0,0,0)'
-        const shadowY = horizontal ? '0 0 0 rgba(0,0,0,0)' : `0 ${Math.sign(delta || 1) * 24}px 32px -8px rgba(0,0,0,0.35)`
-        return content.animate(
-            [
-                { transform: 'none', boxShadow: '0 0 0 rgba(0,0,0,0)', filter: 'brightness(1)' },
-                { transform: translate, boxShadow: `${shadowX} ${shadowY}`, filter: 'brightness(0.9)', offset: 0.5 },
-                { transform: translate, boxShadow: '0 0 0 rgba(0,0,0,0)', filter: 'brightness(1)', offset: 1 },
-            ],
-            { duration: 340, easing: 'cubic-bezier(.3,.55,.35,1)', fill: 'forwards' },
-        )
-    }
-    const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
-    return content.animate(
-        [{ transform: 'none' }, { transform: translate }],
-        { duration: 220, easing: 'cubic-bezier(.2,.65,.35,1)', fill: 'forwards' },
-    )
 }
 
 // collapsed range doesn't return client rects sometimes (or always?)
@@ -986,9 +962,8 @@ export class Paginator extends HTMLElement {
                 const scroll = new AbortController()
                 this.#pageScroll = scroll
                 const content = this.#view?.element
-                const mode = this.getAttribute('animated') || 'slide'
                 const completed = !this.scrolled && typeof content?.animate === 'function'
-                    ? await slidePage(element, content, scrollProp, offset, scroll.signal, mode)
+                    ? await slidePage(element, content, scrollProp, offset, scroll.signal)
                     : await smoothScroll(element, scrollProp, offset, scroll.signal)
                 if (!completed || this.#pageScroll !== scroll) return
                 this.#pageScroll = null

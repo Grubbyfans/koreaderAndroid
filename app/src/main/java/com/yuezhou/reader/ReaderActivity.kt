@@ -1037,7 +1037,6 @@ private fun SettingsControls(
             listOf(
                 "none" to "无",
                 "slide" to "滑动",
-                "simulate" to "仿真",
             ).forEach { (value, label) ->
                 TextButton(onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) }) {
                     Text(
