@@ -546,6 +546,8 @@ class CloudSync(private val context: Context) {
                 backend.ensureAuthorized()
 
                 val store = LibraryStore(context)
+                // 下载前清理历史残留的 .part 临时文件（主动取消/进程被杀遗留）
+                TempFileCleanup.clean(context)
                 val local = store.bookLocation(book.bookId)
                 val destination = local?.tree ?: directory.uri
                 val fileName = local?.fileName ?: book.fileName
@@ -574,7 +576,9 @@ class CloudSync(private val context: Context) {
                     invalidateListCache()
                     Result.success(fileName)
                 } finally {
-                    tmp.delete()
+                    // 主动取消时文件流可能仍占用，delete 失败则注册 deleteOnExit 兜底，
+                    // 确保临时文件最终被清理，不残留占空间。
+                    if (!tmp.delete()) tmp.deleteOnExit()
                 }
             } catch (e: CancellationException) {
                 throw e

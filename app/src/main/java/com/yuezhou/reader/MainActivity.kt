@@ -100,6 +100,8 @@ import com.yuezhou.reader.reader.DownloadDirectory
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.LocalScanner
+import com.yuezhou.reader.reader.TempFileCleanup
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -113,6 +115,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 冷启动时异步清理下载/导入遗留的 .part 临时文件（主动取消/进程被杀残留）
+        lifecycleScope.launch { TempFileCleanup.clean(this@MainActivity) }
         setContent {
             YuezhouTheme {
                 BookshelfScreen()
