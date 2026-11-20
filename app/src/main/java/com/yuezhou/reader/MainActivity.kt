@@ -824,26 +824,20 @@ private fun CloudBookshelfContent(
             }
         }
         error != null -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(error, color = YuezhouColors.TextSecondary, textAlign = TextAlign.Center)
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onRefresh) { Text("重试") }
-                }
-            }
+            EmptyState(
+                icon = Icons.Filled.List,
+                title = "云端书库加载失败",
+                subtitle = error,
+                actionLabel = "重试",
+                onAction = onRefresh,
+            )
         }
         books.isEmpty() -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("云端书库为空", color = YuezhouColors.TextSecondary)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "在设置中点「立即同步」选择要上传的书籍",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YuezhouColors.TextSecondary,
-                    )
-                }
-            }
+            EmptyState(
+                icon = Icons.Filled.List,
+                title = "云端书库为空",
+                subtitle = "在设置中点「立即同步」选择要上传的书籍",
+            )
         }
         else -> {
             Column(Modifier.fillMaxSize()) {
@@ -1019,13 +1013,11 @@ private fun RecentReading(books: List<LibraryStore.Entry>) {
             .sortedByDescending { it.lastReadAt }
     }
     if (recent.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                "还没有阅读记录",
-                style = MaterialTheme.typography.bodyMedium,
-                color = YuezhouColors.TextSecondary,
-            )
-        }
+        EmptyState(
+            icon = Icons.Filled.Star,
+            title = "还没有阅读记录",
+            subtitle = "开始读一本书后，它会出现在这里",
+        )
         return
     }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1492,19 +1484,75 @@ private object CoverPlaceholder {
 
 @Composable
 private fun EmptyLibrary(onImport: () -> Unit) {
+    EmptyState(
+        icon = Icons.Filled.List,
+        title = "书库还是空的",
+        subtitle = "点击右下角 + 导入 EPUB 书籍",
+        actionLabel = "导入书籍",
+        onAction = onImport,
+    )
+}
+
+/** 统一空态：圆形图标底 + 主文案 + 副文案 + 可选主按钮。全站复用，保证观感一致。 */
+@Composable
+private fun EmptyState(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(YuezhouColors.BrandContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = YuezhouColors.BrandDark,
+                    modifier = Modifier.size(34.dp),
+                )
+            }
+            Spacer(Modifier.height(18.dp))
             Text(
-                text = "书库还是空的",
-                style = MaterialTheme.typography.titleMedium,
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = YuezhouColors.TextPrimary,
+                textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "点击右下角 + 导入 EPUB 书籍",
-                style = MaterialTheme.typography.bodyMedium,
-                color = YuezhouColors.TextSecondary,
-            )
+            if (subtitle != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YuezhouColors.TextSecondary,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            if (actionLabel != null && onAction != null) {
+                Spacer(Modifier.height(18.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(YuezhouColors.Brand)
+                        .clickable(onClick = onAction)
+                        .padding(horizontal = 28.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = actionLabel,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = Color.White,
+                    )
+                }
+            }
         }
     }
 }
