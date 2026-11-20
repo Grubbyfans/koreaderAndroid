@@ -79,6 +79,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.reader.CloudCredentialStore
+import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
 import kotlinx.coroutines.Dispatchers
@@ -578,6 +579,30 @@ private fun SettingsPage() {
         // 云同步后端配置（WebDAV / 百度网盘授权）
         val credentialStore = remember { CloudCredentialStore(context) }
         CloudConfigSection(store = credentialStore)
+
+        // 立即同步（推送本地书库到已配置的云端）
+        Spacer(Modifier.height(16.dp))
+        var syncMessage by remember { mutableStateOf<String?>(null) }
+        var syncing by remember { mutableStateOf(false) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                enabled = !syncing,
+                onClick = {
+                    scope.launch {
+                        syncing = true
+                        syncMessage = null
+                        syncMessage = CloudSync(context).pushLocal().message
+                        syncing = false
+                    }
+                },
+            ) {
+                Text(if (syncing) "同步中…" else "立即同步")
+            }
+            syncMessage?.let {
+                Spacer(Modifier.width(12.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+            }
+        }
     }
 }
 

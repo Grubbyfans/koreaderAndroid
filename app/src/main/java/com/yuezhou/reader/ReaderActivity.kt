@@ -59,6 +59,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.reader.EpubImporter
+import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.ReaderEvent
 import com.yuezhou.reader.reader.ReaderWebView
@@ -386,7 +387,13 @@ private fun ReaderScreen(
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
                     onPrefsChange = { p -> scope.launch { ReaderSettings.save(context, p) } },
-                    onSync = { status = "云同步尚未接入，等待 P4/P5 后端就绪" },
+                    onSync = {
+                        scope.launch {
+                            status = "同步中…"
+                            val outcome = CloudSync(context).pushLocal()
+                            status = outcome.message
+                        }
+                    },
                     onSpeak = {
                         if (speaking) {
                             // 朗读中 → 停止
