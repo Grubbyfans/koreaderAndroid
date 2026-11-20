@@ -1,0 +1,35 @@
+app/src/main/AndroidManifest.xml
+  s_4565e709496b9b::t_aadbbdcfe76719 11
+app/src/main/java/com/yuezhou/reader/CloudConfig.kt
+  s_4565e709496b9b::t_0c930fa029b7c8 5,65-111,225-239
+app/src/main/res/xml/network_security_config.xml
+  s_4565e709496b9b::t_3712767ad3bae9 1-10
+gradle/libs.versions.toml
+  s_87704d65a30bf9::t_8362176d1f9c4c 18,47
+reader/build.gradle.kts
+  s_87704d65a30bf9::t_db6646455ff8d8 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1b76991889f0a2ecd64c2cdb55ab392b6f1005a4",
+  "prompts": {},
+  "sessions": {
+    "s_4565e709496b9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f78a-526b-7031-b1b9-203c29ed78d2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    },
+    "s_87704d65a30bf9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f826-7a08-7031-9758-f4573a0b1250",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
