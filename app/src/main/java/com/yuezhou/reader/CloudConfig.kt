@@ -73,7 +73,7 @@ fun CloudConfigSection(store: CloudCredentialStore) {
             Column(Modifier.weight(1f)) {
                 Text("WebDAV", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    if (creds.webdavRootUrl != null) creds.webdavRootUrl else "未配置",
+                    creds.webdavRootUrl ?: "未配置",
                     style = MaterialTheme.typography.bodySmall,
                     color = YuezhouColors.TextSecondary,
                 )
@@ -97,11 +97,7 @@ fun CloudConfigSection(store: CloudCredentialStore) {
             Column(Modifier.weight(1f)) {
                 Text("百度网盘", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    when {
-                        creds.baiduAccountName != null -> creds.baiduAccountName
-                        creds.baiduAccessToken != null -> "已授权"
-                        else -> "未授权"
-                    },
+                    creds.baiduAccountName ?: if (creds.baiduAccessToken != null) "已授权" else "未授权",
                     style = MaterialTheme.typography.bodySmall,
                     color = YuezhouColors.TextSecondary,
                 )

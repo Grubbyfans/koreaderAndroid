@@ -4,6 +4,7 @@ import com.yuezhou.reader.core.cloud.CloudException
 import com.yuezhou.reader.core.cloud.ErrorCode
 import kotlinx.serialization.json.JsonObject
 import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -25,7 +26,7 @@ object BaiduAuth {
     private const val AUTH_URL = "https://openapi.baidu.com/oauth/2.0/authorize"
     private const val TOKEN_URL = "https://openapi.baidu.com/oauth/2.0/token"
     private val FORM_MEDIA_TYPE: MediaType =
-        MediaType.parse("application/x-www-form-urlencoded; charset=utf-8")!!
+        "application/x-www-form-urlencoded; charset=utf-8".toMediaType()
 
     /** 授权码合法字符集（仅字母数字下划线点横线），长度 1..1024。 */
     private val CODE_REGEX = Regex("^[A-Za-z0-9_.-]+$")
@@ -168,3 +169,4 @@ object BaiduAuth {
             ?: uk
         return AccountInfo(userId = uk, accountName = name)
     }
+}

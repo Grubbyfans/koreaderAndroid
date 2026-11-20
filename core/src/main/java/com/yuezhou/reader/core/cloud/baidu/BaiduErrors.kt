@@ -15,11 +15,13 @@ import kotlinx.serialization.json.contentOrNull
  */
 internal object BaiduErrors {
 
-    /** 授权相关错误码集合（数字或 OAuth 字符串错误）。 */
-    private val AUTH_CODES = setOf<Any>(
-        110, 111, -6, 20016, 20017, 31045,
-        "invalid_grant", "invalid_client",
+    /** 授权相关错误码集合（数字）。字符串错误另见 [AUTH_STRINGS]。 */
+    private val AUTH_CODES = setOf<Long>(
+        110L, 111L, -6L, 20016L, 20017L, 31045L,
     )
+
+    /** 授权相关 OAuth 字符串错误。 */
+    private val AUTH_STRINGS = setOf("invalid_grant", "invalid_client")
 
     /**
      * 检查百度业务响应中的错误字段并抛出 [CloudException]。
@@ -36,7 +38,7 @@ internal object BaiduErrors {
     }
 
     private fun map(n: Any): CloudException {
-        val isAuth = n in AUTH_CODES
+        val isAuth = n in AUTH_CODES || n in AUTH_STRINGS
         val code = when {
             isAuth -> ErrorCode.AUTH
             n == -9L || n == "-9" -> ErrorCode.NOT_FOUND

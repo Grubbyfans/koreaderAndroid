@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -16,7 +17,6 @@ import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
 import android.speech.tts.UtteranceProgressListener
-import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.yuezhou.reader.core.speech.SpeechSegment
 import com.yuezhou.reader.core.speech.SpeechStateMachine
@@ -251,8 +251,8 @@ class SpeechService : Service() {
     // ---- 音频焦点 ----
 
     private fun requestAudioFocus(): Boolean {
-        val request = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -261,24 +261,17 @@ class SpeechService : Service() {
                 )
                 .setOnAudioFocusChangeListener(audioFocusListener)
                 .build()
+            audioFocusRequest = request
+            audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         } else {
             @Suppress("DEPRECATION")
             audioManager.requestAudioFocus(
                 audioFocusListener,
                 AudioManager.STREAM_MUSIC,
                 AudioManager.AUDIOFOCUS_GAIN
-            )
-            null
-        }
-        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        } else {
-            request == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         }
         audioFocusGranted = granted
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioFocusRequest = request
-        }
         registerBecomingNoisy()
         return granted
     }
@@ -319,7 +312,11 @@ class SpeechService : Service() {
         becomingNoisyRegistered = false
     }
 
-    private val becomingNoisyReceiver = android.content.BroadcastReceiver { _, _ -> handlePause() }
+    private val becomingNoisyReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            handlePause()
+        }
+    }
 
     // ---- MediaSession ----
 
@@ -384,20 +381,25 @@ class SpeechService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
         val action = { act: String, label: String, icon: Int ->
-            NotificationCompat.Action(
-                icon, label,
+            Notification.Action.Builder(
+                Icon.createWithResource(this, icon),
+                label,
                 PendingIntent.getService(
                     this, act.hashCode(),
                     Intent(this, SpeechService::class.java).setAction(act),
                     PendingIntent.FLAG_IMMUTABLE
                 )
-            )
+            ).build()
         }
         val pauseAction = action(SpeechCommands.ACTION_PAUSE, "暂停", android.R.drawable.ic_media_pause)
         val playAction = action(SpeechCommands.ACTION_PLAY, "播放", android.R.drawable.ic_media_play)
         val nextAction = action(SpeechCommands.ACTION_NEXT, "下一句", android.R.drawable.ic_media_next)
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        val style = Notification.MediaStyle()
+            .setMediaSession(mediaSession?.sessionToken)
+            .setShowActionsInCompactView(0, 1, 2)
+
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle("阅舟朗读")
             .setContentText(stateMachine.plan?.bookId ?: "")
@@ -405,16 +407,10 @@ class SpeechService : Service() {
             .addAction(playAction)
             .addAction(pauseAction)
             .addAction(nextAction)
+            .setStyle(style)
             .setOngoing(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            builder.setStyle(
-                Notification.MediaStyle()
-                    .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
-            )
-        }
-        return builder.build()
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .build()
     }
 
     private fun createNotificationChannel() {

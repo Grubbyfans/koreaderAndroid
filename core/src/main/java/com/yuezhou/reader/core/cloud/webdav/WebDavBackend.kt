@@ -12,6 +12,7 @@ import com.yuezhou.reader.core.cloud.ListResult
 import com.yuezhou.reader.core.cloud.Outcome
 import com.yuezhou.reader.core.cloud.Precondition
 import okhttp3.Credentials
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -322,8 +323,8 @@ class WebDavBackend private constructor(
 
     companion object {
 
-        private val JSON_MEDIA_TYPE = okhttp3.MediaType.parse("application/json; charset=utf-8")!!
-        private val EPUB_MEDIA_TYPE = okhttp3.MediaType.parse("application/epub+zip")!!
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private val EPUB_MEDIA_TYPE = "application/epub+zip".toMediaType()
 
         /** 构建 WebDAV 后端。条件写入能力默认关闭，探测通过后由调用方开启。 */
         fun create(

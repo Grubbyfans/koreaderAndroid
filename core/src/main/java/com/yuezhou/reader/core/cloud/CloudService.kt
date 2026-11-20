@@ -3,9 +3,12 @@ package com.yuezhou.reader.core.cloud
 import com.yuezhou.reader.core.protocol.BookNames
 import com.yuezhou.reader.core.protocol.LibraryCatalog
 import com.yuezhou.reader.core.protocol.LibraryBook
+import com.yuezhou.reader.core.protocol.LibraryCatalogData
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
+import java.time.OffsetDateTime
+import java.time.temporal.ChronoUnit
 
 /**
  * 云端业务编排层，对齐 BaiduPanSync `modules/cloud_service.lua`。
@@ -19,18 +22,18 @@ import java.io.File
 class CloudService(private val backend: CloudBackend) {
 
     /** 读最新列表；不存在时返回空目录。 */
-    suspend fun index(): LibraryCatalog.LibraryCatalogData {
+    suspend fun index(): LibraryCatalogData {
         val raw = try {
             backend.downloadBytes("library.json", LibraryCatalog.MAX_BYTES).toString(Charsets.UTF_8)
         } catch (e: CloudException) {
-            if (e.code == ErrorCode.NOT_FOUND) return LibraryCatalog.LibraryCatalogData(emptyList(), raw = buildJsonObject { put("schemaVersion", 2) })
+            if (e.code == ErrorCode.NOT_FOUND) return LibraryCatalogData(emptyList(), raw = buildJsonObject { put("schemaVersion", 2) })
             throw e
         }
         return LibraryCatalog.decode(raw)
     }
 
     /** 回写列表。 */
-    private suspend fun saveIndex(index: LibraryCatalog.LibraryCatalogData) {
+    private suspend fun saveIndex(index: LibraryCatalogData) {
         val raw = LibraryCatalog.encode(index)
         backend.uploadSmallJson("library.json", raw, Precondition.Unconditional)
     }
@@ -59,7 +62,7 @@ class CloudService(private val backend: CloudBackend) {
         val coverPath = previous?.coverPath
         val coverVersion = previous?.coverVersion
 
-        val uploadedAt = java.time.OffsetDateTime.now().toString()
+        val uploadedAt = OffsetDateTime.now().truncatedTo(ChronoUnit.SECONDS).toString()
         var record = LibraryCatalog.buildBookEntry(
             bookId = bookId,
             fileName = fileName,
@@ -123,7 +126,7 @@ class CloudService(private val backend: CloudBackend) {
             revision = revision + 1,
             writeId = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16),
             deviceId = progress.deviceId,
-            updatedAt = java.time.OffsetDateTime.now().toString(),
+            updatedAt = OffsetDateTime.now().truncatedTo(ChronoUnit.SECONDS).toString(),
         )
         val raw = com.yuezhou.reader.core.protocol.ProgressRecords.encode(record)
         backend.uploadSmallJson(path, raw, Precondition.Unconditional)

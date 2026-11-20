@@ -40,6 +40,8 @@ class SentencePlanner(
         for (unit in units) {
             if (unit.text.isEmpty()) continue
             for ((i, ch) in unit.text.withIndex()) {
+                // 片段起始处跳过前导空白（句末标点后的空格等），避免片段以空格开头。
+                if (buf.isEmpty() && ch.isWhitespace()) continue
                 buf.append(ch)
                 anchors.add(SourceAnchor(unit.anchor.nodeId, unit.anchor.offset + i))
                 if (isSentenceBoundary(ch)) {

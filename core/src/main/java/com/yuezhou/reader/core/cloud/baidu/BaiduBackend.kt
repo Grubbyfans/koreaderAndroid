@@ -12,8 +12,10 @@ import com.yuezhou.reader.core.cloud.ListResult
 import com.yuezhou.reader.core.cloud.Precondition
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -216,7 +218,7 @@ class BaiduBackend private constructor(
     private data class PreCreate(val uploadid: String, val blockList: List<Int>, val returnType: Int, val targetPath: String)
 
     private fun precreate(targetPath: String, size: Long, blocks: List<String>): PreCreate {
-        val blockListJson = buildJsonArray { blocks.forEach { add(it) } }.toString()
+        val blockListJson = buildJsonArray { blocks.forEach { add(JsonPrimitive(it)) } }.toString()
         val v = http.request(
             "https://pan.baidu.com/rest/2.0/xpan/file",
             method = "POST",
@@ -254,7 +256,7 @@ class BaiduBackend private constructor(
                 mapOf(
                     "path" to targetPath, "size" to size.toString(), "isdir" to "0",
                     "uploadid" to uploadid, "rtype" to "3",
-                    "block_list" to buildJsonArray { blocks.forEach { add(it) } }.toString(),
+                    "block_list" to buildJsonArray { blocks.forEach { add(JsonPrimitive(it)) } }.toString(),
                 )
             ),
             writing = true,
@@ -291,7 +293,7 @@ class BaiduBackend private constructor(
         authorized()
         val fullParams = params + ("access_token" to token)
         val query = BaiduForm.form(fullParams)
-        val mediaType = MediaType.parse(contentType)
+        val mediaType = contentType.toMediaType()
         val requestBody = RequestBody.create(mediaType, body)
         val builder = Request.Builder().url("$url?$query").post(requestBody)
         builder.header("User-Agent", "pan.baidu.com")
@@ -379,7 +381,7 @@ class BaiduBackend private constructor(
                         if (n == -1) break
                         read += n
                     }
-                    if (read != partSize) throw fail(ErrorCode.IO, "上传源文件读取不完整")
+                    if (read.toLong() != partSize) throw fail(ErrorCode.IO, "上传源文件读取不完整")
                 }
                 val sliceMd5 = uploadSlice(host, targetPath, pre.uploadid, idx, partBytes, "book.epub")
                 if (sliceMd5 != blocks[idx]) throw fail(ErrorCode.CONFLICT, "百度 EPUB 分片摘要不一致，未提交文件")
@@ -434,7 +436,7 @@ class BaiduBackend private constructor(
         downloadInternal(path, destination, maxBytes, onProgress)
     }
 
-    private fun downloadInternal(
+    private suspend fun downloadInternal(
         path: String,
         destination: File?,
         maxBytes: Long,
@@ -531,7 +533,7 @@ class BaiduBackend private constructor(
     }
 
     /** 拿某个路径的 fsId（作为字符串）。 */
-    private fun statFsId(path: String): String {
+    private suspend fun statFsId(path: String): String {
         val clean = path.trimEnd('/')
         val parent = clean.substringBeforeLast('/', "").let { if (it == clean) "" else it }
         var page: String? = null
@@ -553,7 +555,7 @@ class BaiduBackend private constructor(
             path.matches(Regex("^covers/.+\\.json$"))
         if (!valid) throw fail(ErrorCode.FORBIDDEN, "百度删除路径无效")
         invalidateLink(path)
-        val filelist = buildJsonArray { add(path(path)) }.toString()
+        val filelist = buildJsonArray { add(JsonPrimitive(path(path))) }.toString()
         val v = http.request(
             "https://pan.baidu.com/rest/2.0/xpan/file",
             method = "POST",

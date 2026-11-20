@@ -42,16 +42,17 @@ internal object DavPath {
         return true
     }
 
-    /** 路径段 RFC 3986 编码：保留 `A-Z a-z 0-9 - . _ ~ /`，其余百分号编码。 */
+    /** 路径段 RFC 3986 编码：保留 `A-Z a-z 0-9 - . _ ~ /`，其余（含非 ASCII）百分号编码。 */
     fun encode(path: String): String {
         val sb = StringBuilder()
         for (c in path) {
-            val keep = c.isLetterOrDigit() || c == '-' || c == '.' || c == '_' || c == '~' || c == '/'
+            val keep = (c in 'a'..'z') || (c in 'A'..'Z') || (c in '0'..'9') ||
+                c == '-' || c == '.' || c == '_' || c == '~' || c == '/'
             if (keep) {
                 sb.append(c)
             } else {
                 val bytes = c.toString().toByteArray(Charsets.UTF_8)
-                for (b in bytes) sb.append('%').append(("%02X").format(b))
+                for (b in bytes) sb.append('%').append(("%02X").format(b.toInt() and 0xFF))
             }
         }
         return sb.toString()

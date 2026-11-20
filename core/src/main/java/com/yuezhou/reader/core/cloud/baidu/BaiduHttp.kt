@@ -4,6 +4,7 @@ import com.yuezhou.reader.core.cloud.CloudException
 import com.yuezhou.reader.core.cloud.ErrorCode
 import com.yuezhou.reader.core.cloud.Outcome
 import kotlinx.serialization.json.JsonObject
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -65,7 +66,7 @@ internal class BaiduHttp(
     }
 
     companion object {
-        private val FORM_MEDIA_TYPE = okhttp3.MediaType.parse("application/x-www-form-urlencoded; charset=utf-8")!!
+        private val FORM_MEDIA_TYPE = "application/x-www-form-urlencoded; charset=utf-8".toMediaType()
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .followRedirects(false)

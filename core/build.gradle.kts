@@ -40,5 +40,6 @@ dependencies {
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.kxml2)
     androidTestImplementation(libs.androidx.test.ext.junit)
 }
