@@ -1,0 +1,18 @@
+app/src/main/assets/reader/bridge.js
+  h_7f20b2a03eb3b6 134-136,145-161,165,171-188,360,362-363,366,374-388
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  h_7f20b2a03eb3b6 408,411
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  h_7f20b2a03eb3b6 193-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d9a10e808fbf4b193c1ab788d2842ae933d31e53",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
