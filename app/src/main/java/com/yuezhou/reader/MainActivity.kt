@@ -46,7 +46,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -101,6 +100,10 @@ import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.LocalScanner
 import com.yuezhou.reader.reader.TempFileCleanup
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -151,13 +154,10 @@ private fun BookshelfScreen() {
 
     val store = remember { LibraryStore(context) }
     var hiddenBooks by remember { mutableStateOf(store.hiddenBookIds()) }
-    // 书架排序：新添加（无阅读记录）在最前，其余按最近阅读时间倒序
+    // 书架排序：按最近阅读时间倒序（读过的书排最前），从未读过的书排最后
     val visibleBooks = remember(books, hiddenBooks) {
         books.filter { it.bookId !in hiddenBooks }
-            .sortedWith(
-                compareByDescending<LibraryStore.Entry> { it.lastReadAt != null } // 有阅读记录的排后
-                    .thenByDescending { it.lastReadAt ?: 0L }, // 无记录按 0，有记录按时间倒序
-            )
+            .sortedByDescending { it.lastReadAt ?: Long.MIN_VALUE }
     }
     val removedBooks = books.filter { it.bookId in hiddenBooks }
     val cloudSync = remember { CloudSync(context) }
@@ -242,6 +242,16 @@ private fun BookshelfScreen() {
         books = store.snapshot().books
         hiddenBooks = store.hiddenBookIds()
         loading = false
+    }
+
+    // 从阅读器返回书架（ON_RESUME）时刷新书库，让阅读进度/最近阅读排序即时更新
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshKey++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val uploadQueue = remember(cloudSync, scope) { BookUploadQueue(cloudSync, scope) }
@@ -496,7 +506,6 @@ private fun BookshelfScreen() {
                         )
                     }
                 }
-                Tab.最近阅读 -> RecentReading(visibleBooks)
                 Tab.设置 -> SettingsPage(cloudSync, uploadQueue, remoteLoading)
             }
         }
@@ -895,10 +904,9 @@ private fun ScanResultDialog(
     )
 }
 
-/** 底部导航的三个 tab。 */
+/** 底部导航的两个 tab。 */
 private enum class Tab(val label: String, val icon: ImageVector) {
     书架("书库", Icons.Filled.List),
-    最近阅读("最近阅读", Icons.Filled.Star),
     设置("设置", Icons.Filled.Settings),
 }
 
@@ -1186,137 +1194,6 @@ private fun BookshelfContent(
                     )
                 }
             }
-        }
-    }
-}
-
-/** 最近阅读：按最近阅读时间倒序，仅展示有阅读记录的书，最多 5 本。 */
-@Composable
-private fun RecentReading(books: List<LibraryStore.Entry>) {
-    val recent = remember(books) {
-        books.filter { it.lastReadAt != null }
-            .sortedByDescending { it.lastReadAt }
-            .take(5)
-    }
-    if (recent.isEmpty()) {
-        EmptyState(
-            icon = Icons.Filled.Star,
-            title = "还没有阅读记录",
-            subtitle = "开始读一本书后，它会出现在这里",
-        )
-        return
-    }
-    val context = androidx.compose.ui.platform.LocalContext.current
-    LazyColumn(
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        lazyItems(recent, key = { it.bookId }) { book ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(YuezhouColors.Surface)
-                    .clickable {
-                        context.startActivity(
-                            Intent(context, ReaderActivity::class.java).apply {
-                                putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId)
-                            },
-                        )
-                    }
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 小封面
-                Box(
-                    modifier = Modifier
-                        .size(width = 48.dp, height = 64.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(CoverPlaceholder.color(book.bookId)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val cover = book.coverPng
-                    if (cover != null) {
-                        CoverImage(
-                            bytes = cover,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                        )
-                    } else {
-                        Text(
-                            book.title.take(1),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White,
-                        )
-                    }
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        book.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                        color = YuezhouColors.TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(3.dp)
-                                .clip(RoundedCornerShape(1.5.dp))
-                                .background(YuezhouColors.Divider),
-                        ) {
-                            book.percent?.let { p ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(p.coerceIn(0.0, 1.0).coerceAtLeast(0.01).toFloat())
-                                        .height(3.dp)
-                                        .clip(RoundedCornerShape(1.5.dp))
-                                        .background(YuezhouColors.Brand),
-                                )
-                            }
-                        }
-                        book.percent?.let { p ->
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "已读 ${(p * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = YuezhouColors.TextSecondary,
-                            )
-                        }
-                    }
-                    book.lastReadAt?.let { ts ->
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            formatReadAt(ts),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = YuezhouColors.TextSecondary,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** 把阅读时间戳格式化为「刚刚 / N 分钟前 / 昨天 / MM-dd」等简短文案。 */
-private fun formatReadAt(millis: Long): String {
-    val now = System.currentTimeMillis()
-    val diff = now - millis
-    val minute = 60_000L
-    val hour = 60 * minute
-    val day = 24 * hour
-    return when {
-        diff < minute -> "刚刚"
-        diff < hour -> "${diff / minute} 分钟前"
-        diff < day -> "${diff / hour} 小时前"
-        diff < 2 * day -> "昨天"
-        else -> {
-            val fmt = java.text.SimpleDateFormat("MM-dd", java.util.Locale.getDefault())
-            fmt.format(java.util.Date(millis))
         }
     }
 }
@@ -1861,19 +1738,6 @@ private fun BottomNavBar(current: Tab, onSelect: (Tab) -> Unit) {
             onClick = { onSelect(Tab.书架) },
             icon = { Icon(Tab.书架.icon, contentDescription = Tab.书架.label) },
             label = { Text(Tab.书架.label) },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = YuezhouColors.Brand,
-                selectedTextColor = YuezhouColors.Brand,
-                unselectedIconColor = YuezhouColors.TextSecondary,
-                unselectedTextColor = YuezhouColors.TextSecondary,
-                indicatorColor = YuezhouColors.Brand.copy(alpha = 0.12f),
-            ),
-        )
-        NavigationBarItem(
-            selected = current == Tab.最近阅读,
-            onClick = { onSelect(Tab.最近阅读) },
-            icon = { Icon(Tab.最近阅读.icon, contentDescription = Tab.最近阅读.label) },
-            label = { Text(Tab.最近阅读.label) },
             colors = NavigationBarItemDefaults.colors(
                 selectedIconColor = YuezhouColors.Brand,
                 selectedTextColor = YuezhouColors.Brand,
