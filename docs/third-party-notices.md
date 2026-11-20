@@ -27,3 +27,14 @@
 ## 其他
 
 - Gradle/AGP/Kotlin/Compose/AndroidX 版本锁定见 `gradle/libs.versions.toml`。
+
+
+## 内置阅读字体
+
+APK 的 `assets/reader/fonts/` 含以下官方常规字重文件及对应的 SIL Open Font License 1.1 文本。字体文件保持上游原样。
+
+| 字体 | 来源版本 | 随附许可证 |
+| --- | --- | --- |
+| Noto Serif SC | [Noto CJK Serif2.003，SC Subset OTF](https://github.com/notofonts/noto-cjk/tree/Serif2.003/Serif/SubsetOTF/SC) | `OFL-NotoSerif.txt` |
+| Noto Sans SC | [Noto CJK Sans2.004，SC Subset OTF](https://github.com/notofonts/noto-cjk/tree/Sans2.004/Sans/SubsetOTF/SC) | `OFL-NotoSans.txt` |
+| 霞鹜文楷轻便版 | [LXGW WenKai Lite v1.530](https://github.com/lxgw/LxgwWenKai-Lite/tree/v1.530) | `OFL-WenKai.txt` |

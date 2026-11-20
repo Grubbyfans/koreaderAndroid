@@ -296,13 +296,22 @@ const systemFontFamilies = new Map([
     ['mono', 'monospace'],
 ])
 
+const bundledFonts = new Map([
+    ['noto-serif-sc', { file: 'noto-serif-sc.otf', fallback: 'serif' }],
+    ['noto-sans-sc', { file: 'noto-sans-sc.otf', fallback: 'sans-serif' }],
+    ['wenkai-lite', { file: 'wenkai-lite.ttf', fallback: 'serif' }],
+])
+
 function fontStyle(id) {
     let family = systemFontFamilies.get(id)
     let face = ''
-    if (typeof id === 'string' && /^[0-9a-f-]{36}\.(ttf|otf)$/.test(id)) {
-        const url = new URL(`/fonts/${id}`, location.origin).href
+    const bundled = bundledFonts.get(id)
+    const isImported = typeof id === 'string' && /^[0-9a-f-]{36}\.(ttf|otf)$/.test(id)
+    if (bundled || isImported) {
+        const path = bundled ? `/assets/reader/fonts/${bundled.file}` : `/fonts/${id}`
+        const url = new URL(path, location.origin).href
         face = `@font-face { font-family: YuezhouCustom; src: url("${url}"); font-display: swap; }`
-        family = 'YuezhouCustom, sans-serif'
+        family = `YuezhouCustom, ${bundled?.fallback ?? 'sans-serif'}`
     }
     if (!family) return ''
     return `${face}

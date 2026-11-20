@@ -23,8 +23,11 @@ import com.yuezhou.reader.reader.ReaderFontStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-private val systemFonts = listOf(
+private val defaultFonts = listOf(
     ReaderFontStore.Font("book", "书籍默认"),
+    ReaderFontStore.Font("noto-serif-sc", "思源宋体风格 · Noto Serif SC"),
+    ReaderFontStore.Font("noto-sans-sc", "思源黑体风格 · Noto Sans SC"),
+    ReaderFontStore.Font("wenkai-lite", "霞鹜文楷（轻便版）"),
     ReaderFontStore.Font("sans", "系统无衬线"),
     ReaderFontStore.Font("serif", "系统衬线"),
     ReaderFontStore.Font("mono", "系统等宽"),
@@ -59,8 +62,8 @@ internal fun ReaderFontPreference(selectedId: String) {
         }
     }
 
-    val choices = systemFonts + installed
-    val selected = choices.firstOrNull { it.id == selectedId } ?: systemFonts.first()
+    val choices = defaultFonts + installed
+    val selected = choices.firstOrNull { it.id == selectedId } ?: defaultFonts.first()
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("字体", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         TextButton(enabled = !importing, onClick = { selecting = true }) {
