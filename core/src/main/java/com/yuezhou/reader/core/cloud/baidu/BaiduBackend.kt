@@ -609,5 +609,8 @@ class BaiduBackend private constructor(
             .readTimeout(120, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
             .build()
+
+        /** 公开的默认 client 工厂，供上层（CloudSync）注入诊断拦截器。 */
+        fun defaultClientForDiagnostics(): OkHttpClient = defaultClient()
     }
 }

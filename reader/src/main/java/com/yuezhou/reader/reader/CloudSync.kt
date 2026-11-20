@@ -4,6 +4,7 @@ import android.content.Context
 import com.yuezhou.reader.core.cloud.CloudBackend
 import com.yuezhou.reader.core.cloud.CloudException
 import com.yuezhou.reader.core.cloud.CloudService
+import com.yuezhou.reader.core.cloud.DiagnosticCollector
 import com.yuezhou.reader.core.cloud.ErrorCode
 import com.yuezhou.reader.core.cloud.ProgressPayload
 import com.yuezhou.reader.core.cloud.BackendKind
@@ -32,6 +33,9 @@ class CloudSync(private val context: Context) {
 
     /** 云端书库持久化缓存（列表按日历日 + 封面按版本）。 */
     private val cache = CloudCache(context)
+
+    /** 诊断摘要持久化（最近 20 次，可导出脱敏 JSON，方案 §13.2）。 */
+    private val diagnostics = DiagnosticStore(context)
 
     /** 同步结果：成功与否 + 用户可读消息。 */
     data class SyncOutcome(val success: Boolean, val message: String)
@@ -67,9 +71,11 @@ class CloudSync(private val context: Context) {
      *   1. 用户显式指定了当前后端（[CloudCredentials.activeBackend]）→ 用指定后端；
      *   2. 未指定（null，自动）→ 优先百度（已授权），否则 WebDAV（已配置），否则 null。
      *
+     * @param collector 可选的诊断收集器；非空时把其拦截器注入后端 OkHttpClient，
+     * 以统计本次任务的请求数/字节/重定向（对齐方案 §13.2）。
      * @throws CloudException 凭据格式非法（如应用目录不是 /apps/xxx、token 缺失）。
      */
-    suspend fun backend(): CloudBackend? {
+    suspend fun backend(collector: DiagnosticCollector? = null): CloudBackend? {
         val creds = credentialStore.load()
         val baiduAvailable = creds.baiduAccessToken != null && creds.baiduAppDir != null
         val webdavAvailable = creds.webdavRootUrl != null && creds.webdavUsername != null
@@ -80,6 +86,12 @@ class CloudSync(private val context: Context) {
             else -> baiduAvailable || !webdavAvailable
         }
 
+        // 诊断拦截器：把请求统计注入到后端 client
+        fun withDiagnostics(base: () -> okhttp3.OkHttpClient): () -> okhttp3.OkHttpClient = {
+            val client = base()
+            if (collector != null) client.newBuilder().addInterceptor(collector.interceptor).build() else client
+        }
+
         return when {
             useBaidu && baiduAvailable -> {
                 BaiduBackend.create(
@@ -87,6 +99,7 @@ class CloudSync(private val context: Context) {
                     accessToken = creds.baiduAccessToken!!,
                     expiresAt = creds.baiduExpiresAt ?: 0L,
                     userId = creds.baiduUserId,
+                    clientFactory = withDiagnostics { BaiduBackend.defaultClientForDiagnostics() },
                 )
             }
             !useBaidu && webdavAvailable -> {
@@ -94,6 +107,7 @@ class CloudSync(private val context: Context) {
                     rootUrl = creds.webdavRootUrl!!,
                     username = creds.webdavUsername!!,
                     password = creds.webdavPassword ?: "",
+                    clientFactory = withDiagnostics { WebDavBackend.defaultClientForDiagnostics() },
                 )
             }
             // 显式选了某后端但该后端未配置 → 回退到另一侧（容错，避免误报未配置）
@@ -103,11 +117,13 @@ class CloudSync(private val context: Context) {
                     accessToken = creds.baiduAccessToken!!,
                     expiresAt = creds.baiduExpiresAt ?: 0L,
                     userId = creds.baiduUserId,
+                    clientFactory = withDiagnostics { BaiduBackend.defaultClientForDiagnostics() },
                 )
                 webdavAvailable -> WebDavBackend.create(
                     rootUrl = creds.webdavRootUrl!!,
                     username = creds.webdavUsername!!,
                     password = creds.webdavPassword ?: "",
+                    clientFactory = withDiagnostics { WebDavBackend.defaultClientForDiagnostics() },
                 )
                 else -> null
             }
@@ -125,8 +141,10 @@ class CloudSync(private val context: Context) {
      */
     suspend fun pushLocal(onBookProgress: ((done: Int, total: Int) -> Unit)? = null): SyncOutcome =
         withContext(Dispatchers.IO) {
+            val collector = DiagnosticCollector()
+            val start = System.currentTimeMillis()
             try {
-                val backend = backend()
+                val backend = backend(collector)
                     ?: return@withContext SyncOutcome(false, "尚未配置云后端，请先在设置页配置 WebDAV 或百度网盘")
                 // 授权就绪检查（百度校验 token 未过期、WebDAV 校验凭据可用）
                 backend.ensureAuthorized()
@@ -136,6 +154,9 @@ class CloudSync(private val context: Context) {
                 val store = LibraryStore(context)
                 val snapshot = store.snapshot()
                 if (snapshot.books.isEmpty()) {
+                    collector.recordPhase("读列表", System.currentTimeMillis() - start)
+                    collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Failed)
+                    diagnostics.append("同步", collector.snapshot())
                     return@withContext SyncOutcome(true, "本地书库为空，无需同步")
                 }
 
@@ -156,6 +177,7 @@ class CloudSync(private val context: Context) {
                             savedAt = System.currentTimeMillis(),
                         )
                     )
+                    val bookStart = System.currentTimeMillis()
                     try {
                         // 上传正文（同名覆盖），封面回传本地已提取的 PNG（无封面则返回 null，不写 coverPath）
                         val coverPng = entry.coverPng
@@ -175,25 +197,35 @@ class CloudSync(private val context: Context) {
                         if (e.code == ErrorCode.UNCERTAIN) {
                             // 正文已上传但列表发布失败 → 保留回执，供后续补全
                             pending++
+                            collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Uncertain, e.code)
                         } else {
                             // 其他失败（正文可能未传成功）也保留回执，补全时 stat 确认后再补
                             pending++
+                            collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Failed, e.code)
                         }
                     }
+                    collector.recordPhase("上传《${entry.bookId}》", System.currentTimeMillis() - bookStart)
                     done++
                     onBookProgress?.invoke(done, total)
                 }
 
                 // 同步成功，云端书库已变化，失效列表缓存以便下次进入时重新拉取
                 invalidateListCache()
+                collector.recordPhase("总耗时", System.currentTimeMillis() - start)
+                diagnostics.append("同步", collector.snapshot())
                 if (pending > 0) {
                     SyncOutcome(true, "同步完成：$done/$total 本，$pending 本待补全（可在设置中重试）")
                 } else {
                     SyncOutcome(true, "同步完成：$done/$total 本")
                 }
             } catch (e: CloudException) {
+                collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Failed, e.code)
+                collector.recordPhase("总耗时", System.currentTimeMillis() - start)
+                diagnostics.append("同步", collector.snapshot())
                 SyncOutcome(false, "同步失败：${e.message}")
             } catch (e: Exception) {
+                collector.recordPhase("总耗时", System.currentTimeMillis() - start)
+                diagnostics.append("同步", collector.snapshot())
                 SyncOutcome(false, "同步失败：${e.message ?: e.toString()}")
             }
         }
@@ -250,7 +282,9 @@ class CloudSync(private val context: Context) {
      * - 更新失败保留旧缓存，抛异常由 UI 展示失败状态。
      */
     suspend fun listBooks(force: Boolean = false): RemoteLibrary = withContext(Dispatchers.IO) {
-        val backend = backend() ?: throw CloudException(
+        val collector = DiagnosticCollector()
+        val start = System.currentTimeMillis()
+        val backend = backend(collector) ?: throw CloudException(
             ErrorCode.INVALID_INPUT, "尚未配置云后端，请先在设置页配置 WebDAV 或百度网盘",
         )
         val ns = backend.backendId
@@ -259,7 +293,10 @@ class CloudSync(private val context: Context) {
         if (!force) {
             val cached = cache.readList(ns)
             if (cached != null) {
+                collector.recordCacheHit("列表")
                 val fromCacheBooks = decodeCachedBooks(cached.raw, backend)
+                collector.recordPhase("读列表", System.currentTimeMillis() - start)
+                diagnostics.append("读云端书库", collector.snapshot())
                 return@withContext RemoteLibrary(
                     books = fromCacheBooks,
                     backendLabel = backendLabelOf(backend),
@@ -269,34 +306,43 @@ class CloudSync(private val context: Context) {
             }
         }
 
-        backend.ensureAuthorized()
-        val service = CloudService(backend)
-        val index = service.index()
-
-        // 本地已存在的 bookId 集合，用于封面角标
-        val localIds = LibraryStore(context).snapshot().books.map { it.bookId }.toSet()
-
-        val books = index.books.map { b ->
-            RemoteBook(
-                bookId = b.bookId,
-                fileName = b.fileName,
-                size = b.size,
-                coverPath = b.coverPath,
-                coverVersion = b.coverVersion,
-                local = b.bookId in localIds,
-                coverPng = b.coverPath?.let { fetchCover(backend, ns, b.bookId, b.coverVersion ?: "") },
-            )
-        }
-        val fetchedAt = System.currentTimeMillis()
-        val result = RemoteLibrary(books, backendLabelOf(backend), fromCache = false, fetchedAt = fetchedAt)
-
-        // 写回持久化缓存（只存列表原文，封面单独缓存）
         try {
-            cache.writeList(ns, LibraryCatalog.encode(index), fetchedAt)
-        } catch (e: Exception) {
-            // 缓存写失败不影响主流程
+            backend.ensureAuthorized()
+            val service = CloudService(backend)
+            val index = service.index()
+
+            // 本地已存在的 bookId 集合，用于封面角标
+            val localIds = LibraryStore(context).snapshot().books.map { it.bookId }.toSet()
+
+            val books = index.books.map { b ->
+                RemoteBook(
+                    bookId = b.bookId,
+                    fileName = b.fileName,
+                    size = b.size,
+                    coverPath = b.coverPath,
+                    coverVersion = b.coverVersion,
+                    local = b.bookId in localIds,
+                    coverPng = b.coverPath?.let { fetchCover(backend, ns, b.bookId, b.coverVersion ?: "") },
+                )
+            }
+            val fetchedAt = System.currentTimeMillis()
+            val result = RemoteLibrary(books, backendLabelOf(backend), fromCache = false, fetchedAt = fetchedAt)
+
+            // 写回持久化缓存（只存列表原文，封面单独缓存）
+            try {
+                cache.writeList(ns, LibraryCatalog.encode(index), fetchedAt)
+            } catch (e: Exception) {
+                // 缓存写失败不影响主流程
+            }
+            collector.recordPhase("读列表", System.currentTimeMillis() - start)
+            diagnostics.append("读云端书库", collector.snapshot())
+            result
+        } catch (e: CloudException) {
+            collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Failed, e.code)
+            collector.recordPhase("读列表", System.currentTimeMillis() - start)
+            diagnostics.append("读云端书库", collector.snapshot())
+            throw e
         }
-        result
     }
 
     /**
@@ -304,21 +350,32 @@ class CloudSync(private val context: Context) {
      * 返回用户可读的结果描述；失败抛异常由 UI 提示。
      */
     suspend fun refreshLibrary(): String = withContext(Dispatchers.IO) {
-        val backend = backend() ?: throw CloudException(
+        val collector = DiagnosticCollector()
+        val start = System.currentTimeMillis()
+        val backend = backend(collector) ?: throw CloudException(
             ErrorCode.INVALID_INPUT, "尚未配置云后端，请先在设置页配置 WebDAV 或百度网盘",
         )
-        backend.ensureAuthorized()
-        val service = CloudService(backend)
+        try {
+            backend.ensureAuthorized()
+            val service = CloudService(backend)
 
-        val discovered = service.discoverExternalBooks()
-        // 主动更新后失效缓存，下次 listBooks 强制重拉最新列表
-        invalidateListCache()
+            val discovered = service.discoverExternalBooks()
+            // 主动更新后失效缓存，下次 listBooks 强制重拉最新列表
+            invalidateListCache()
+            collector.recordPhase("主动更新", System.currentTimeMillis() - start)
+            diagnostics.append("刷新书库", collector.snapshot())
 
-        buildString {
-            append("已更新书库")
-            if (discovered.added.isNotEmpty()) append("，新增 ${discovered.added.size} 本")
-            if (discovered.skipped.isNotEmpty()) append("，跳过 ${discovered.skipped.size} 本（同名冲突）")
-            if (discovered.added.isEmpty() && discovered.skipped.isEmpty()) append("，无变化")
+            buildString {
+                append("已更新书库")
+                if (discovered.added.isNotEmpty()) append("，新增 ${discovered.added.size} 本")
+                if (discovered.skipped.isNotEmpty()) append("，跳过 ${discovered.skipped.size} 本（同名冲突）")
+                if (discovered.added.isEmpty() && discovered.skipped.isEmpty()) append("，无变化")
+            }
+        } catch (e: CloudException) {
+            collector.markOutcome(com.yuezhou.reader.core.cloud.Outcome.Failed, e.code)
+            collector.recordPhase("主动更新", System.currentTimeMillis() - start)
+            diagnostics.append("刷新书库", collector.snapshot())
+            throw e
         }
     }
 
@@ -573,6 +630,13 @@ class CloudSync(private val context: Context) {
         BackendKind.WebDav -> "WebDAV"
         else -> null
     }
+
+    /** 导出脱敏诊断 JSON（方案 §13.2「可主动导出脱敏 JSON」）。 */
+    suspend fun exportDiagnostics(): String = diagnostics.export()
+
+    /** 读取诊断摘要列表（时间升序），供 UI 展示。 */
+    suspend fun diagnosticSummaries(): List<Pair<Long, Pair<String, com.yuezhou.reader.core.cloud.DiagnosticSummary>>> =
+        diagnostics.all()
 
     private fun deviceId(): String {
         val sp = context.getSharedPreferences("library", Context.MODE_PRIVATE)

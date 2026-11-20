@@ -1139,6 +1139,45 @@ private fun SettingsPage() {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
             }
         }
+
+        // 诊断摘要（方案 §13.2：最近 20 次同步/刷新任务的可执行诊断）
+        Spacer(Modifier.height(16.dp))
+        var diagnostics by remember { mutableStateOf<List<Pair<Long, Pair<String, com.yuezhou.reader.core.cloud.DiagnosticSummary>>>>(emptyList()) }
+        var showDiagnostics by remember { mutableStateOf(false) }
+        TextButton(
+            onClick = {
+                scope.launch {
+                    diagnostics = CloudSync(context).diagnosticSummaries()
+                    showDiagnostics = !showDiagnostics
+                }
+            },
+        ) {
+            Text(if (showDiagnostics) "收起诊断" else "查看诊断")
+        }
+        if (showDiagnostics) {
+            if (diagnostics.isEmpty()) {
+                Text(
+                    "暂无诊断记录（完成一次同步或刷新书库后生成）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YuezhouColors.TextSecondary,
+                )
+            } else {
+                // 倒序展示最近的在前面
+                diagnostics.reversed().forEach { (at, pair) ->
+                    val (kind, s) = pair
+                    val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+                        .format(java.util.Date(at))
+                    val phaseText = s.phasesMs.entries.joinToString(" ") { "${it.key}=${it.value}ms" }
+                    Text(
+                        "[$time] $kind · 请求${s.totalRequests} · ↑${s.bytesUp}B ↓${s.bytesDown}B · 缓存${s.cacheHits}" +
+                            (s.errorKind?.let { " · $it" } ?: "") + "\n$phaseText",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
