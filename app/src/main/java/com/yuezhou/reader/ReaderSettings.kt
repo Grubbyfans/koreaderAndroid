@@ -27,12 +27,14 @@ data class ReaderPreferences(
     val speechRate: Float = 1.0f,
     /** 朗读音色名（TextToSpeech.setVoice 入参）；空串表示用引擎默认音色。 */
     val speechVoice: String = "",
+    val fontId: String = "book",
 )
 
 private val Context.readerDataStore by preferencesDataStore(name = "reader_settings")
 
 object ReaderSettings {
 
+    private val KEY_FONT_ID = stringPreferencesKey("font_id")
     private val KEY_FONT_SIZE = intPreferencesKey("font_size")
     private val KEY_LINE_HEIGHT = doublePreferencesKey("line_height")
     private val KEY_PAGE_MARGIN = intPreferencesKey("page_margin")
@@ -46,6 +48,7 @@ object ReaderSettings {
         context.readerDataStore.data.map { prefs ->
             ReaderPreferences(
                 fontSize = prefs[KEY_FONT_SIZE] ?: 18,
+                fontId = prefs[KEY_FONT_ID] ?: "book",
                 lineHeight = prefs[KEY_LINE_HEIGHT] ?: 1.6,
                 pageMargin = prefs[KEY_PAGE_MARGIN] ?: 12,
                 theme = prefs[KEY_THEME] ?: "light",
@@ -54,6 +57,10 @@ object ReaderSettings {
                 speechVoice = prefs[KEY_SPEECH_VOICE] ?: "",
             )
         }
+
+    suspend fun selectFont(context: Context, fontId: String) {
+        context.readerDataStore.edit { it[KEY_FONT_ID] = fontId }
+    }
 
     /** 保存整份设置。 */
     suspend fun save(context: Context, prefs: ReaderPreferences) {

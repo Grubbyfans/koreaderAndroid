@@ -12,6 +12,7 @@ let currentBook = null
 
 // 当前排版设置（字号/行距/边距/主题/翻页模式），供 applySettings 与 load 注入使用
 let currentSettings = {
+    fontId: "book",
     fontSize: 18,        // px
     lineHeight: 1.6,     // 倍数
     pageMargin: 20,      // px（左右/上下边距）
@@ -289,8 +290,30 @@ function applyTheme() {
     view.style.background = t.bg
 }
 
+const systemFontFamilies = new Map([
+    ['sans', 'sans-serif'],
+    ['serif', 'serif'],
+    ['mono', 'monospace'],
+])
+
+function fontStyle(id) {
+    let family = systemFontFamilies.get(id)
+    let face = ''
+    if (typeof id === 'string' && /^[0-9a-f-]{36}\.(ttf|otf)$/.test(id)) {
+        const url = new URL(`/fonts/${id}`, location.origin).href
+        face = `@font-face { font-family: YuezhouCustom; src: url("${url}"); font-display: swap; }`
+        family = 'YuezhouCustom, sans-serif'
+    }
+    if (!family) return ''
+    return `${face}
+        html body,
+        html body :is(p, div, li, span, em, strong, blockquote, h1, h2, h3, h4, h5, h6, td, th):not(:where(pre *, code *, svg *, math *)) {
+            font-family: ${family} !important;
+        }`
+}
+
 // 向每个已加载章节的 iframe document 注入字号/行距/主题样式
-function applyTextStyle() {
+function textStyle() {
     const s = currentSettings
     const themes = {
         light: { bg: '#faf9f7', fg: '#1a1a1a' },
@@ -300,7 +323,7 @@ function applyTextStyle() {
     const t = themes[s.theme] || themes.light
     // 注意：不再注入 body 的 padding，边距由 foliate 的 gap/margin 属性控制，
     // 避免与 foliate 内置的 grid 边距（--_gap）叠加导致左右留白过大。
-    const css = `
+    return `
         html, body {
             background: ${t.bg} !important;
             color: ${t.fg} !important;
@@ -312,7 +335,13 @@ function applyTextStyle() {
         p, div, li {
             line-height: inherit;
         }
+        ${fontStyle(s.fontId)}
     `
+}
+
+function applyTextStyle() {
+    const s = currentSettings
+    const css = textStyle()
     try {
         const renderer = view.renderer
         if (!renderer) return
@@ -363,23 +392,9 @@ view.addEventListener('relocate', ({ detail }) => {
     })
 })
 
-// 每章加载后注入用户排版样式（字号/行距/边距/主题）
-view.addEventListener('load', (e) => {
-    const doc = e.detail && e.detail.doc
-    if (doc) {
-        const s = currentSettings
-        const themes = {
-            light: { bg: '#faf9f7', fg: '#1a1a1a' },
-            sepia: { bg: '#f5ecd7', fg: '#3a3226' },
-            dark: { bg: '#1a1a1a', fg: '#c8c8c8' },
-        }
-        const t = themes[s.theme] || themes.light
-        const css = `
-            html, body { background: ${t.bg} !important; color: ${t.fg} !important; }
-            body { font-size: ${s.fontSize}px !important; line-height: ${s.lineHeight} !important; }
-        `
-        injectStyle(doc, css)
-    }
+// Apply the same preferences before the first pagination of each chapter.
+view.addEventListener('load', ({ detail }) => {
+    if (detail?.doc) injectStyle(detail.doc, textStyle())
 })
 
 // 判断元素是否为不可朗读内容：脚本/样式/隐藏装饰/导航

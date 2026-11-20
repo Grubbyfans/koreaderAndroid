@@ -467,7 +467,7 @@ private fun ReaderScreen(
         val wv = webView ?: return@LaunchedEffect
         val prefs = loadedPrefs ?: return@LaunchedEffect
         wv.verticalMode = prefs.vertical
-        wv.applySettings(prefs.fontSize, prefs.lineHeight, prefs.pageMargin, prefs.theme, prefs.vertical)
+        wv.applySettings(prefs.fontSize, prefs.lineHeight, prefs.pageMargin, prefs.theme, prefs.vertical, prefs.fontId)
         pendingOpen?.let { (fileName, restoreCfi, source) ->
             pendingOpen = null
             openedSource = fileName to source
@@ -825,6 +825,7 @@ private fun SettingsControls(
     // 语速预览值；null 表示未拖动
     var ratePreview by remember { mutableStateOf<Float?>(null) }
     Column(modifier = Modifier.fillMaxWidth()) {
+        ReaderFontPreference(prefs.fontId)
         // 字号
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("字号", style = MaterialTheme.typography.bodyMedium)

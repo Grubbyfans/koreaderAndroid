@@ -36,6 +36,19 @@ class ReaderWebView(context: Context) : WebView(context) {
         .addPathHandler("/assets/", AssetsPathHandler(context))
         // EPUB 私有目录：app 内部 files/epub/ 下的文件
         .addPathHandler("/epub/", InternalStoragePathHandler(context, File(context.filesDir, "epub")))
+        .addPathHandler("/fonts/") { path ->
+            val file = File(context.filesDir, "${ReaderFontStore.DIRECTORY}/$path")
+            if (!ReaderFontStore.isImportedFont(path) || !file.isFile) {
+                WebResourceResponse("text/plain", "UTF-8", 404, "Font unavailable", emptyMap(), null)
+            } else {
+                val mimeType = if (path.endsWith(".otf")) "font/otf" else "font/ttf"
+                try {
+                    WebResourceResponse(mimeType, null, 200, "OK", emptyMap(), file.inputStream())
+                } catch (_: java.io.IOException) {
+                    WebResourceResponse("text/plain", "UTF-8", 404, "Font unavailable", emptyMap(), null)
+                }
+            }
+        }
         .addPathHandler("/selected/") { path ->
             val uri = externalSource
             val stream = if (path == "book.epub" && uri != null) {
@@ -278,13 +291,15 @@ class ReaderWebView(context: Context) : WebView(context) {
         pageMargin: Int,
         theme: String,
         vertical: Boolean,
+        fontId: String,
     ) {
         val settings = buildString {
             append("{fontSize:$fontSize,")
             append("lineHeight:$lineHeight,")
             append("pageMargin:$pageMargin,")
             append("theme:${jsonQuote(theme)},")
-            append("vertical:$vertical}")
+            append("vertical:$vertical,")
+            append("fontId:${jsonQuote(fontId)}}")
         }
         if (readerSettings == settings) return
         readerSettings = settings

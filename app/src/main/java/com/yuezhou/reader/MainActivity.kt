@@ -1210,6 +1210,8 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             }
             Spacer(Modifier.height(4.dp))
 
+            ReaderFontPreference(prefs.fontId)
+
             // 字号
             Text("默认字号：${fontSizePreview ?: prefs.fontSize}", style = MaterialTheme.typography.bodyMedium)
             Slider(
