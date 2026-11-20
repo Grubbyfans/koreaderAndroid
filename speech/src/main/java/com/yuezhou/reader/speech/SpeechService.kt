@@ -137,6 +137,7 @@ class SpeechService : Service() {
     private fun handleStop() {
         tts?.stop()
         stateMachine.stop()
+        SpeechProgressTracker.clear()
         releaseAudioFocus()
         updatePlaybackState(PlaybackState.STATE_STOPPED)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -183,14 +184,14 @@ class SpeechService : Service() {
         override fun onStart(utteranceId: String?) {
             val seg = segmentIndexFrom(utteranceId) ?: return
             if (isStale(mySession)) return
-            stateMachine.onProgress(seg, 0)
+            confirm(seg, 0)
         }
 
         override fun onDone(utteranceId: String?) {
             val seg = segmentIndexFrom(utteranceId) ?: return
             if (isStale(mySession)) return
             // 该片段已完整播出，确认到片段末尾。
-            stateMachine.onProgress(seg, segmentAt(seg)?.text?.length ?: 0)
+            confirm(seg, segmentAt(seg)?.text?.length ?: 0)
             onSegmentDone()
         }
 
@@ -205,7 +206,18 @@ class SpeechService : Service() {
             val seg = segmentIndexFrom(utteranceId) ?: return
             if (isStale(mySession)) return
             // 引擎支持可靠范围回调时提供词/字级进度；否则仅句子级（onStart/onDone）。
-            stateMachine.onProgress(seg, start)
+            confirm(seg, start)
+        }
+
+        private fun confirm(seg: Int, charOffset: Int) {
+            stateMachine.onProgress(seg, charOffset)
+            val segment = segmentAt(seg)
+            SpeechProgressTracker.onProgress(
+                bookId = stateMachine.plan?.bookId ?: "",
+                segmentIndex = seg,
+                charOffset = charOffset,
+                anchor = segment?.anchorAt(charOffset),
+            )
         }
 
         private fun isStale(session: Long) = session != sessionId
@@ -228,6 +240,7 @@ class SpeechService : Service() {
         if (next == null) {
             // 计划播完：停止，释放焦点，但保留前台通知由上层决定是否退出。
             stateMachine.stop()
+            SpeechProgressTracker.clear()
             releaseAudioFocus()
             updatePlaybackState(PlaybackState.STATE_STOPPED)
             return
