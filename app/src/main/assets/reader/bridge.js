@@ -22,18 +22,15 @@ let currentSettings = {
 // 供 Kotlin 调用的全局接口
 window.__reader = {
     // 打开 EPUB：epubUrl 为 Android 侧提供的可访问 URL；restoreCfi 为可选的恢复位置
-    async openBook(epubUrl, restoreCfi) {
+    async openBook(epubUrl, restoreCfi, settings) {
         try {
             await view.open(epubUrl)
-            // view.open() 无返回值，book 挂在 view.book 上
             currentBook = view.book
-            // 关键：open() 只装载书，不渲染第一页；必须显式 init 才会翻页显示内容，
-            // 否则 WebView 白屏。lastLocation 为空时显示正文起始。
-            await view.init({ showTextStart: true })
-            // 有恢复位置则跳转过去
-            if (restoreCfi) {
-                await view.goTo(restoreCfi)
-            }
+            Object.assign(currentSettings, settings)
+            applyTheme()
+            applyTextStyle()
+            setFlow(currentSettings.vertical)
+            await view.init({ lastLocation: restoreCfi || null, showTextStart: true })
             post('bookOpened', {
                 sections: currentBook?.sections?.length ?? 0,
                 title: currentBook?.metadata?.title ?? '',
@@ -247,7 +244,7 @@ window.__reader = {
 }
 
 // 切换翻页模式：vertical=true 上下滚动(scrolled)，false 左右翻页(paginated)
-async function applyFlow(vertical) {
+function setFlow(vertical) {
     const renderer = view.renderer
     if (!renderer) return
     if (vertical) {
@@ -255,6 +252,10 @@ async function applyFlow(vertical) {
     } else {
         renderer.removeAttribute('flow')
     }
+}
+
+async function applyFlow(vertical) {
+    setFlow(vertical)
     // 重载当前位置，让 paginator 按新 flow 重新布局
     const cfi = view.lastLocation?.cfi
     if (cfi) {
@@ -343,14 +344,22 @@ function injectStyle(doc, css) {
     styleEl.textContent = css
 }
 
-// 监听位置变化：view 的 relocate 事件 detail 已含 CFI（内部 joinIndir 生成）
-view.addEventListener('relocate', (e) => {
-    const { cfi, index, fraction, range } = e.detail
+// Save the start of the visible page, independent of its trailing boundary.
+view.addEventListener('relocate', ({ detail }) => {
+    const { cfi, section, fraction, range } = detail
+    const index = section?.current ?? null
+    let pageStart = cfi
+    if (range && index !== null) {
+        try {
+            const start = range.cloneRange()
+            start.collapse(true)
+            pageStart = view.getCFI(index, start) ?? cfi
+        } catch { /* Keep the renderer CFI on unsupported layouts. */ }
+    }
     post('relocate', {
-        cfi: cfi ?? null,
-        index: index ?? null,
+        cfi: pageStart ?? null,
+        index,
         fraction: fraction ?? null,
-        hasRange: !!range,
     })
 })
 

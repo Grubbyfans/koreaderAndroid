@@ -166,10 +166,11 @@ class ReaderWebView(context: Context) : WebView(context) {
      */
     fun openEpub(epubFileName: String, restoreCfi: String? = null) {
         val url = "https://appassets.androidplatform.net/epub/$epubFileName"
+        val settings = readerSettings
         whenReaderReady {
             val restore = restoreCfi ?: ""
             evaluateJavascript(
-                "window.__reader.openBook(${jsonQuote(url)}, ${jsonQuote(restore)}).then(r => {});",
+                "window.__reader.openBook(${jsonQuote(url)}, ${jsonQuote(restore)}, $settings).then(r => {});",
                 null,
             )
         }
@@ -248,23 +249,29 @@ class ReaderWebView(context: Context) : WebView(context) {
     }
 
     /** 应用排版设置（字号/行距/边距/主题/翻页模式）。 */
+    private var readerSettings = "{}"
+
     fun applySettings(
         fontSize: Int,
         lineHeight: Double,
         pageMargin: Int,
         theme: String,
         vertical: Boolean,
-    ) = whenReaderReady {
-        val js = buildString {
-            append("window.__reader.applySettings({")
-            append("fontSize:$fontSize,")
+    ) {
+        val settings = buildString {
+            append("{fontSize:$fontSize,")
             append("lineHeight:$lineHeight,")
             append("pageMargin:$pageMargin,")
             append("theme:${jsonQuote(theme)},")
-            append("vertical:$vertical")
-            append("}).then(r => {});")
+            append("vertical:$vertical}")
         }
-        evaluateJavascript(js, null)
+        if (readerSettings == settings) return
+        readerSettings = settings
+        whenReaderReady {
+            if (readerSettings == settings) {
+                evaluateJavascript("window.__reader.applySettings($settings)", null)
+            }
+        }
     }
 
     /**

@@ -77,6 +77,7 @@ import com.yuezhou.reader.speech.SpeechVoices
 import com.yuezhou.reader.speech.TtsEngine
 import com.yuezhou.reader.speech.TtsVoice
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -156,12 +157,14 @@ private fun ReaderScreen(
 
     val store = remember { LibraryStore(context) }
     // 阅读设置（DataStore）
-    val readerPrefs by ReaderSettings.flow(context).collectAsStateWithLifecycle(initialValue = ReaderPreferences())
+    val loadedPrefs by ReaderSettings.flow(context).collectAsStateWithLifecycle(initialValue = null)
+    val readerPrefs = loadedPrefs ?: ReaderPreferences()
     // 当前 TTS 引擎可用音色（服务就绪后发布）
     val availableVoices by SpeechVoices.voices.collectAsStateWithLifecycle()
 
     // 进度去抖保存：翻页频繁时合并写入
     var saveJob by remember { mutableStateOf<Job?>(null) }
+    var leaving by remember { mutableStateOf(false) }
     // 记录最近一次位置，供退出时立即保存
     var lastPosition by remember { mutableStateOf<Pair<String, Double?>?>(null) }
 
@@ -173,11 +176,19 @@ private fun ReaderScreen(
     var undoPosition by remember(bookId) { mutableStateOf<Pair<String, Double?>?>(null) }
     var pendingJump by remember { mutableStateOf<Pair<String, kotlinx.coroutines.CompletableDeferred<Boolean>>?>(null) }
 
-    fun flushProgress() {
-        val pos = lastPosition
-        val id = bookId
-        if (pos != null && id != null) {
-            scope.launch { store.saveProgress(id, pos.first, pos.second) }
+    suspend fun flushProgress() {
+        saveJob?.cancelAndJoin()
+        val pos = lastPosition ?: return
+        val id = bookId ?: return
+        store.saveProgress(id, pos.first, pos.second)
+    }
+
+    fun leaveReader() {
+        if (leaving) return
+        leaving = true
+        scope.launch {
+            flushProgress()
+            onBack()
         }
     }
 
@@ -347,8 +358,8 @@ private fun ReaderScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP || event == Lifecycle.Event.ON_PAUSE) {
-                flushProgress()
+            if (event == Lifecycle.Event.ON_PAUSE && !leaving) {
+                scope.launch { flushProgress() }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -375,7 +386,7 @@ private fun ReaderScreen(
                 currentIndex = event.index
                 val cfi = event.cfi
                 val fraction = event.fraction
-                if (cfi != null && bookId != null && pendingJump == null) {
+                if (cfi != null && bookId != null && pendingJump == null && !leaving) {
                     lastPosition = cfi to fraction?.toDouble()
                     // 去抖：300ms 内的连续翻页合并成一次写
                     saveJob?.cancel()
@@ -404,8 +415,7 @@ private fun ReaderScreen(
     }
 
     fun openBookFile(fileName: String, restoreCfi: String? = null) {
-        val wv = webView
-        if (wv != null) wv.openEpub(fileName, restoreCfi) else pendingOpen = fileName to restoreCfi
+        pendingOpen = fileName to restoreCfi
     }
 
     // 初始化：有 bookId 则从书库打开
@@ -441,16 +451,16 @@ private fun ReaderScreen(
         }
     }
 
-    // 排版设置变化时应用（打开书后生效）
-    LaunchedEffect(readerPrefs) {
-        webView?.verticalMode = readerPrefs.vertical
-        webView?.applySettings(
-            fontSize = readerPrefs.fontSize,
-            lineHeight = readerPrefs.lineHeight,
-            pageMargin = readerPrefs.pageMargin,
-            theme = readerPrefs.theme,
-            vertical = readerPrefs.vertical,
-        )
+    // Open with the saved layout already applied so restoring the CFI uses the final pagination.
+    LaunchedEffect(webView, loadedPrefs, pendingOpen) {
+        val wv = webView ?: return@LaunchedEffect
+        val prefs = loadedPrefs ?: return@LaunchedEffect
+        wv.verticalMode = prefs.vertical
+        wv.applySettings(prefs.fontSize, prefs.lineHeight, prefs.pageMargin, prefs.theme, prefs.vertical)
+        pendingOpen?.let { (fileName, restoreCfi) ->
+            pendingOpen = null
+            wv.openEpub(fileName, restoreCfi)
+        }
     }
 
     ModalNavigationDrawer(
@@ -472,11 +482,13 @@ private fun ReaderScreen(
         },
     ) {
         // 返回键：优先关抽屉 → 关面板 → 退出
-        BackHandler(enabled = drawerState.isOpen || panelVisible) {
+        BackHandler {
             if (drawerState.isOpen) {
                 scope.launch { drawerState.close() }
             } else if (panelVisible) {
                 panelVisible = false
+            } else {
+                leaveReader()
             }
         }
         Box(
@@ -495,10 +507,6 @@ private fun ReaderScreen(
                         }
                         wv.verticalMode = readerPrefs.vertical
                         webView = wv
-                        pendingOpen?.let { (name, cfi) ->
-                            pendingOpen = null
-                            wv.openEpub(name, cfi)
-                        }
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -537,7 +545,7 @@ private fun ReaderScreen(
                     prefs = readerPrefs,
                     voices = availableVoices,
                     speaking = speaking || speakRequested,
-                    onBack = onBack,
+                    onBack = { leaveReader() },
                     onOpenToc = { scope.launch { drawerState.open() } },
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
