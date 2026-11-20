@@ -20,7 +20,7 @@ let currentSettings = {
     pageMargin: 20,      // px（左右/上下边距）
     theme: 'light',      // light | sepia | dark
     vertical: false,     // false=左右翻页, true=上下滚动
-    pageAnimation: 'slide', // none=无动画 | slide=平滑滑动 | simulate=仿真翻页 | ripple=水波纹涟漪
+    pageAnimation: 'slide', // none=无动画 | slide=平滑滑动 | simulate=仿真翻页
 }
 
 // 供 Kotlin 调用的全局接口
@@ -283,7 +283,7 @@ function setFlow(vertical) {
 }
 
 // 根据翻页动画设置开启/关闭动画：给 foliate-paginator 加 animated 属性并携带模式值。
-// none=瞬时翻页；slide=平滑滑动；simulate=3D 仿真卷页；ripple=水波纹涟漪扩散。
+// none=瞬时翻页；slide=平滑滑动；simulate=仿真卷页。
 function applyPageAnimation() {
     const renderer = view.renderer
     if (!renderer) return

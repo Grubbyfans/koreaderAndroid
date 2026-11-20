@@ -1276,7 +1276,6 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
                     "none" to "无动画",
                     "slide" to "平滑滑动",
                     "simulate" to "仿真翻页",
-                    "ripple" to "水波纹",
                 ).forEach { (value, label) ->
                     val selected = prefs.pageAnimation == value
                     Text(

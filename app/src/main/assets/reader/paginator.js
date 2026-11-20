@@ -39,7 +39,7 @@ const smoothScroll = (element, property, target, signal) => new Promise(resolve 
 })
 
 // Animate the chapter layer, then commit the real scroll offset in the same frame.
-// mode 决定翻页动效：'slide' 平滑滑动 | 'simulate' 3D 仿真卷页 | 'ripple' 水波纹涟漪。
+// mode 决定翻页动效：'slide' 平滑滑动 | 'simulate' 仿真卷页。
 const slidePage = async (element, content, property, target, signal, mode = 'slide') => {
     const delta = element[property] - target
     const horizontal = property === 'scrollLeft'
@@ -61,44 +61,29 @@ const slidePage = async (element, content, property, target, signal, mode = 'sli
         content.style.transform = ''
         content.style.transformOrigin = ''
         content.style.filter = ''
+        content.style.boxShadow = ''
     }
 }
 
 // 按模式构造翻页关键帧动画：
 // - slide：横向/纵向平移，轻盈滑动。
-// - simulate：2D skewX 斜切模拟纸张卷起（绕书脊倾斜），无透视缩放，文字不变形。
-// - ripple：平移叠加「周期性缩放/位移波动」模拟水波纹，页面像被水推着荡开。
+// - simulate：平移 + 方向性阴影 + 轻微亮度变化，模拟纸张翻起的厚度与层次（覆盖式翻页）。
+//   注：foliate 分页是 CSS multi-column 并排，对章节层做 skew/rotate 会撕裂相邻列，
+//   因此仿真翻页不做几何形变，改用「滑动 + 阴影层次」呈现，文字始终清晰不变形。
 const pageAnimation = (content, horizontal, delta, mode) => {
     if (mode === 'simulate') {
-        // delta 为当前偏移 - 目标偏移；sign 决定书脊在左还是右。
-        const sign = Math.sign(delta) || 1
-        // 绕书脊侧旋转轴，用 skewX 做倾斜卷页（约 ±14° 的峰值斜切），
-        // 全程无 perspective，避免整屏文字透视缩放导致「字体忽大忽小」。
-        content.style.transformOrigin = sign < 0 ? 'left center' : 'right center'
-        const skew = sign * 14
         const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
+        // 覆盖式翻页：整页平移，滑动过程中页面整体略暗（模拟纸张遮住下层），
+        // 前缘用 box-shadow 营造纸张厚度。不做几何形变，避免撕裂多栏文字。
+        const shadowX = horizontal ? `${Math.sign(delta || 1) * 24}px 0 32px -8px rgba(0,0,0,0.35)` : '0 0 0 rgba(0,0,0,0)'
+        const shadowY = horizontal ? '0 0 0 rgba(0,0,0,0)' : `0 ${Math.sign(delta || 1) * 24}px 32px -8px rgba(0,0,0,0.35)`
         return content.animate(
             [
-                { transform: `skewX(0deg)`, filter: 'brightness(1)' },
-                { transform: `skewX(${skew}deg)`, filter: 'brightness(0.94)' },
-                { transform: `skewX(0deg) ${translate}`, filter: 'brightness(1)' },
+                { transform: 'none', boxShadow: '0 0 0 rgba(0,0,0,0)', filter: 'brightness(1)' },
+                { transform: translate, boxShadow: `${shadowX} ${shadowY}`, filter: 'brightness(0.9)', offset: 0.5 },
+                { transform: translate, boxShadow: '0 0 0 rgba(0,0,0,0)', filter: 'brightness(1)', offset: 1 },
             ],
-            { duration: 320, easing: 'cubic-bezier(.3,.6,.3,1)', fill: 'forwards' },
-        )
-    }
-    if (mode === 'ripple') {
-        const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
-        const axis = horizontal ? 'scaleX' : 'scaleY'
-        // 水波纹：移动过程中叠加 2 次「先压缩后舒展」的弹性波动，
-        // 页面像被水面波纹推着走，字随之轻微压缩/回弹，视觉上明显区别于纯滑动。
-        return content.animate(
-            [
-                { transform: 'none' },
-                { transform: `${axis}(0.988) ${translate}`, offset: 0.35 },
-                { transform: `${axis}(1.006)`, offset: 0.6 },
-                { transform: translate, offset: 1 },
-            ],
-            { duration: 460, easing: 'cubic-bezier(.25,.55,.3,1)', fill: 'forwards' },
+            { duration: 340, easing: 'cubic-bezier(.3,.55,.35,1)', fill: 'forwards' },
         )
     }
     const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`

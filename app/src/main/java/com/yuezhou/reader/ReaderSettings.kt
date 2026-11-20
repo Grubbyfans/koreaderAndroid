@@ -23,7 +23,7 @@ data class ReaderPreferences(
     val theme: String = "light",
     /** 翻页模式：false=左右翻页，true=上下滚动。 */
     val vertical: Boolean = false,
-    /** 翻页动画方式：none=无动画（瞬时），slide=平滑滑动，simulate=仿真翻页，ripple=水波纹涟漪。 */
+    /** 翻页动画方式：none=无动画（瞬时），slide=平滑滑动，simulate=仿真翻页。 */
     val pageAnimation: String = "slide",
     /** 朗读语速（TextToSpeech 范围约 0.5..2.0，1.0 为正常）。 */
     val speechRate: Float = 1.0f,
