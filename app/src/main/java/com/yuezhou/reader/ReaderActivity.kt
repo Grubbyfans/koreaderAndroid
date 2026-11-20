@@ -656,6 +656,7 @@ private fun ReaderScreen(
                     voices = availableVoices,
                     speaking = speaking || speakRequested,
                     onBack = { leaveReader() },
+                    onDismiss = { panelVisible = false },
                     onOpenToc = { scope.launch { drawerState.open() } },
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
@@ -801,6 +802,7 @@ private fun ReaderPanel(
     voices: List<TtsVoice>,
     speaking: Boolean,
     onBack: () -> Unit,
+    onDismiss: () -> Unit,
     onOpenToc: () -> Unit,
     onImport: () -> Unit,
     onFractionSeek: (Float) -> Unit,
@@ -812,7 +814,14 @@ private fun ReaderPanel(
     var settingsExpanded by remember { mutableStateOf(false) }
     // 进度滑块拖动中的本地预览值；null 表示未在拖动（跟随真实 fraction）
     var fractionPreview by remember { mutableStateOf<Float?>(null) }
-    Column(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 全屏透明点击层：拦截对正文/翻页区的点击，直接隐藏面板
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss),
+        )
+        Column(modifier = Modifier.fillMaxSize()) {
         // 顶部栏：从上方滑入/滑出
         AnimatedVisibility(
             visible = true,
@@ -920,6 +929,7 @@ private fun ReaderPanel(
                     }
                 }
             }
+        }
         }
     }
 }
