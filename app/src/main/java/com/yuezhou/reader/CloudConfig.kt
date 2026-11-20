@@ -2,6 +2,7 @@ package com.yuezhou.reader
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -60,6 +61,53 @@ fun CloudConfigSection(store: CloudCredentialStore) {
         Spacer(Modifier.height(8.dp))
 
         val creds = credentials ?: CloudCredentials()
+
+        // 当前生效后端选择（仅列出已配置的后端）
+        val webdavConfigured = creds.webdavRootUrl != null && creds.webdavUsername != null
+        val baiduConfigured = creds.baiduAccessToken != null && creds.baiduAppDir != null
+        if (webdavConfigured || baiduConfigured) {
+            Text(
+                "当前同步目标",
+                style = MaterialTheme.typography.bodySmall,
+                color = YuezhouColors.TextSecondary,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                if (webdavConfigured) {
+                    BackendChoiceChip(
+                        label = "WebDAV",
+                        selected = creds.activeBackend == "webdav" ||
+                            (creds.activeBackend == null && !baiduConfigured),
+                        onClick = {
+                            scope.launch {
+                                val updated = creds.copy(activeBackend = "webdav")
+                                if (store.save(updated)) {
+                                    credentials = updated
+                                    message = "同步目标已切换为 WebDAV"
+                                }
+                            }
+                        },
+                    )
+                }
+                if (baiduConfigured) {
+                    BackendChoiceChip(
+                        label = "百度网盘",
+                        selected = creds.activeBackend == "baidu" ||
+                            (creds.activeBackend == null && baiduConfigured),
+                        onClick = {
+                            scope.launch {
+                                val updated = creds.copy(activeBackend = "baidu")
+                                if (store.save(updated)) {
+                                    credentials = updated
+                                    message = "同步目标已切换为百度网盘"
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
 
         // WebDAV 行
         Row(
@@ -172,6 +220,21 @@ fun CloudConfigSection(store: CloudCredentialStore) {
             },
         )
     }
+}
+
+/** 后端选择 chip：显示当前同步目标选中态。 */
+@Composable
+private fun BackendChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (selected) Color.White else YuezhouColors.TextSecondary,
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    )
 }
 
 /** WebDAV 凭据配置对话框。 */

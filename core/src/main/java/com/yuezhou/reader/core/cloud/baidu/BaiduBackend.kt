@@ -85,7 +85,8 @@ class BaiduBackend private constructor(
     // region 路径
 
     private fun path(relative: String): String {
-        if (relative.isEmpty() || relative[0] == '/' || relative.contains("//")) {
+        if (relative.isEmpty()) return root
+        if (relative[0] == '/' || relative.contains("//")) {
             throw fail(ErrorCode.INVALID_INPUT, "百度路径必须在应用目录内")
         }
         if (relative.any { it == '\\' || it.code < 0x20 || it.code == 0x7f }) {

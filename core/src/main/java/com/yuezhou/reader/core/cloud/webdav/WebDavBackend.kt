@@ -84,7 +84,8 @@ class WebDavBackend private constructor(
         return response
     }
 
-    private fun url(path: String): String = root + DavPath.encode(path)
+    private fun url(path: String): String =
+        if (path.isEmpty()) root else "$root/${DavPath.encode(path)}"
 
     private fun request(
         method: String,
@@ -129,10 +130,9 @@ class WebDavBackend private constructor(
             val body = r.body?.string() ?: throw err(ErrorCode.INVALID_INPUT, "无效的 DAV stat 响应")
             if (r.code != 207) throw err(ErrorCode.INVALID_INPUT, "无效的 DAV stat 响应")
             val multistatus = DavXml.parse(body)
-            val expectedPath = decode(url(path))
             for (resp in multistatus.responses) {
-                val href = normalizeHref(resp.href)
-                if (href == expectedPath) {
+                val rel = toRelative(resp.href)
+                if (rel == path) {
                     if (resp.status == null || !resp.status.contains("200")) {
                         throw err(ErrorCode.FORBIDDEN, "DAV stat 属性不可读")
                     }
@@ -150,20 +150,33 @@ class WebDavBackend private constructor(
         }
     }
 
-    private fun normalizeHref(href: String): String {
-        // 去掉可能的前缀 scheme/host，再百分号解码，归一到不含尾斜杠的相对路径。
-        val uri = try {
-            URI(href)
+    /**
+     * 把服务器返回的 href 归一化为「相对同步根目录」的路径（不含前导斜杠、不含尾斜杠）。
+     *
+     * 兼容两种形态：
+     *   - 完整 URL（如 http://host/sync/books/x.epub）；
+     *   - 相对根路径（如 /sync/books/x.epub，部分服务器实现如此返回）。
+     * 二者经 [URI.rawPath] 后都得到以根路径（[rootPath]）开头的路径，据此统一去前缀。
+     * 返回 null 表示 href 非法或越出根目录。
+     */
+    private fun toRelative(href: String): String? {
+        val raw = try {
+            URI(href).rawPath
         } catch (e: Exception) {
-            throw err(ErrorCode.FORBIDDEN, "DAV href 非法")
+            null
+        } ?: return null
+        val decoded = URLDecoder.decode(raw, Charsets.UTF_8)
+        val rootPath = try {
+            URI(root).rawPath
+        } catch (e: Exception) {
+            null
+        } ?: return null
+        return when {
+            decoded == rootPath -> ""
+            decoded.startsWith("$rootPath/") -> decoded.substring(rootPath.length + 1)
+            else -> null
         }
-        val raw = uri.rawPath ?: throw err(ErrorCode.FORBIDDEN, "DAV href 非法")
-        val decoded = URLDecoder.decode(raw, Charsets.UTF_8).trimEnd('/')
-        return decoded
     }
-
-    private fun decode(url: String): String =
-        URLDecoder.decode(url, Charsets.UTF_8).trimEnd('/')
 
     // endregion
 
@@ -178,10 +191,9 @@ class WebDavBackend private constructor(
             if (r.code != 207) throw err(ErrorCode.INVALID_INPUT, "无效的 DAV 多状态响应")
             val multistatus = DavXml.parse(xml)
             val entries = mutableListOf<CloudEntry>()
-            val base = decode(root)
             val prefix = if (path.isEmpty()) "" else path.trimEnd('/') + "/"
             for (resp in multistatus.responses) {
-                val rel = relative(resp.href, base)
+                val rel = toRelative(resp.href)
                 if (rel == null || !DavPath.safeListing(rel)) throw err(ErrorCode.FORBIDDEN, "DAV 条目路径无效")
                 if (rel == path || rel == prefix) continue
                 // 只收直接子项
@@ -205,17 +217,6 @@ class WebDavBackend private constructor(
             }
             return ListResult(entries)
         }
-    }
-
-    private fun relative(href: String, base: String): String? {
-        val decoded = try {
-            URI(href).rawPath?.let { URLDecoder.decode(it, Charsets.UTF_8) } ?: return null
-        } catch (e: Exception) {
-            return null
-        }
-        if (!decoded.startsWith(base)) return null
-        val rel = decoded.substring(base.length).removePrefix("/")
-        return rel
     }
 
     // endregion

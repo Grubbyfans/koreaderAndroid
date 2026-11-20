@@ -13,7 +13,7 @@ import java.io.File
  * 支持在写操作前注入失败（[failOnUpload]、[failOnDelete]），
  * 以验证 [CloudService] 对 uncertain/失败的处理。
  */
-class FakeBackend(
+open class FakeBackend(
     override val kind: BackendKind = BackendKind.WebDav,
     override val backendId: String = "fake",
     override val root: String = "fake://root",

@@ -28,4 +28,25 @@ data class TtsVoice(
     /** 展示名：优先音色名，退化到语言标签。 */
     val displayName: String
         get() = name.ifBlank { locale.toLanguageTag() }
+
+    /**
+     * 音色性别推断（仅用于 UI 分组展示，非严格判定）：
+     * 依据音色/引擎名中的常见关键词（male/female/men/women/female 等）。
+     * 无法判断时返回 null。
+     */
+    val gender: Gender?
+        get() {
+            val haystack = (name + " " + enginePackage).lowercase()
+            return when {
+                haystack.contains("female") || haystack.contains("women") ||
+                    haystack.contains("woman") || haystack.contains("femail") ||
+                    haystack.contains("xiaofei") || haystack.contains("xiaoyan") -> Gender.FEMALE
+                haystack.contains("male") || haystack.contains("man") ||
+                    haystack.contains("men") -> Gender.MALE
+                else -> null
+            }
+        }
+
+    /** 音色性别（仅用于 UI 展示）。 */
+    enum class Gender { MALE, FEMALE }
 }

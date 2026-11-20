@@ -82,6 +82,14 @@ class CloudServiceTest {
     }
 
     @Test
+    fun `uploadProgress 首次上传会创建 progress 目录`() = runTest {
+        val backend = FakeBackend()
+        val svc = CloudService(backend)
+        svc.uploadProgress("测试书", ProgressPayload(xpointer = "/body/text().0", deviceId = "dev1"))
+        assertTrue(backend.mkdirCalls.contains("progress"))
+    }
+
+    @Test
     fun `uploadProgress 再次上传递增 revision`() = runTest {
         val backend = FakeBackend()
         val svc = CloudService(backend)
@@ -162,5 +170,32 @@ class CloudServiceTest {
         } catch (e: CloudException) {
             assertEquals(ErrorCode.CONFLICT, e.code)
         }
+    }
+
+    @Test
+    fun `读 progress 目录缺失返回 CONFLICT 时视为远端不存在`() = runTest {
+        // 模拟部分后端：访问 progress/xxx.json 时，父目录不存在返回 CONFLICT(409) 而非 NOT_FOUND(404)。
+        val backend = object : FakeBackend() {
+            var progressStatCalls = 0
+            override suspend fun downloadBytes(path: String, maxBytes: Int): ByteArray {
+                if (path.startsWith("progress/")) {
+                    throw CloudException(ErrorCode.CONFLICT, "目录不存在")
+                }
+                return super.downloadBytes(path, maxBytes)
+            }
+            override suspend fun stat(path: String): CloudStat {
+                if (path == "progress") {
+                    progressStatCalls++
+                    throw CloudException(ErrorCode.NOT_FOUND, "progress 目录不存在")
+                }
+                return super.stat(path)
+            }
+        }
+        val svc = CloudService(backend)
+        // 不应抛异常；应把「远端进度不存在」当正常，创建 progress 目录并写入 revision=1。
+        svc.uploadProgress("测试书", ProgressPayload(xpointer = "/body/text().0", deviceId = "dev1"))
+        assertTrue(backend.mkdirCalls.contains("progress"))
+        val raw = backend.text("progress/测试书.json")!!
+        assertEquals(1L, com.yuezhou.reader.core.protocol.ProgressRecords.decode(raw).revision)
     }
 }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置。
+  用户自建 WebDAV 常见于局域网 IP + HTTP（无 TLS 证书），Android 9+ 默认禁止明文流量，
+  故允许明文 HTTP。WebDAV 层已在代码中做了防护：禁止重定向、路径安全校验、凭据加密落盘，
+  且仅连接用户显式配置的地址。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

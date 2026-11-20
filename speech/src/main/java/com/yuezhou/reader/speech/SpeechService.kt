@@ -95,11 +95,18 @@ class SpeechService : Service() {
         val plan = SpeechPlanStore.peek() ?: return
         scope.launch {
             val engine = ensureEngine() ?: return@launch
+            applyConfig(engine)
             stateMachine.load(plan)
             sessionId++
             engine.listener = createProgressListener()
             speakCurrent(engine)
         }
+    }
+
+    /** 应用运行期朗读配置（语速 + 音色）。 */
+    private fun applyConfig(engine: TtsEngine) {
+        val config = SpeechPlanStore.peekConfig()
+        engine.applyConfig(config.rate, config.voiceName)
     }
 
     private fun handlePause() {
@@ -150,9 +157,11 @@ class SpeechService : Service() {
         return try {
             engine.initialize()
             tts = engine
+            SpeechVoices.publish(engine.availableVoices())
             engine
         } catch (e: Exception) {
             engine.shutdown()
+            SpeechVoices.clear()
             updatePlaybackState(PlaybackState.STATE_ERROR, errorMessage = "TTS 引擎初始化失败")
             null
         }
@@ -427,6 +436,7 @@ class SpeechService : Service() {
         releaseAudioFocus()
         tts?.shutdown()
         tts = null
+        SpeechVoices.clear()
         mediaSession?.release()
         mediaSession = null
         scope.cancel()

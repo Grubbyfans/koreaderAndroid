@@ -13,6 +13,7 @@ class DavPathTest {
         assertTrue(DavPath.safe("books/书名.epub"))
         assertTrue(DavPath.safe("library.json"))
         assertTrue(DavPath.safe("progress/foo.json"))
+        assertTrue(DavPath.safe(""))                    // 空串=根目录，合法（stat/list/ensureAuthorized 用）
         assertFalse(DavPath.safe("/library.json"))          // 根目录外
         assertFalse(DavPath.safe("books//x.epub"))          // 双斜杠
         assertFalse(DavPath.safe("books/../x.epub"))        // 上级目录

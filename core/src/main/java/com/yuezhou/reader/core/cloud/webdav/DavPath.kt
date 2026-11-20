@@ -23,7 +23,9 @@ internal object DavPath {
     private fun hasControl(s: String) = s.any { it.code < 0x20 || it.code == 0x7f }
 
     fun safe(path: String): Boolean {
-        if (path.isEmpty() || path[0] == '/' || path.contains("//")) return false
+        // 空串表示同步根目录本身（stat("") / list("") / ensureAuthorized 均以空串指代根），合法。
+        if (path.isEmpty()) return true
+        if (path[0] == '/' || path.contains("//")) return false
         if (path.any { it == '%' || it == '\\' || it == '?' || it == '#' }) return false
         if (hasControl(path)) return false
         for (part in path.split('/')) {

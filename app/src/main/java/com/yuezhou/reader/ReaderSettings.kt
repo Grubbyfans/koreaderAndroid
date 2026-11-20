@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -22,6 +23,10 @@ data class ReaderPreferences(
     val theme: String = "light",
     /** 翻页模式：false=左右翻页，true=上下滚动。 */
     val vertical: Boolean = false,
+    /** 朗读语速（TextToSpeech 范围约 0.5..2.0，1.0 为正常）。 */
+    val speechRate: Float = 1.0f,
+    /** 朗读音色名（TextToSpeech.setVoice 入参）；空串表示用引擎默认音色。 */
+    val speechVoice: String = "",
 )
 
 private val Context.readerDataStore by preferencesDataStore(name = "reader_settings")
@@ -33,6 +38,8 @@ object ReaderSettings {
     private val KEY_PAGE_MARGIN = intPreferencesKey("page_margin")
     private val KEY_THEME = stringPreferencesKey("theme")
     private val KEY_VERTICAL = booleanPreferencesKey("vertical")
+    private val KEY_SPEECH_RATE = floatPreferencesKey("speech_rate")
+    private val KEY_SPEECH_VOICE = stringPreferencesKey("speech_voice")
 
     /** 读取阅读设置（Flow，随变更更新）。 */
     fun flow(context: Context): Flow<ReaderPreferences> =
@@ -43,6 +50,8 @@ object ReaderSettings {
                 pageMargin = prefs[KEY_PAGE_MARGIN] ?: 12,
                 theme = prefs[KEY_THEME] ?: "light",
                 vertical = prefs[KEY_VERTICAL] ?: false,
+                speechRate = prefs[KEY_SPEECH_RATE] ?: 1.0f,
+                speechVoice = prefs[KEY_SPEECH_VOICE] ?: "",
             )
         }
 
@@ -54,6 +63,8 @@ object ReaderSettings {
             it[KEY_PAGE_MARGIN] = prefs.pageMargin
             it[KEY_THEME] = prefs.theme
             it[KEY_VERTICAL] = prefs.vertical
+            it[KEY_SPEECH_RATE] = prefs.speechRate
+            it[KEY_SPEECH_VOICE] = prefs.speechVoice
         }
     }
 }

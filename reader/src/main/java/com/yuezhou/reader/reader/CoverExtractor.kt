@@ -89,8 +89,12 @@ object CoverExtractor {
 
         // 1) manifest 里 id 为 cover 的 item
         val manifest = Regex("<manifest[\\s\\S]*?</manifest>").find(opfText)?.value ?: opfText
-        val itemRegex = Regex("<item[^>]*id=[\"']([^\"']+)[\"'][^>]*href=[\"']([^\"']+)[\"'][^>]*/?>")
-        val items = itemRegex.findAll(manifest).map { it.groupValues[1] to it.groupValues[2] }.toList()
+        // 逐个 <item> 解析，分别提取 id 与 href，不依赖属性书写顺序（calibre 常把 href 写在 id 之前）。
+        val items = Regex("<item\\b[^>]*>").findAll(manifest).mapNotNull { tag ->
+            val id = Regex("\\bid\\s*=\\s*[\"']([^\"']+)[\"']").find(tag.value)?.groupValues?.get(1)
+            val href = Regex("\\bhref\\s*=\\s*[\"']([^\"']+)[\"']").find(tag.value)?.groupValues?.get(1)
+            if (id != null && href != null) id to href else null
+        }.toList()
 
         // 找 id 恰为 cover 的（忽略大小写）
         val coverItem = items.firstOrNull { (id, _) -> id.equals("cover", ignoreCase = true) }

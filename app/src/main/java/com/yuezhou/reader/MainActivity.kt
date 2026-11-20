@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -53,6 +54,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -77,11 +79,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.reader.CloudCredentialStore
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
+import com.yuezhou.reader.reader.LocalScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,6 +119,8 @@ private fun BookshelfScreen() {
     var refreshKey by remember { mutableStateOf(0) }
     // 当前选中的底部导航 tab
     var currentTab by remember { mutableStateOf(Tab.书架) }
+    // 书库范围：本地 / 云端
+    var bookScope by remember { mutableStateOf(BookScope.本地) }
     // 管理态（多选删除）：非空表示进入管理态，集合为已勾选的 bookId
     var selecting by remember { mutableStateOf<Set<String>?>(null) }
     // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
@@ -124,6 +130,55 @@ private fun BookshelfScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
 
     val store = remember { LibraryStore(context) }
+    val cloudSync = remember { CloudSync(context) }
+
+    // —— 云端书库状态 ——
+    var remoteBooks by remember { mutableStateOf<List<CloudSync.RemoteBook>>(emptyList()) }
+    var remoteLoading by remember { mutableStateOf(false) }
+    var remoteError by remember { mutableStateOf<String?>(null) }
+    var remoteBackendLabel by remember { mutableStateOf<String?>(null) }
+    // 列表缓存状态（方案 §12.1：显示最后成功获取时间与是否命中缓存）
+    var remoteFetchedAt by remember { mutableStateOf(0L) }
+    var remoteFromCache by remember { mutableStateOf(false) }
+    // 待下载/详情选中的书
+    var detailBook by remember { mutableStateOf<CloudSync.RemoteBook?>(null) }
+    var downloading by remember { mutableStateOf(false) }
+
+    // —— 本地目录扫描（方案 §8.3：点击「检查本机书籍」才扫描）——
+    var scanResult by remember { mutableStateOf<LocalScanner.ScanResult?>(null) }
+    var scanDialogOpen by remember { mutableStateOf(false) }
+    var scanning by remember { mutableStateOf(false) }
+    var scanUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    val pickDirectory = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                scanning = true
+                status = null
+                try {
+                    // 持久授权：允许后续扫描同一目录
+                    val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                    try {
+                        context.contentResolver.takePersistableUriPermission(uri, flags)
+                    } catch (e: Exception) {
+                        // 持久授权失败不阻断单次扫描
+                    }
+                    val existingIds = store.snapshot().books.map { it.bookId }.toSet()
+                    val result = LocalScanner.scan(context, uri, existingIds)
+                    scanResult = result
+                    scanUri = uri
+                    scanDialogOpen = true
+                } catch (e: Exception) {
+                    status = "扫描失败：${e.message}"
+                } finally {
+                    scanning = false
+                }
+            }
+        }
+    }
 
     val pickEpub = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -148,6 +203,55 @@ private fun BookshelfScreen() {
         loading = true
         books = store.snapshot().books
         loading = false
+    }
+
+    // 云端书库：进入云端 tab 时加载（带缓存，短时间复用；显式刷新走 force）
+    fun loadRemote(force: Boolean = false) {
+        scope.launch {
+            remoteLoading = true
+            remoteError = null
+            try {
+                val lib = cloudSync.listBooks(force)
+                remoteBooks = lib.books
+                remoteBackendLabel = lib.backendLabel
+                remoteFetchedAt = lib.fetchedAt
+                remoteFromCache = lib.fromCache
+            } catch (e: Exception) {
+                remoteError = e.message ?: "云端书库加载失败"
+                remoteBooks = emptyList()
+            } finally {
+                remoteLoading = false
+            }
+        }
+    }
+
+    // 主动更新书库（方案 §10）：强制刷新列表 + 枚举 books/ 登记外部上传 EPUB
+    fun refreshRemoteLibrary() {
+        scope.launch {
+            remoteLoading = true
+            remoteError = null
+            try {
+                val msg = cloudSync.refreshLibrary()
+                // 主动更新后再拉最新列表展示
+                val lib = cloudSync.listBooks(force = true)
+                remoteBooks = lib.books
+                remoteBackendLabel = lib.backendLabel
+                remoteFetchedAt = lib.fetchedAt
+                remoteFromCache = false
+                status = msg
+            } catch (e: Exception) {
+                remoteError = e.message ?: "更新书库失败"
+            } finally {
+                remoteLoading = false
+            }
+        }
+    }
+
+    // 切换到云端 tab 时自动加载（命中缓存时几乎瞬时返回，不重复请求网络）
+    LaunchedEffect(currentTab, bookScope) {
+        if (currentTab == Tab.书架 && bookScope == BookScope.云端) {
+            loadRemote()
+        }
     }
 
     // 管理态下返回键退出管理态（而非退出 App）
@@ -218,12 +322,23 @@ private fun BookshelfScreen() {
         },
         floatingActionButton = {
             if (currentTab == Tab.书架) {
-                FloatingActionButton(
-                    onClick = { pickEpub.launch(arrayOf("application/epub+zip")) },
-                    containerColor = YuezhouColors.Brand,
-                    contentColor = Color.White,
-                ) {
-                    Text("+", style = MaterialTheme.typography.headlineMedium)
+                if (bookScope == BookScope.本地) {
+                    FloatingActionButton(
+                        onClick = { pickEpub.launch(arrayOf("application/epub+zip")) },
+                        containerColor = YuezhouColors.Brand,
+                        contentColor = Color.White,
+                    ) {
+                        Text("+", style = MaterialTheme.typography.headlineMedium)
+                    }
+                } else {
+                    // 云端：主动刷新按钮（主动更新：强制拉列表 + 发现外部上传）
+                    FloatingActionButton(
+                        onClick = { refreshRemoteLibrary() },
+                        containerColor = YuezhouColors.Brand,
+                        contentColor = Color.White,
+                    ) {
+                        Text("↻", style = MaterialTheme.typography.headlineMedium)
+                    }
                 }
             }
         },
@@ -259,17 +374,53 @@ private fun BookshelfScreen() {
 
             val visibleBooks = books.filter { it.bookId !in hiddenBooks }
             when (currentTab) {
-                Tab.书架 -> BookshelfContent(
-                    books = visibleBooks,
-                    loading = loading,
-                    selecting = selecting,
-                    onPickEpub = { pickEpub.launch(arrayOf("application/epub+zip")) },
-                    onEnterSelect = { selecting = setOf(it) },
-                    onToggleSelect = { id ->
-                        val cur = selecting ?: emptySet()
-                        selecting = if (id in cur) cur - id else cur + id
-                    },
-                )
+                Tab.书架 -> {
+                    // 本地/云端切换条
+                    BookScopeSwitch(current = bookScope, onSelect = { bookScope = it })
+                    when (bookScope) {
+                        BookScope.本地 -> {
+                            // 检查本机书籍入口（方案 §8.3：正常进入不扫描，点击才扫描）
+                            if (!scanning) {
+                                TextButton(
+                                    onClick = { pickDirectory.launch(null) },
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                ) {
+                                    Text("检查本机书籍", color = YuezhouColors.Brand)
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("扫描本机书籍中…", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                            BookshelfContent(
+                                books = visibleBooks,
+                                loading = loading,
+                                selecting = selecting,
+                                onPickEpub = { pickEpub.launch(arrayOf("application/epub+zip")) },
+                                onEnterSelect = { selecting = setOf(it) },
+                                onToggleSelect = { id ->
+                                    val cur = selecting ?: emptySet()
+                                    selecting = if (id in cur) cur - id else cur + id
+                                },
+                            )
+                        }
+                        BookScope.云端 -> CloudBookshelfContent(
+                            books = remoteBooks,
+                            loading = remoteLoading,
+                            error = remoteError,
+                            backendLabel = remoteBackendLabel,
+                            fetchedAt = remoteFetchedAt,
+                            fromCache = remoteFromCache,
+                            onRefresh = { refreshRemoteLibrary() },
+                            onOpenDetail = { detailBook = it },
+                        )
+                    }
+                }
                 Tab.最近阅读 -> RecentReading(visibleBooks)
                 Tab.设置 -> SettingsPage()
             }
@@ -306,14 +457,16 @@ private fun BookshelfScreen() {
                             val result = snackbarHostState.showSnackbar(
                                 message = "已移除 ${toDelete.size} 本",
                                 actionLabel = "撤销",
+                                duration = SnackbarDuration.Short,
                             )
                             if (result == SnackbarResult.ActionPerformed) {
                                 // 撤销：恢复显示，不删除
                                 hiddenBooks = hiddenBooks - toDelete
                                 refreshKey++
                             } else {
-                                // 超时/消失：真正删除
+                                // 超时/消失：真正删除，并从软隐藏集合移除（避免残留 bookId 干扰后续同名书导入）
                                 store.removeBooks(toDelete)
+                                hiddenBooks = hiddenBooks - toDelete
                                 refreshKey++
                             }
                         }
@@ -327,6 +480,179 @@ private fun BookshelfScreen() {
             },
         )
     }
+
+    // 云端书籍详情弹窗：名称/大小/后端 + 下载（或已本地存在时打开）
+    val detail = detailBook
+    if (detail != null) {
+        AlertDialog(
+            onDismissRequest = { detailBook = null },
+            title = { Text(detail.bookId, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Column {
+                    Text("文件名：${detail.fileName}", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "大小：${formatSize(detail.size)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "后端：${remoteBackendLabel ?: "云端"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (detail.local) "已在本机书库" else "尚未下载到本机",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (detail.local) YuezhouColors.Brand else YuezhouColors.TextSecondary,
+                    )
+                }
+            },
+            confirmButton = {
+                if (detail.local) {
+                    TextButton(
+                        onClick = {
+                            detailBook = null
+                            context.startActivity(
+                                Intent(context, ReaderActivity::class.java).apply {
+                                    putExtra(ReaderActivity.EXTRA_BOOK_ID, detail.bookId)
+                                },
+                            )
+                        },
+                    ) { Text("打开") }
+                } else {
+                    TextButton(
+                        enabled = !downloading,
+                        onClick = {
+                            scope.launch {
+                                downloading = true
+                                val result = CloudSync(context).downloadBook(detail.fileName)
+                                downloading = false
+                                if (result.isSuccess) {
+                                    detailBook = null
+                                    refreshKey++ // 刷新本地书库
+                                    snackbarHostState.showSnackbar("已下载：${detail.bookId}")
+                                } else {
+                                    snackbarHostState.showSnackbar(
+                                        "下载失败：${result.exceptionOrNull()?.message}",
+                                    )
+                                }
+                            }
+                        },
+                    ) { Text(if (downloading) "下载中…" else "下载") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { detailBook = null }) { Text("关闭") }
+            },
+        )
+    }
+
+    // 扫描结果弹窗（方案 §8.3：列出发现的 EPUB + 同名冲突位置，不自动选）
+    val scan = scanResult
+    if (scanDialogOpen && scan != null) {
+        ScanResultDialog(
+            scan = scan,
+            onImportLocation = { location ->
+                scope.launch {
+                    importing = true
+                    val result = EpubImporter.import(context, location.uri)
+                    importing = false
+                    if (result.isSuccess) {
+                        status = "已导入：${result.getOrNull()?.nameWithoutExtension}"
+                        refreshKey++
+                        // 重新扫描刷新「已在库」状态
+                        scanUri?.let { u ->
+                            val ids = store.snapshot().books.map { it.bookId }.toSet()
+                            scanResult = LocalScanner.scan(context, u, ids)
+                        }
+                    } else {
+                        status = "导入失败：${result.exceptionOrNull()?.message}"
+                    }
+                }
+            },
+            onDismiss = { scanDialogOpen = false },
+        )
+    }
+}
+
+/** 扫描结果弹窗：列出发现的 EPUB，同名冲突列出全部位置供用户选择。 */
+@Composable
+private fun ScanResultDialog(
+    scan: LocalScanner.ScanResult,
+    onImportLocation: (LocalScanner.Location) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("检查本机书籍") },
+        text = {
+            Column {
+                when {
+                    scan.books.isEmpty() -> {
+                        Text("未发现 EPUB 文件", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    else -> {
+                        Text(
+                            "发现 ${scan.books.size} 本，同名冲突 ${scan.conflicts.size} 处",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                            lazyItems(scan.books) { book ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp),
+                                ) {
+                                    Text(
+                                        book.bookId,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (book.locations.size > 1) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                    // 同名冲突：列出全部位置，每个位置单独可导入，不自动选一个
+                                    book.locations.forEach { loc ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(start = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                "${loc.displayName}（${formatSize(loc.size)}）",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (book.locations.size > 1)
+                                                    Color(0xFFE64340)
+                                                else YuezhouColors.TextSecondary,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            TextButton(onClick = { onImportLocation(loc) }) {
+                                                Text(if (book.alreadyInLibrary) "覆盖" else "导入")
+                                            }
+                                        }
+                                    }
+                                    if (book.locations.size > 1) {
+                                        Text(
+                                            "同名文件有多个位置，请选择要导入的一项",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFFE64340),
+                                            modifier = Modifier.padding(start = 12.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+    )
 }
 
 /** 底部导航的三个 tab。 */
@@ -334,6 +660,194 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     书架("书库", Icons.Filled.List),
     最近阅读("最近阅读", Icons.Filled.Star),
     设置("设置", Icons.Filled.Settings),
+}
+
+/** 书库范围：本地 / 云端。 */
+private enum class BookScope(val label: String) {
+    本地("本地"),
+    云端("云端"),
+}
+
+/** 本地/云端切换条。 */
+@Composable
+private fun BookScopeSwitch(current: BookScope, onSelect: (BookScope) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BookScope.entries.forEach { scope ->
+            val selected = current == scope
+            Text(
+                scope.label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) Color.White else YuezhouColors.TextSecondary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (selected) YuezhouColors.Brand else YuezhouColors.Surface)
+                    .clickable { onSelect(scope) }
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+/** 云端书库内容：后端名 + 网格 + 空/错误态。 */
+@Composable
+private fun CloudBookshelfContent(
+    books: List<CloudSync.RemoteBook>,
+    loading: Boolean,
+    error: String?,
+    backendLabel: String?,
+    fetchedAt: Long,
+    fromCache: Boolean,
+    onRefresh: () -> Unit,
+    onOpenDetail: (CloudSync.RemoteBook) -> Unit,
+) {
+    when {
+        loading -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+        error != null -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(error, color = YuezhouColors.TextSecondary, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onRefresh) { Text("重试") }
+                }
+            }
+        }
+        books.isEmpty() -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("云端书库为空", color = YuezhouColors.TextSecondary)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "在本地导入书后点「立即同步」即可上传",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                }
+            }
+        }
+        else -> {
+            Column(Modifier.fillMaxSize()) {
+                backendLabel?.let {
+                    Text(
+                        buildString {
+                            append("后端：$it · ${books.size} 本")
+                            if (fetchedAt > 0) {
+                                append(" · ")
+                                append(if (fromCache) "缓存" else "已更新")
+                                append(" ")
+                                append(formatFetchedAt(fetchedAt))
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    contentPadding = PaddingValues(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(books, key = { it.bookId }) { book ->
+                        CloudBookCard(book = book, onClick = { onOpenDetail(book) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 把 epoch millis 格式化为「HH:mm」或「昨天 HH:mm」等简短时间。 */
+private fun formatFetchedAt(millis: Long): String {
+    val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+    return fmt.format(java.util.Date(millis))
+}
+
+/** 云端书籍卡片：书名占位封面 + 本机已存在角标。 */
+@Composable
+private fun CloudBookCard(
+    book: CloudSync.RemoteBook,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.75f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(CoverPlaceholder.color(book.bookId)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val cover = book.coverPng
+            if (cover != null) {
+                CoverImage(
+                    bytes = cover,
+                    contentDescription = book.bookId,
+                    contentScale = ContentScale.FillBounds,
+                )
+            } else {
+                Text(
+                    text = book.bookId,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(8.dp),
+                )
+            }
+
+            // 本机已存在角标
+            if (book.local) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(20.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(Color.White.copy(alpha = 0.9f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("✓", color = YuezhouColors.Brand, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
+        Text(
+            text = book.bookId,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+/** 格式化文件大小为可读字符串。 */
+private fun formatSize(bytes: Long): String {
+    val kb = 1024.0
+    val mb = kb * 1024
+    return when {
+        bytes >= mb -> String.format("%.1f MB", bytes / mb)
+        bytes >= kb -> String.format("%.1f KB", bytes / kb)
+        else -> "$bytes B"
+    }
 }
 
 @Composable
@@ -591,12 +1105,34 @@ private fun SettingsPage() {
                     scope.launch {
                         syncing = true
                         syncMessage = null
-                        syncMessage = CloudSync(context).pushLocal().message
+                        val sync = CloudSync(context)
+                        val backendLabel = sync.activeBackendLabel()
+                        val outcome = sync.pushLocal()
+                        syncMessage = if (outcome.success && backendLabel != null) {
+                            "${outcome.message}（$backendLabel）"
+                        } else {
+                            outcome.message
+                        }
                         syncing = false
                     }
                 },
             ) {
                 Text(if (syncing) "同步中…" else "立即同步")
+            }
+            // 补全待发布回执（方案 §11.6：正文已传但列表发布失败时的补救）
+            TextButton(
+                enabled = !syncing,
+                onClick = {
+                    scope.launch {
+                        syncing = true
+                        syncMessage = null
+                        val repaired = CloudSync(context).repairPendingPublications()
+                        syncMessage = if (repaired > 0) "已补全 $repaired 本" else "无待补全记录"
+                        syncing = false
+                    }
+                },
+            ) {
+                Text("补全待发布")
             }
             syncMessage?.let {
                 Spacer(Modifier.width(12.dp))

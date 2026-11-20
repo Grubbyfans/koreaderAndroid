@@ -35,6 +35,8 @@ data class CloudCredentials(
     val baiduUserId: String? = null,
     /** 百度：账户显示名。 */
     val baiduAccountName: String? = null,
+    /** 当前生效的后端；null 表示「自动」（优先百度，否则 WebDAV）。 */
+    val activeBackend: String? = null,
 )
 
 /**

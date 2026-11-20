@@ -22,8 +22,10 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -68,8 +70,12 @@ import com.yuezhou.reader.core.speech.SentencePlanner
 import com.yuezhou.reader.core.speech.SourceAnchor
 import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechTextUnit
+import com.yuezhou.reader.speech.SpeechConfig
 import com.yuezhou.reader.speech.SpeechPlanStore
 import com.yuezhou.reader.speech.SpeechProgressTracker
+import com.yuezhou.reader.speech.SpeechVoices
+import com.yuezhou.reader.speech.TtsEngine
+import com.yuezhou.reader.speech.TtsVoice
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -141,17 +147,78 @@ private fun ReaderScreen(
     val store = remember { LibraryStore(context) }
     // 阅读设置（DataStore）
     val readerPrefs by ReaderSettings.flow(context).collectAsStateWithLifecycle(initialValue = ReaderPreferences())
+    // 当前 TTS 引擎可用音色（服务就绪后发布）
+    val availableVoices by SpeechVoices.voices.collectAsStateWithLifecycle()
 
     // 进度去抖保存：翻页频繁时合并写入
     var saveJob by remember { mutableStateOf<Job?>(null) }
     // 记录最近一次位置，供退出时立即保存
     var lastPosition by remember { mutableStateOf<Pair<String, Double?>?>(null) }
 
+    // 进度同步面板：非空表示打开；数据为进度对照信息
+    var syncDialogOpen by remember { mutableStateOf(false) }
+    var syncInfo by remember { mutableStateOf<CloudSync.ProgressInfo?>(null) }
+    var syncLoading by remember { mutableStateOf(false) }
+    var syncBusy by remember { mutableStateOf(false) }
+
     fun flushProgress() {
         val pos = lastPosition
         val id = bookId
         if (pos != null && id != null) {
             scope.launch { store.saveProgress(id, pos.first, pos.second) }
+        }
+    }
+
+    // 打开进度同步面板：读本机 + 云端进度对照
+    fun openSyncDialog() {
+        val id = bookId ?: return
+        scope.launch {
+            syncLoading = true
+            syncDialogOpen = true
+            syncInfo = null
+            // 打开前先 flush 当前进度，保证「本机位置」是最新的
+            flushProgress()
+            syncInfo = CloudSync(context).progressInfo(id)
+            syncLoading = false
+        }
+    }
+
+    // 应用云端进度：跳转到云端位置
+    fun applyRemoteProgress() {
+        val id = bookId ?: return
+        val info = syncInfo ?: return
+        val remote = info.remoteLocation ?: return
+        scope.launch {
+            syncBusy = true
+            // 应用前保存旧位置（撤销用，lastPosition 已是当前本机位置）
+            val cloud = CloudSync(context)
+            val location = cloud.fetchRemoteProgressLocation(id) ?: remote
+            // 暂停朗读，避免旧回调覆盖新位置
+            SpeechPlanStore.stop(context)
+            webView?.goToCfi(location)
+            // 提交本地状态（把云端位置写回本地进度）
+            val percent = info.remotePercent
+            store.saveProgress(id, location, percent)
+            syncBusy = false
+            syncDialogOpen = false
+            status = "已应用云端进度"
+        }
+    }
+
+    // 上传本机进度到云端
+    fun uploadLocalProgress() {
+        val id = bookId ?: return
+        val pos = lastPosition
+        if (pos == null) {
+            status = "本机暂无进度可上传"
+            return
+        }
+        scope.launch {
+            syncBusy = true
+            val err = CloudSync(context).uploadLocalProgress(id, pos.first, pos.second)
+            syncBusy = false
+            syncDialogOpen = false
+            status = err ?: "已上传本机进度"
         }
     }
 
@@ -165,6 +232,15 @@ private fun ReaderScreen(
             val anchor = snap?.sourceAnchor
             if (snap != null && anchor != null && anchor.nodeId.isNotBlank()) {
                 webView?.highlight(anchor.nodeId, anchor.offset)
+            }
+        }
+    }
+
+    // 面板打开且音色列表为空时，一次性查询系统 TTS 音色（供朗读前选择男声/女声）
+    LaunchedEffect(panelVisible, availableVoices.isEmpty()) {
+        if (panelVisible && availableVoices.isEmpty()) {
+            TtsEngine.queryVoicesOnce(context) { voices ->
+                SpeechVoices.publish(voices)
             }
         }
     }
@@ -189,6 +265,10 @@ private fun ReaderScreen(
             segments = segments,
         )
         try {
+            // 注入朗读配置（语速 + 音色），服务在开始朗读时应用
+            SpeechPlanStore.putConfig(
+                SpeechConfig(rate = readerPrefs.speechRate, voiceName = readerPrefs.speechVoice)
+            )
             SpeechPlanStore.startAndPlay(context, plan)
             speakRequested = true
             status = "已开始朗读"
@@ -386,19 +466,14 @@ private fun ReaderScreen(
                     sectionIndex = currentIndex,
                     totalSections = totalSections,
                     prefs = readerPrefs,
+                    voices = availableVoices,
                     speaking = speaking || speakRequested,
                     onBack = onBack,
                     onOpenToc = { scope.launch { drawerState.open() } },
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
                     onPrefsChange = { p -> scope.launch { ReaderSettings.save(context, p) } },
-                    onSync = {
-                        scope.launch {
-                            status = "同步中…"
-                            val outcome = CloudSync(context).pushLocal()
-                            status = outcome.message
-                        }
-                    },
+                    onSync = { openSyncDialog() },
                     onSpeak = {
                         if (speaking) {
                             // 朗读中 → 停止
@@ -414,7 +489,107 @@ private fun ReaderScreen(
                 )
             }
         }
+
+        // 进度同步面板（方案 §5.6：本机/云端对照 + 上传/应用两步交互）
+        if (syncDialogOpen) {
+            ProgressSyncDialog(
+                info = syncInfo,
+                loading = syncLoading,
+                busy = syncBusy,
+                onUpload = { uploadLocalProgress() },
+                onApply = { applyRemoteProgress() },
+                onDismiss = { syncDialogOpen = false },
+            )
+        }
     }
+}
+
+/** 进度同步对话框：展示后端、本机/云端进度、设备与时间，提供上传/应用两步操作。 */
+@Composable
+private fun ProgressSyncDialog(
+    info: CloudSync.ProgressInfo?,
+    loading: Boolean,
+    busy: Boolean,
+    onUpload: () -> Unit,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("进度同步") },
+        text = {
+            Column {
+                if (loading) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("读取进度中…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else if (info == null) {
+                    Text("无法读取进度信息", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    info.backendLabel?.let {
+                        Text("后端：$it", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Text(
+                        "本机进度：${formatPercent(info.localPercent)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "云端进度：${formatPercent(info.remotePercent)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    info.remoteUpdatedAt?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "云端更新：${formatTime(it)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    info.remoteDeviceId?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "云端设备：${it.take(8)}…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "请选择操作，不会按百分比自动覆盖。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onApply,
+                enabled = !busy && !loading && info?.remoteLocation != null,
+            ) { Text("应用云端进度") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = onUpload,
+                    enabled = !busy && !loading && info?.localLocation != null,
+                ) { Text("上传本机进度") }
+                TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
+            }
+        },
+    )
+}
+
+private fun formatPercent(p: Double?): String =
+    if (p == null) "无" else "${(p * 100).toInt()}%"
+
+private fun formatTime(millis: Long): String {
+    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+    return fmt.format(java.util.Date(millis))
 }
 
 /** 主题背景色（与 bridge.js 主题一致）。 */
@@ -431,6 +606,7 @@ private fun ReaderPanel(
     sectionIndex: Int?,
     totalSections: Int,
     prefs: ReaderPreferences,
+    voices: List<TtsVoice>,
     speaking: Boolean,
     onBack: () -> Unit,
     onOpenToc: () -> Unit,
@@ -531,7 +707,7 @@ private fun ReaderPanel(
                 }
                 // 设置区（默认收起，点击「设置」展开）
                 if (settingsExpanded) {
-                    SettingsControls(prefs = prefs, onPrefsChange = onPrefsChange)
+                    SettingsControls(prefs = prefs, voices = voices, onPrefsChange = onPrefsChange)
                 }
             }
         }
@@ -546,11 +722,14 @@ private fun PanelAction(label: String, onClick: () -> Unit) {
 @Composable
 private fun SettingsControls(
     prefs: ReaderPreferences,
+    voices: List<TtsVoice>,
     onPrefsChange: (ReaderPreferences) -> Unit,
 ) {
     // 拖动中的本地预览值；null 表示未拖动（跟随真实 prefs），松手才提交，避免连续写 DataStore + 重排全文
     var fontSizePreview by remember { mutableStateOf<Int?>(null) }
     var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
+    // 语速预览值；null 表示未拖动
+    var ratePreview by remember { mutableStateOf<Float?>(null) }
     Column(modifier = Modifier.fillMaxWidth()) {
         // 字号
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -638,6 +817,80 @@ private fun SettingsControls(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = if (prefs.vertical) FontWeight.Bold else FontWeight.Normal,
                 )
+            }
+        }
+        // 朗读语速
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("语速", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                String.format("%.1fx", ratePreview ?: prefs.speechRate),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.width(44.dp),
+                textAlign = TextAlign.Center,
+            )
+            Slider(
+                value = (ratePreview ?: prefs.speechRate).coerceIn(0.5f, 2.0f),
+                onValueChange = { ratePreview = it },
+                onValueChangeFinished = {
+                    val v = ratePreview
+                    if (v != null) {
+                        onPrefsChange(prefs.copy(speechRate = v))
+                        ratePreview = null
+                    }
+                },
+                valueRange = 0.5f..2.0f,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        // 朗读音色
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("音色", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                "默认",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (prefs.speechVoice.isBlank()) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (prefs.speechVoice.isBlank()) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.clickable { onPrefsChange(prefs.copy(speechVoice = "")) },
+            )
+        }
+        // 音色列表（横向滚动，便于选择男声/女声等）
+        if (voices.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                items(voices) { voice ->
+                    val selected = prefs.speechVoice == voice.name
+                    val genderTag = when (voice.gender) {
+                        TtsVoice.Gender.MALE -> "男声"
+                        TtsVoice.Gender.FEMALE -> "女声"
+                        else -> null
+                    }
+                    val label = buildString {
+                        append(voice.displayName)
+                        if (genderTag != null) append("·$genderTag")
+                        if (!voice.isOfflineCapable) append("(需联网)")
+                    }
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clickable { onPrefsChange(prefs.copy(speechVoice = voice.name)) },
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                }
             }
         }
     }

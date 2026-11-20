@@ -63,9 +63,18 @@ object EpubImporter {
         return uri.lastPathSegment
     }
 
-    /** 清理文件名中的路径分隔符与非法字符，避免目录穿越。 */
+    /**
+     * 清理文件名中的路径分隔符与非法字符，避免目录穿越。
+     *
+     * 关键：去扩展名后的「书名」部分必须 trim 首尾空白。否则书名末尾带空格（如「全编 .epub」）
+     * 时，localId 虽能通过（local_id 不校验首尾空白），但 LibraryCatalog.encode 的严格校验
+     * （复用 cloud_id，拒绝首尾空白）会在写库时抛异常，导致书库登记失败、书架显示为空。
+     */
     private fun sanitizeFileName(name: String): String {
         val cleaned = name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim()
-        return if (cleaned.isBlank()) "book.epub" else cleaned
+        if (cleaned.isBlank()) return "book.epub"
+        // 拆分扩展名，仅对「书名」部分 trim 首尾空白，保留合法的 .epub 扩展名
+        val base = cleaned.removeSuffix(".epub").removeSuffix(".EPUB").trim()
+        return if (base.isBlank()) "book.epub" else "$base.epub"
     }
 }

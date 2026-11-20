@@ -92,6 +92,18 @@ class TtsEngine(private val context: Context) {
         return t.setSpeechRate(rate) == TextToSpeech.SUCCESS
     }
 
+    /**
+     * 应用朗读配置：语速 + 音色。
+     *
+     * @param rate 语速；非法值时跳过（保留当前）。
+     * @param voiceName 音色名（[TextToSpeech.Voice.name]）；空白时保持引擎默认音色。
+     */
+    fun applyConfig(rate: Float, voiceName: String) {
+        val t = _tts ?: return
+        if (rate > 0f) t.setSpeechRate(rate)
+        if (voiceName.isNotBlank()) setVoice(voiceName)
+    }
+
     /** 朗读一段文本。@param utteranceId 稳定标识，用于回调映射。返回是否已入队。 */
     fun speak(text: String, utteranceId: String, queueMode: Int = TextToSpeech.QUEUE_FLUSH): Boolean {
         val t = _tts ?: return false
@@ -123,4 +135,43 @@ class TtsEngine(private val context: Context) {
         isNetworkConnectionRequired = isNetworkConnectionRequired,
         isInstalled = features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == false,
     )
+
+    companion object {
+        /**
+         * 一次性查询系统默认 TTS 引擎的可用音色（不保留引擎实例）。
+         *
+         * 供 UI 在尚未启动朗读服务时提前枚举音色；查询完成后立即释放引擎。
+         * 回调在主线程触发；引擎初始化失败时返回空列表。
+         */
+        fun queryVoicesOnce(context: Context, onResult: (List<TtsVoice>) -> Unit) {
+            var tts: TextToSpeech? = null
+            var delivered = false
+            tts = TextToSpeech(context.applicationContext) { status ->
+                if (delivered) {
+                    tts?.shutdown()
+                    return@TextToSpeech
+                }
+                delivered = true
+                val engine = tts
+                if (status != TextToSpeech.SUCCESS || engine == null) {
+                    engine?.shutdown()
+                    onResult(emptyList())
+                    return@TextToSpeech
+                }
+                @Suppress("DEPRECATION")
+                val voices = engine.voices?.map { v ->
+                    TtsVoice(
+                        name = v.name ?: "",
+                        locale = v.locale ?: Locale.getDefault(),
+                        enginePackage = engine.defaultEngine ?: "",
+                        isNetworkConnectionRequired = v.isNetworkConnectionRequired,
+                        isInstalled = v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == false,
+                    )
+                }?.sortedWith(compareByDescending<TtsVoice> { it.isOfflineCapable })
+                    ?: emptyList()
+                onResult(voices)
+                engine.shutdown()
+            }
+        }
+    }
 }
