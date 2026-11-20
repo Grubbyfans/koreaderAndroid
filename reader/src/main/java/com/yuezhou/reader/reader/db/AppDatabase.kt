@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * 阅舟本地 Room 数据库（对齐方案 §8.2「本地结构化数据用 Room」）。
@@ -20,7 +22,7 @@ import androidx.room.RoomDatabase
         PendingPublicationEntity::class,
         DiagnosticEventEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,6 +30,26 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun diagnosticEventDao(): DiagnosticEventDao
 
     companion object {
+        private val isolatePublications = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE pending_publication_v2 (
+                        backendId TEXT NOT NULL, bookId TEXT NOT NULL, fileName TEXT NOT NULL,
+                        size INTEGER NOT NULL, coverPath TEXT, coverVersion TEXT, savedAt INTEGER NOT NULL,
+                        PRIMARY KEY (backendId, bookId)
+                    )
+                """.trimIndent())
+                // Version 1 did not record the destination. Preserve those rows without assigning a backend.
+                db.execSQL("""
+                    INSERT INTO pending_publication_v2
+                    SELECT '', bookId, fileName, size, coverPath, coverVersion, savedAt
+                    FROM pending_publication
+                """.trimIndent())
+                db.execSQL("DROP TABLE pending_publication")
+                db.execSQL("ALTER TABLE pending_publication_v2 RENAME TO pending_publication")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -37,7 +59,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yuezhou_reader.db",
-                ).build().also { instance = it }
+                ).addMigrations(isolatePublications).build().also { instance = it }
             }
     }
 }

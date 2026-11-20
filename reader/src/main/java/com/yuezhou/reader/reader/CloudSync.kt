@@ -209,7 +209,7 @@ class CloudSync(private val context: Context) {
                             { com.yuezhou.reader.core.protocol.CoverFile.encode(png) }
                         },
                     )
-                    receipts.remove(entry.bookId)
+                    receipts.remove(selectedBackend.backendId, entry.bookId)
                     done++
                     onProgress(entry.bookId, BookUploadProgress(UploadStatus.Done))
                 } catch (e: CancellationException) {
@@ -218,6 +218,7 @@ class CloudSync(private val context: Context) {
                     val status = when {
                         bodyUploaded -> {
                             receipts.upsert(PendingPublication(
+                                backendId = selectedBackend.backendId,
                                 bookId = entry.bookId,
                                 fileName = entry.fileName,
                                 size = size,
@@ -272,10 +273,10 @@ class CloudSync(private val context: Context) {
      */
     suspend fun repairPendingPublications(): Int = withContext(Dispatchers.IO) {
         val receipts = PendingPublicationStore(context)
-        val pending = receipts.load()
+        val backend = backend() ?: return@withContext 0
+        val pending = receipts.load(backend.backendId)
         if (pending.isEmpty()) return@withContext 0
 
-        val backend = backend() ?: return@withContext 0
         backend.ensureAuthorized()
         val service = CloudService(backend)
 
@@ -290,11 +291,11 @@ class CloudSync(private val context: Context) {
                     coverVersion = pub.coverVersion,
                 )
                 if (record != null) {
-                    receipts.remove(pub.bookId)
+                    receipts.remove(backend.backendId, pub.bookId)
                     repaired++
                 } else {
                     // 正文不在云端（上次未传成功），清除回执，交由下次同步重传
-                    receipts.remove(pub.bookId)
+                    receipts.remove(backend.backendId, pub.bookId)
                 }
             } catch (e: Exception) {
                 // 补全失败保留回执，下次再试
