@@ -94,6 +94,35 @@ window.__reader = {
         }
     },
 
+    // 朗读高亮：把「文本节点 CFI + 节点内字符偏移」定位并高亮到原文。
+    // offset 为相对该文本节点起始的字符数（0-based）。
+    async highlightRange(cfi, offset) {
+        try {
+            const resolved = view.resolveCFI?.(cfi)
+            if (!resolved) return false
+            const { index, anchor } = resolved
+            const { doc } = view.renderer?.getContents?.().find(c => c.index === index) || {}
+            if (!doc || typeof anchor !== 'function') return false
+            const range = anchor(doc)
+            if (!range) return false
+            // 将 range 起点前进 offset 个字符（在同一文本节点内），终点对齐句尾由调用方给定；
+            // 此处仅高亮「当前已确认位置」的单点，避免抢占用户阅读选中态。
+            if (offset > 0 && range.startContainer) {
+                const node = range.startContainer
+                const start = Math.min((range.startOffset || 0) + offset, node.textContent?.length ?? 0)
+                try {
+                    range.setStart(node, start)
+                    range.collapse(true)
+                } catch (e) { /* 偏移越界时保持原位 */ }
+            }
+            await view.renderer?.scrollToAnchor?.(range, true)
+            return true
+        } catch (e) {
+            post('error', { message: String(e?.message ?? e) })
+            return false
+        }
+    },
+
     // 关闭当前书
     closeBook() {
         currentBook = null

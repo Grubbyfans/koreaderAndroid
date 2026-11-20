@@ -155,12 +155,17 @@ private fun ReaderScreen(
         }
     }
 
-    // 朗读进度收集：服务写入 SpeechProgressTracker，这里反映到 UI（朗读中状态）
+    // 朗读进度收集：服务写入 SpeechProgressTracker，这里反映到 UI（朗读中状态 + 高亮回写）
     LaunchedEffect(Unit) {
         SpeechProgressTracker.current.collect { snap ->
             speaking = snap != null
             // 朗读停止时同步清空「朗读请求中」标记
             if (snap == null) speakRequested = false
+            // 已确认朗读点 → 回写高亮到 WebView（CFI + 节点内偏移）
+            val anchor = snap?.sourceAnchor
+            if (snap != null && anchor != null && anchor.nodeId.isNotBlank()) {
+                webView?.highlight(anchor.nodeId, anchor.offset)
+            }
         }
     }
 

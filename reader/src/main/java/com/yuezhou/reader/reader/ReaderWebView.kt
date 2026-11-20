@@ -195,6 +195,11 @@ class ReaderWebView(context: Context) : WebView(context) {
         evaluateJavascript("window.__reader.getCurrentChapterText();", null)
     }
 
+    /** 朗读高亮：定位到文本节点 CFI + 节点内字符偏移处并选中。 */
+    fun highlight(cfi: String, offset: Int) = whenReaderReady {
+        evaluateJavascript("window.__reader.highlightRange(${jsonQuote(cfi)}, $offset).then(r => {});", null)
+    }
+
     /** 跳转到目录项（href 指向章节）。 */
     fun goToToc(href: String) = whenReaderReady {
         evaluateJavascript("window.__reader.goToToc(${jsonQuote(href)}).then(r => {});", null)
