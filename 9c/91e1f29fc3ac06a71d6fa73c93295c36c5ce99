@@ -1,0 +1,20 @@
+speech/src/main/AndroidManifest.xml
+  h_7f20b2a03eb3b6 2-14
+speech/src/main/java/com/yuezhou/reader/speech/SpeechCommands.kt
+  h_7f20b2a03eb3b6 1-30
+speech/src/main/java/com/yuezhou/reader/speech/SpeechPlanStore.kt
+  h_7f20b2a03eb3b6 1-53
+speech/src/main/java/com/yuezhou/reader/speech/SpeechService.kt
+  h_7f20b2a03eb3b6 1-430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9c91e1f29fc3ac06a71d6fa73c93295c36c5ce99",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
