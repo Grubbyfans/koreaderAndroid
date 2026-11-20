@@ -1,0 +1,22 @@
+reader/build.gradle.kts
+  h_7f20b2a03eb3b6 21-24,32-34
+reader/src/main/java/com/yuezhou/reader/reader/EpubChapterTextSource.kt
+  h_7f20b2a03eb3b6 1-113
+reader/src/main/java/com/yuezhou/reader/reader/HtmlTextExtractor.kt
+  h_7f20b2a03eb3b6 1-133
+reader/src/test/java/com/yuezhou/reader/reader/EpubChapterTextSourceTest.kt
+  h_7f20b2a03eb3b6 1-109
+reader/src/test/java/com/yuezhou/reader/reader/HtmlTextExtractorTest.kt
+  h_7f20b2a03eb3b6 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ea31b3d1b71f96247a5dfe8b05aeba38f25d8362",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
