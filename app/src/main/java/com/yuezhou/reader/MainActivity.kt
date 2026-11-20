@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -45,6 +46,10 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -133,11 +138,15 @@ private fun BookshelfScreen() {
     var selecting by remember { mutableStateOf<Set<String>?>(null) }
     // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
     var pendingDelete by remember { mutableStateOf<Set<String>?>(null) }
-    // 软删除集合：确认删除后先隐藏，Snackbar 撤销前不真正落盘删除
-    var hiddenBooks by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var shelfMenuOpen by remember { mutableStateOf(false) }
+    var showHiddenBooks by remember { mutableStateOf(false) }
+    var deletingLocalBooks by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     val store = remember { LibraryStore(context) }
+    var hiddenBooks by remember { mutableStateOf(store.hiddenBookIds()) }
+    val visibleBooks = books.filter { it.bookId !in hiddenBooks }
+    val removedBooks = books.filter { it.bookId in hiddenBooks }
     val cloudSync = remember { CloudSync(context) }
 
     // —— 云端书库状态 ——
@@ -214,6 +223,7 @@ private fun BookshelfScreen() {
     LaunchedEffect(refreshKey) {
         loading = true
         books = store.snapshot().books
+        hiddenBooks = store.hiddenBookIds()
         loading = false
     }
 
@@ -279,11 +289,11 @@ private fun BookshelfScreen() {
         containerColor = YuezhouColors.Background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            if (selecting != null && currentTab == Tab.书架) {
+            if (selecting != null && currentTab == Tab.书架 && bookScope == BookScope.本地) {
                 // 管理态顶栏：已选数量 + 全选/删除
                 val selected = selecting!!
                 TopAppBar(
-                    title = { Text("已选 ${selected.size} 项") },
+                    title = { Text("已选 ${selected.size} 本") },
                     navigationIcon = {
                         Text(
                             "取消",
@@ -295,7 +305,7 @@ private fun BookshelfScreen() {
                         )
                     },
                     actions = {
-                        val allSelected = books.isNotEmpty() && selected.size == books.size
+                        val allSelected = visibleBooks.isNotEmpty() && selected.size == visibleBooks.size
                         Text(
                             if (allSelected) "取消全选" else "全选",
                             style = MaterialTheme.typography.bodyMedium,
@@ -303,22 +313,44 @@ private fun BookshelfScreen() {
                             modifier = Modifier
                                 .clickable {
                                     selecting = if (allSelected) emptySet()
-                                    else books.map { it.bookId }.toSet()
+                                    else visibleBooks.map { it.bookId }.toSet()
                                 }
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
-                        Text(
-                            "删除",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (selected.isEmpty()) YuezhouColors.TextSecondary
-                            else Color(0xFFE64340),
-                            modifier = Modifier
-                                .clickable(enabled = selected.isNotEmpty()) {
-                                    // 二次确认：先弹框，确认后才真正删除
-                                    pendingDelete = selected
-                                }
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                        )
+                        Box {
+                            IconButton(enabled = selected.isNotEmpty() && !deletingLocalBooks, onClick = { shelfMenuOpen = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+                            }
+                            DropdownMenu(expanded = shelfMenuOpen, onDismissRequest = { shelfMenuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("从书架移除") },
+                                    onClick = {
+                                        shelfMenuOpen = false
+                                        selecting = null
+                                        store.setBooksHidden(selected, true)
+                                        hiddenBooks = store.hiddenBookIds()
+                                        scope.launch {
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "已从书架移除 ${selected.size} 本，文件已保留",
+                                                actionLabel = "撤销",
+                                                duration = SnackbarDuration.Short,
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                store.setBooksHidden(selected, false)
+                                                hiddenBooks = store.hiddenBookIds()
+                                            }
+                                        }
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("删除本机文件", color = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        shelfMenuOpen = false
+                                        pendingDelete = selected
+                                    },
+                                )
+                            }
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = YuezhouColors.Surface,
@@ -328,6 +360,11 @@ private fun BookshelfScreen() {
             } else {
                 TopAppBar(
                     title = { Text(if (currentTab == Tab.书架) "书库" else currentTab.label) },
+                    actions = {
+                        if (currentTab == Tab.书架 && bookScope == BookScope.本地 && removedBooks.isNotEmpty()) {
+                            TextButton(onClick = { showHiddenBooks = true }) { Text("已移除") }
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = YuezhouColors.Surface,
                         titleContentColor = YuezhouColors.TextPrimary,
@@ -389,11 +426,13 @@ private fun BookshelfScreen() {
                 )
             }
 
-            val visibleBooks = books.filter { it.bookId !in hiddenBooks }
             when (currentTab) {
                 Tab.书架 -> {
                     // 本地/云端切换条
-                    BookScopeSwitch(current = bookScope, onSelect = { bookScope = it })
+                    BookScopeSwitch(current = bookScope, onSelect = {
+                        bookScope = it
+                        selecting = null
+                    })
                     when (bookScope) {
                         BookScope.本地 -> {
                             if (scanning) {
@@ -436,57 +475,67 @@ private fun BookshelfScreen() {
         }
     }
 
-    // 删除二次确认弹窗：列出将删除的书名，明确范围，确认后才执行
-    val toDelete = pendingDelete
-    if (toDelete != null && toDelete.isNotEmpty()) {
-        val titles = books.filter { it.bookId in toDelete }.map { it.title }
+    if (showHiddenBooks) {
         AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("删除书籍") },
+            onDismissRequest = { showHiddenBooks = false },
+            title = { Text("已从书架移除") },
             text = {
-                Text(
-                    buildString {
-                        append("将删除以下 ")
-                        append(toDelete.size)
-                        append(" 本本地书籍，正文与阅读进度一并移除，此操作不可撤销：\n\n")
-                        titles.take(5).forEach { append("· ").append(it).append('\n') }
-                        if (titles.size > 5) append("… 等共 ").append(titles.size).append(" 本")
-                    },
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            // 先软隐藏，给撤销窗口；Snackbar 超时（未撤销）才真正删除
-                            hiddenBooks = hiddenBooks + toDelete
-                            pendingDelete = null
-                            selecting = null
-                            refreshKey++
-                            val result = snackbarHostState.showSnackbar(
-                                message = "已移除 ${toDelete.size} 本",
-                                actionLabel = "撤销",
-                                duration = SnackbarDuration.Short,
-                            )
-                            if (result == SnackbarResult.ActionPerformed) {
-                                // 撤销：恢复显示，不删除
-                                hiddenBooks = hiddenBooks - toDelete
-                                refreshKey++
-                            } else {
-                                // 超时/消失：真正删除，并从软隐藏集合移除（避免残留 bookId 干扰后续同名书导入）
-                                store.removeBooks(toDelete)
-                                hiddenBooks = hiddenBooks - toDelete
-                                refreshKey++
-                            }
+                if (removedBooks.isEmpty()) Text("暂无已移除的书籍")
+                else LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                    items(removedBooks, key = { it.bookId }) { book ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(book.title, modifier = Modifier.weight(1f))
+                            TextButton(onClick = {
+                                store.setBooksHidden(setOf(book.bookId), false)
+                                hiddenBooks = store.hiddenBookIds()
+                            }) { Text("恢复") }
                         }
-                    },
-                ) {
-                    Text("删除", color = Color(0xFFE64340))
+                    }
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            confirmButton = { TextButton(onClick = { showHiddenBooks = false }) { Text("关闭") } },
+        )
+    }
+
+    val toDelete = pendingDelete
+    if (!toDelete.isNullOrEmpty()) {
+        val selectedBooks = books.filter { it.bookId in toDelete }
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除 ${selectedBooks.size} 本本机文件") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("删除成功后将移出书架。阅读进度、云端书籍及下载目录中的其他副本会保留。")
+                    LazyColumn(modifier = Modifier.heightIn(max = 260.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(selectedBooks, key = { it.bookId }) { book ->
+                            Text(book.title, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                java.io.File(context.filesDir, "epub/${book.fileName}").path,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
             },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDelete = null
+                    selecting = null
+                    deletingLocalBooks = true
+                    scope.launch {
+                        try {
+                            val result = store.removeBooks(toDelete, ReaderActivity::isBookOpen)
+                            refreshKey++
+                            val failures = result.failures.entries.joinToString("；") { (id, reason) -> "$id：$reason" }
+                            status = "已删除 ${result.removed.size} 本本机文件" +
+                                if (failures.isEmpty()) "" else "，${result.failures.size} 本失败：$failures"
+                        } finally {
+                            deletingLocalBooks = false
+                        }
+                    }
+                }) { Text("删除本机文件", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
         )
     }
 

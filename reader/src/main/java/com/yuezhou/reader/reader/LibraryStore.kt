@@ -43,6 +43,15 @@ class LibraryStore(private val context: Context) {
     /** 显示名映射：bookId → EPUB 元数据书名（本地展示用，不写入 library.json 以保持协议 title=bookId）。 */
     private val titlesFile: File get() = File(root, "display_titles.json")
 
+    private val shelfPrefs = context.getSharedPreferences("bookshelf_visibility", Context.MODE_PRIVATE)
+
+    fun hiddenBookIds(): Set<String> = shelfPrefs.getStringSet("hidden", emptySet()).orEmpty().toSet()
+
+    fun setBooksHidden(bookIds: Set<String>, hidden: Boolean) {
+        val previous = hiddenBookIds()
+        shelfPrefs.edit().putStringSet("hidden", if (hidden) previous + bookIds else previous - bookIds).apply()
+    }
+
     /** 统一时间戳格式：秒精度、无小数秒，符合 ProtocolChecks.validTimestamp 的严格正则。 */
     private fun now(): String =
         OffsetDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX"))
@@ -151,6 +160,7 @@ class LibraryStore(private val context: Context) {
             // 登记 library.json
             upsertCatalog(bookId, fileName, target.length(), coverPath, coverVersion)
 
+            setBooksHidden(setOf(bookId), false)
             Result.success(bookId)
         } catch (e: Exception) {
             Result.failure(e)
@@ -250,28 +260,30 @@ class LibraryStore(private val context: Context) {
      * 移除一本（或多本）书籍：删除正文 EPUB、封面、进度、显示名，并从 library.json 摘除。
      * 复用 [registerBook] 的目录/协议约定，保证清理彻底、不残留孤儿记录。
      *
-     * @return 实际移除的 bookId 列表（正文不存在等情况下会跳过）。
+     * @return 已移除条目与逐本失败原因。
      */
-    suspend fun removeBooks(bookIds: Collection<String>): List<String> = withContext(Dispatchers.IO) {
+    data class BookDeletion(val removed: List<String>, val failures: Map<String, String>)
+
+    suspend fun removeBooks(bookIds: Collection<String>, isOpen: (String) -> Boolean): BookDeletion = withContext(Dispatchers.IO) {
         val existing: List<LibraryBook> = if (libraryFile.exists()) {
             try { LibraryCatalog.decode(libraryFile.readText()).books } catch (e: Exception) { emptyList() }
         } else emptyList()
         val removed = ArrayList<String>()
+        val failures = linkedMapOf<String, String>()
         for (bookId in bookIds) {
             try {
-                val book = existing.firstOrNull { it.bookId == bookId } ?: continue
-                // 正文：files/epub/<fileName>（library.json 的 fileName 为唯一身份）
-                File(booksDir, book.fileName).delete()
+                check(!isOpen(bookId)) { "请先关闭正在阅读的书籍" }
+                val book = existing.firstOrNull { it.bookId == bookId } ?: error("书架条目已不存在")
+                val file = File(booksDir, book.fileName)
+                check(!file.exists() || file.delete()) { "无法删除应用私有文件" }
                 // 封面
                 book.coverPath?.let { File(root, it).delete() }
                 File(coversDir, "$bookId.json").delete()
-                // 进度
-                File(progressDir, "$bookId.json").delete()
                 // 显示名映射
                 removeTitle(bookId)
                 removed.add(bookId)
             } catch (e: Exception) {
-                // 单项失败不阻断其余，继续处理
+                failures[bookId] = e.message ?: "删除失败"
             }
         }
         if (removed.isNotEmpty()) {
@@ -286,8 +298,9 @@ class LibraryStore(private val context: Context) {
             libraryFile.writeText(LibraryCatalog.encode(catalog))
             // 同步清理显示名映射文件（若已空则删除）
             cleanupTitlesIfEmpty()
+            setBooksHidden(removed.toSet(), false)
         }
-        removed
+        BookDeletion(removed, failures)
     }
 
     /** 读取进度：返回 (percent, location, lastReadAtMillis)。无进度返回 null。 */
