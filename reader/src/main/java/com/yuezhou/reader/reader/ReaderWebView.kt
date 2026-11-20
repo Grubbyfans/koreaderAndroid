@@ -1,6 +1,7 @@
 package com.yuezhou.reader.reader
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -28,11 +29,30 @@ import java.util.UUID
  */
 class ReaderWebView(context: Context) : WebView(context) {
 
+    @Volatile private var externalSource: Uri? = null
+
     /** 资产加载器：负责把 assets/reader 目录映射为受控 HTTPS URL。 */
     private val assetLoader: WebViewAssetLoader = WebViewAssetLoader.Builder()
         .addPathHandler("/assets/", AssetsPathHandler(context))
         // EPUB 私有目录：app 内部 files/epub/ 下的文件
         .addPathHandler("/epub/", InternalStoragePathHandler(context, File(context.filesDir, "epub")))
+        .addPathHandler("/selected/") { path ->
+            val uri = externalSource
+            val stream = if (path == "book.epub" && uri != null) {
+                try {
+                    context.contentResolver.openInputStream(uri)
+                } catch (_: java.io.IOException) {
+                    null
+                } catch (_: SecurityException) {
+                    null
+                }
+            } else null
+            if (stream == null) {
+                WebResourceResponse("text/plain", "UTF-8", 404, "EPUB unavailable", emptyMap(), null)
+            } else {
+                WebResourceResponse("application/epub+zip", null, 200, "OK", mapOf("Cache-Control" to "no-store"), stream)
+            }
+        }
         .build()
 
     /** 桥接事件监听器。 */
@@ -160,12 +180,13 @@ class ReaderWebView(context: Context) : WebView(context) {
     }
 
     /**
-     * 打开 EPUB。epubFile 须为已复制到私有目录 files/epub/ 下的文件；
-     * 这里用其文件名构造受控 URL 传给 JS 侧 view.open()。
+     * 通过受控 URL 加载私有 EPUB 或用户授权的当前书籍。
      * restoreCfi 非空时打开后跳转到该位置（恢复阅读进度）。
      */
-    fun openEpub(epubFileName: String, restoreCfi: String? = null) {
-        val url = "https://appassets.androidplatform.net/epub/$epubFileName"
+    fun openEpub(epubFileName: String, restoreCfi: String? = null, source: Uri? = null) {
+        externalSource = source
+        val path = if (source == null) "epub/${Uri.encode(epubFileName)}" else "selected/book.epub"
+        val url = "https://appassets.androidplatform.net/$path"
         val settings = readerSettings
         whenReaderReady {
             val restore = restoreCfi ?: ""

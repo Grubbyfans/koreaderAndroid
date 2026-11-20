@@ -145,7 +145,7 @@ private fun ReaderScreen(
     var totalSections by remember { mutableStateOf(0) }
     var tocItems by remember { mutableStateOf<List<TocItem>>(emptyList()) }
     // 待打开的书：WebView 尚未创建时先暂存
-    var pendingOpen by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    var pendingOpen by remember { mutableStateOf<Triple<String, String?, Uri?>?>(null) }
     // 沉浸式面板显隐
     var panelVisible by remember { mutableStateOf(false) }
     // 朗读状态：是否正在朗读
@@ -414,17 +414,24 @@ private fun ReaderScreen(
         }
     }
 
-    fun openBookFile(fileName: String, restoreCfi: String? = null) {
-        pendingOpen = fileName to restoreCfi
+    fun openBookFile(fileName: String, restoreCfi: String? = null, source: Uri? = null) {
+        pendingOpen = Triple(fileName, restoreCfi, source)
     }
 
     // 初始化：有 bookId 则从书库打开
     LaunchedEffect(bookId) {
         if (bookId != null) {
             loading = true
-            val fileName = store.fileNameOf(bookId)
-            val restoreCfi = store.savedLocation(bookId)
-            openBookFile(fileName, restoreCfi)
+            try {
+                val source = store.bookLocation(bookId)
+                val restoreCfi = store.savedLocation(bookId)
+                openBookFile(source?.fileName ?: "$bookId.epub", restoreCfi, source?.uri)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                loading = false
+                status = "无法读取书籍位置：${e.message}"
+            }
         } else {
             loading = false
         }
@@ -457,9 +464,9 @@ private fun ReaderScreen(
         val prefs = loadedPrefs ?: return@LaunchedEffect
         wv.verticalMode = prefs.vertical
         wv.applySettings(prefs.fontSize, prefs.lineHeight, prefs.pageMargin, prefs.theme, prefs.vertical)
-        pendingOpen?.let { (fileName, restoreCfi) ->
+        pendingOpen?.let { (fileName, restoreCfi, source) ->
             pendingOpen = null
-            wv.openEpub(fileName, restoreCfi)
+            wv.openEpub(fileName, restoreCfi, source)
         }
     }
 

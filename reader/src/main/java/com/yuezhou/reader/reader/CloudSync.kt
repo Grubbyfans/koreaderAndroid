@@ -159,7 +159,9 @@ class CloudSync(private val context: Context) {
         val backend = backend() ?: throw CloudException(ErrorCode.INVALID_INPUT, "请先配置云同步后端")
         backend.ensureAuthorized()
         val catalog = CloudService(backend).index().books.associateBy { it.bookId }
-        val books = LibraryStore(context).snapshot().books
+        val store = LibraryStore(context)
+        val hidden = store.hiddenBookIds()
+        val books = store.snapshot().books.filterNot { it.bookId in hidden }
         val syncedIds = books.filter { catalog[it.bookId]?.size == it.size }.map { it.bookId }.toSet()
         UploadSelection(backend.backendId, backendLabelOf(backend), books, syncedIds)
     }
@@ -194,12 +196,22 @@ class CloudSync(private val context: Context) {
                     continue
                 }
                 val bookStart = System.currentTimeMillis()
-                val epub = File(EpubImporter.epubDir(context), entry.fileName)
-                val size = epub.length()
+                var staging: File? = null
+                var size = 0L
                 var uploadedFileName: String? = null
                 var transferStarted = false
                 onProgress(entry.bookId, BookUploadProgress(UploadStatus.Preparing))
                 try {
+                    val epub = entry.sourceUri?.let { uri ->
+                        val temp = File.createTempFile("upload-", ".epub", context.cacheDir)
+                        staging = temp
+                        val resolver = context.contentResolver
+                        checkNotNull(resolver.openInputStream(uri)) { "无法读取指定目录中的 EPUB" }.use { input ->
+                            temp.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        temp
+                    } ?: File(EpubImporter.epubDir(context), entry.fileName)
+                    size = epub.length()
                     check(epub.isFile && size > 0L) { "本地 EPUB 不存在或为空" }
                     service.uploadBook(
                         epub,
@@ -261,6 +273,7 @@ class CloudSync(private val context: Context) {
                     }
                     onProgress(entry.bookId, BookUploadProgress(status, message = e.message))
                 } finally {
+                    staging?.delete()
                     collector.recordPhase("上传书籍", System.currentTimeMillis() - bookStart)
                 }
             }
@@ -521,15 +534,15 @@ class CloudSync(private val context: Context) {
                 check(book.size in 1..(1024L * 1024 * 1024)) { "书库记录中的文件大小无效，请先更新书库" }
                 check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
                 val directory = DownloadDirectory(context)
-                val destination = directory.uri
                 val backend = backend() ?: return@withLock Result.failure(
                     IllegalStateException("尚未配置云后端"),
                 )
                 backend.ensureAuthorized()
 
                 val store = LibraryStore(context)
-                val fileName = store.snapshot().books.firstOrNull { it.bookId == book.bookId }?.fileName
-                    ?: book.fileName
+                val local = store.bookLocation(book.bookId)
+                val destination = local?.tree ?: directory.uri
+                val fileName = local?.fileName ?: book.fileName
                 val target = File(EpubImporter.epubDir(context), fileName)
                 check(target.parentFile?.usableSpace?.let { it >= book.size } == true) { "应用存储空间不足" }
                 val tmp = File.createTempFile("download-", ".part", target.parentFile)
@@ -538,21 +551,23 @@ class CloudSync(private val context: Context) {
                     check(tmp.length() == book.size) { "下载大小与书库不符，请先更新书库" }
                     CoverExtractor.validatePackage(tmp)
                     check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
-                    if (destination != null) directory.publish(destination, tmp, fileName)
-                    Files.move(
-                        tmp.toPath(), target.toPath(),
-                        StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING,
-                    )
+                    val cover = CoverExtractor.extract(tmp)
+                    val title = CoverExtractor.extractTitle(tmp)
+                    val source = destination?.let { directory.publish(it, tmp, fileName) }
+                    if (source == null) {
+                        Files.move(
+                            tmp.toPath(), target.toPath(),
+                            StandardCopyOption.ATOMIC_MOVE,
+                            StandardCopyOption.REPLACE_EXISTING,
+                        )
+                    }
+                    store.registerBook(fileName, cover, title, source, destination, book.size).getOrThrow()
+                    if (source != null) target.delete()
+                    invalidateListCache()
+                    Result.success(fileName)
                 } finally {
                     tmp.delete()
                 }
-
-                val cover = CoverExtractor.extract(target)
-                val title = CoverExtractor.extractTitle(target)
-                val registered = store.registerBook(fileName, cover, title)
-                invalidateListCache()
-                registered.map { fileName }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

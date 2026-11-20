@@ -505,12 +505,12 @@ private fun BookshelfScreen() {
             title = { Text("删除 ${selectedBooks.size} 本本机文件") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("删除成功后将移出书架。阅读进度、云端书籍及下载目录中的其他副本会保留。")
+                    Text("删除成功后将移出书架。只删除下方所列文件。阅读进度和云端书籍会保留。")
                     LazyColumn(modifier = Modifier.heightIn(max = 260.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(selectedBooks, key = { it.bookId }) { book ->
                             Text(book.title, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                java.io.File(context.filesDir, "epub/${book.fileName}").path,
+                                book.localPath,
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -529,6 +529,11 @@ private fun BookshelfScreen() {
                             val failures = result.failures.entries.joinToString("；") { (id, reason) -> "$id：$reason" }
                             status = "已删除 ${result.removed.size} 本本机文件" +
                                 if (failures.isEmpty()) "" else "，${result.failures.size} 本失败：$failures"
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            refreshKey++
+                            status = "无法更新本地书架：${e.message}"
                         } finally {
                             deletingLocalBooks = false
                         }
@@ -1142,7 +1147,7 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
 
         SettingsCard("下载目录") {
             Text(downloadLabel, style = MaterialTheme.typography.bodyMedium)
-            Text("下载的 EPUB 会同时保留一份应用内阅读副本。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+            Text("新下载的书会直接从所选目录打开。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
             Row {
                 TextButton(onClick = { chooseDownloadDirectory.launch(downloadDirectory.uri) }) {
                     Text("选择目录")

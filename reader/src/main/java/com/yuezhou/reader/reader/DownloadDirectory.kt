@@ -39,7 +39,7 @@ class DownloadDirectory(private val context: Context) {
         DocumentFile.fromTreeUri(context, tree)?.takeIf { it.isDirectory && it.canWrite() }
             ?: throw IOException("下载目录无法写入，请在设置中重新选择")
 
-    internal fun publish(tree: Uri, source: File, fileName: String) {
+    internal fun publish(tree: Uri, source: File, fileName: String): Uri {
         val directory = writableDirectory(tree)
         val existing = directory.findFile(fileName)
         if (existing != null && !existing.isFile) {
@@ -52,15 +52,22 @@ class DownloadDirectory(private val context: Context) {
         var backedUp = false
         var installed = false
         try {
-            resolver.openOutputStream(staged.uri, "wt")?.use { output ->
+            val bytesWritten = resolver.openOutputStream(staged.uri, "wt")?.use { output ->
                 source.inputStream().use { input -> input.copyTo(output) }
             } ?: throw IOException("无法写入下载目录")
+            if (bytesWritten != source.length()) throw IOException("写入所选目录的 EPUB 大小不符")
             if (existing != null) {
                 backedUp = existing.renameTo("yuezhou-$id.backup")
                 if (!backedUp) throw IOException("下载目录不支持安全替换同名文件")
             }
-            installed = staged.renameTo(fileName)
-            if (!installed) throw IOException("下载目录不支持发布文件，请选择其他目录")
+            if (!staged.renameTo(fileName)) {
+                throw IOException("下载目录不支持发布文件，请选择其他目录")
+            }
+            if (resolver.openInputStream(staged.uri)?.use { it.read() }?.let { it >= 0 } != true) {
+                throw IOException("无法读取所选目录中的 EPUB")
+            }
+            installed = true
+            return staged.uri
         } finally {
             if (!installed) {
                 staged.delete()
