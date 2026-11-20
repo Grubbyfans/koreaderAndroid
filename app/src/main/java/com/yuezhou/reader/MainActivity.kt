@@ -78,6 +78,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.yuezhou.reader.reader.CloudCredentialStore
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
 import kotlinx.coroutines.Dispatchers
@@ -574,11 +575,9 @@ private fun SettingsPage() {
         )
 
         Spacer(Modifier.height(24.dp))
-        Text(
-            "云同步与朗读功能尚未接入，将在 P4/P5（WebDAV / 百度网盘）与 P2（TTS）后端就绪后开放。",
-            style = MaterialTheme.typography.bodySmall,
-            color = YuezhouColors.TextSecondary,
-        )
+        // 云同步后端配置（WebDAV / 百度网盘授权）
+        val credentialStore = remember { CloudCredentialStore(context) }
+        CloudConfigSection(store = credentialStore)
     }
 }
 

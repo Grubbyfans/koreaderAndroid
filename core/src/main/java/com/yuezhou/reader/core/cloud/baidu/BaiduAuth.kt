@@ -38,6 +38,12 @@ object BaiduAuth {
         val refreshToken: String?,
     )
 
+    /** 账户信息（uinfo 结果）。 */
+    data class AccountInfo(
+        val userId: String,
+        val accountName: String,
+    )
+
     /** 生成 OOB 授权 URL。 */
     fun authorizationUrl(appKey: String, state: String): String {
         if (appKey.isBlank()) throw CloudException(ErrorCode.INVALID_INPUT, "缺少百度 AppKey")
@@ -126,4 +132,39 @@ object BaiduAuth {
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
-}
+
+    /**
+     * 拉取百度账户信息（`method=uinfo`），返回稳定用户标识 `uk` 与账户显示名。
+     * 用于授权完成后核对账户身份、展示账户名。`uk` 以字符串承载防 2^53 精度丢失。
+     */
+    fun fetchAccountInfo(
+        accessToken: String,
+        clientFactory: (() -> OkHttpClient)? = null,
+    ): AccountInfo {
+        val client = clientFactory?.invoke() ?: defaultClient()
+        val url = "https://pan.baidu.com/rest/2.0/xpan/nas?method=uinfo&access_token=" +
+            BaiduForm.escape(accessToken)
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "pan.baidu.com")
+            .get()
+            .build()
+        val obj: JsonObject = client.newCall(request).execute().use { r ->
+            val raw = r.body?.string()
+                ?: throw CloudException(ErrorCode.NETWORK, "百度账户信息请求无响应")
+            if (r.code != 200) {
+                throw CloudException(ErrorCode.NETWORK, "百度账户信息请求失败：${r.code}")
+            }
+            val parsed = BaiduJson.parse(raw)
+            BaiduErrors.checkError(parsed)
+            parsed
+        }
+        val uk = BaiduJson.strField(obj, "uk")
+        if (uk == null || !uk.matches(Regex("^[1-9]\\d*$")) || uk.length > 24) {
+            throw CloudException(ErrorCode.INVALID_INPUT, "百度未返回可信的稳定用户标识")
+        }
+        val name = BaiduJson.strField(obj, "baidu_name")
+            ?: BaiduJson.strField(obj, "netdisk_name")
+            ?: uk
+        return AccountInfo(userId = uk, accountName = name)
+    }
