@@ -1,0 +1,10 @@
+{
+  "errno": 0,
+  "fs_id": "10864357346121676922",
+  "path": "/apps/阅舟同步/books/示例书.epub",
+  "size": 10485760,
+  "md5": "c9c8e6a6c0f5f8e8c0a8d9e0f1a2b3c4",
+  "isdir": 0,
+  "server_mtime": 1764136800,
+  "request_id": "demo-request-id-create"
+}

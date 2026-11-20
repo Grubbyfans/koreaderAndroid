@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WebDAV PROPFIND Depth:1 响应样例（枚举直接子项）。
+  用于校准 core/cloud/webdav/DavXml.kt 对目录列表的解析。
+
+  包含三种典型条目：
+  1. 目录（resourcetype 含 collection）—— books/
+  2. 文件（含 ETag、长度、mtime）—— books/示例书.epub
+  3. 404 项（单个 response 内 propstat status 为 404）—— 已不存在的条目
+  脱敏样例，非真实服务器返回。
+-->
+<D:multistatus xmlns:D="DAV:">
+  <!-- 目录项 -->
+  <D:response>
+    <D:href>/dav/books/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/></D:resourcetype>
+        <D:getlastmodified>Sun, 19 Nov 2026 09:00:00 GMT</D:getlastmodified>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+
+  <!-- 文件项 -->
+  <D:response>
+    <D:href>/dav/books/示例书.epub</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype/>
+        <D:getcontentlength>10485760</D:getcontentlength>
+        <D:getetag>"a1b2c3d4-0000-0000-0000-000000000001"</D:getetag>
+        <D:getlastmodified>Sun, 19 Nov 2026 18:00:00 GMT</D:getlastmodified>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+
+  <!-- 404 项：某条目已消失，仅返回 404 propstat，无有效 prop -->
+  <D:response>
+    <D:href>/dav/books/已删除.epub</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype/>
+      </D:prop>
+      <D:status>HTTP/1.1 404 Not Found</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>

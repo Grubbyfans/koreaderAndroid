@@ -1,0 +1,15 @@
+{
+  "errno": 0,
+  "list": [
+    {
+      "fs_id": "10864357346121676922",
+      "path": "/apps/阅舟同步/books/示例书.epub",
+      "size": 10485760,
+      "isdir": 0,
+      "md5": "c9c8e6a6c0f5f8e8c0a8d9e0f1a2b3c4",
+      "server_mtime": 1764136800,
+      "dlink": "https://d.pcs.baidu.com/file/xxxx?fid=10864357346121676922&rt=pr&sign=FDtAER-DCb740ccc5511e5e8fedcff06b081203-abc123&expires=8h&chkv=1&chkbd=0&chkpc=&dp-logid=123&dp-callid=0&r=1234567890&vuk=1234567890&ft=video"
+    }
+  ],
+  "request_id": "demo-request-id-filemetas"
+}

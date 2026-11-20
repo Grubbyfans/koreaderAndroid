@@ -1,0 +1,33 @@
+{
+  "errno": 0,
+  "list": [
+    {
+      "fs_id": "10864357346121676922",
+      "path": "/apps/阅舟同步/books/示例书.epub",
+      "size": 10485760,
+      "isdir": 0,
+      "md5": "c9c8e6a6c0f5f8e8c0a8d9e0f1a2b3c4",
+      "server_mtime": 1764136800,
+      "category": 6
+    },
+    {
+      "fs_id": "10864357346121676923",
+      "path": "/apps/阅舟同步/books/无封面书.epub",
+      "size": 1,
+      "isdir": 0,
+      "md5": "a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5",
+      "server_mtime": 1764136700,
+      "category": 6
+    },
+    {
+      "fs_id": "10864357346121676924",
+      "path": "/apps/阅舟同步/covers",
+      "size": 0,
+      "isdir": 1,
+      "md5": "",
+      "server_mtime": 1764136600,
+      "category": 6
+    }
+  ],
+  "request_id": "demo-request-id-list"
+}

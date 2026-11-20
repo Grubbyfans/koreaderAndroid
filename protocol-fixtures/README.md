@@ -9,6 +9,7 @@
 - `covers/`：Base64 PNG 封面样本（≤32 KiB、≤240×320）。
 - `progress/`：`schemaVersion=2` 进度样本，**不含** `contentSha256`，`updatedAt` 用 `+08:00` 显式偏移。
 - `samples/`：位置转换测试 EPUB 与真实锚点（P1 阶段补充）。
+- `cloud/`：P4/P5 云端对接的传输层/接口层响应样例（WebDAV `PROPFIND`、百度上传四阶段/下载/枚举/错误码），脱敏，供解析器校准与 mock 回放。
 
 ## 来源
 
