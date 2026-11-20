@@ -12,7 +12,7 @@ sealed interface ReaderEvent {
     /** 目录（TOC）已就绪，携带目录树。 */
     data class TocLoaded(val items: List<TocItem>) : ReaderEvent
     /** 当前章节正文文本已提取（朗读用），携带 { cfi, text } 列表。 */
-    data class ChapterText(val items: List<ChapterTextNode>) : ReaderEvent
+    data class ChapterText(val items: List<ChapterTextNode>, val index: Int?) : ReaderEvent
     /** 错误。 */
     data class Error(val message: String) : ReaderEvent
 }

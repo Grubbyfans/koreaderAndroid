@@ -18,11 +18,14 @@ import android.os.Build
 import android.os.IBinder
 import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.ServiceCompat
+import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechSegment
 import com.yuezhou.reader.core.speech.SpeechStateMachine
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -46,6 +49,11 @@ class SpeechService : Service() {
     private lateinit var audioManager: AudioManager
     private var tts: TtsEngine? = null
     private val stateMachine = SpeechStateMachine()
+    private var request: SpeechPlanStore.Request? = null
+    private var playJob: Job? = null
+    private var chapterJob: Job? = null
+    private var waitingChapter: SpeechPlan? = null
+    private var chapterPaused = false
 
     private var mediaSession: MediaSession? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -79,10 +87,7 @@ class SpeechService : Service() {
             SpeechCommands.ACTION_NEXT -> handleNext()
             SpeechCommands.ACTION_PREVIOUS -> handlePrevious()
             SpeechCommands.ACTION_STOP -> handleStop()
-            SpeechCommands.ACTION_STOP_FOREGROUND -> {
-                handleStop()
-                stopSelf()
-            }
+            SpeechCommands.ACTION_STOP_FOREGROUND -> handleStop()
         }
         return START_NOT_STICKY
     }
@@ -92,15 +97,34 @@ class SpeechService : Service() {
     // ---- 控制动作 ----
 
     private fun handlePlay() {
-        val plan = SpeechPlanStore.peek() ?: return
-        scope.launch {
-            val engine = ensureEngine() ?: return@launch
-            applyConfig(engine)
-            stateMachine.load(plan)
-            sessionId++
-            engine.listener = createProgressListener()
-            speakCurrent(engine)
+        val nextRequest = SpeechPlanStore.peek() ?: run {
+            handleStop()
+            return
         }
+        playJob?.cancel()
+        clearChapterTransition()
+        request = nextRequest
+        sessionId++
+        tts?.stop()
+        playJob = scope.launch {
+            val engine = ensureEngine() ?: return@launch handleStop("TTS 引擎初始化失败")
+            applyConfig(engine)
+            playChapter(engine, nextRequest.plan)
+        }
+    }
+
+    private fun playChapter(engine: TtsEngine, plan: SpeechPlan) {
+        stateMachine.load(plan)
+        sessionId++
+        engine.listener = createProgressListener()
+        speakCurrent(engine)
+    }
+
+    private fun clearChapterTransition() {
+        chapterJob?.cancel()
+        chapterJob = null
+        waitingChapter = null
+        chapterPaused = false
     }
 
     /** 应用运行期朗读配置（语速 + 音色）。 */
@@ -110,6 +134,8 @@ class SpeechService : Service() {
     }
 
     private fun handlePause() {
+        if (chapterJob != null || waitingChapter != null) chapterPaused = true
+        sessionId++
         tts?.stop()
         stateMachine.pause()
         updatePlaybackState(PlaybackState.STATE_PAUSED)
@@ -117,16 +143,33 @@ class SpeechService : Service() {
 
     private fun handleResume() {
         val engine = tts ?: return
-        scope.launch {
-            val segment = stateMachine.resume().getOrNull() ?: return@launch
-            sessionId++
-            engine.listener = createProgressListener()
-            speak(engine, segment)
+        chapterPaused = false
+        val next = waitingChapter
+        if (next != null) {
+            waitingChapter = null
+            playChapter(engine, next)
+            return
         }
+        if (chapterJob != null) {
+            updatePlaybackState(PlaybackState.STATE_BUFFERING)
+            return
+        }
+        val segment = stateMachine.resume().getOrNull() ?: return
+        sessionId++
+        engine.listener = createProgressListener()
+        speak(engine, segment)
     }
 
     private fun handleNext() {
+        if (chapterJob != null || waitingChapter != null) return
         val engine = tts ?: return
+        val plan = stateMachine.plan ?: return
+        if (stateMachine.position.segmentIndex >= plan.segments.lastIndex) {
+            sessionId++
+            engine.stop()
+            loadNextChapter(engine)
+            return
+        }
         val segment = stateMachine.next().getOrNull() ?: return
         sessionId++
         engine.listener = createProgressListener()
@@ -134,6 +177,7 @@ class SpeechService : Service() {
     }
 
     private fun handlePrevious() {
+        if (chapterJob != null || waitingChapter != null) return
         val engine = tts ?: return
         val segment = stateMachine.previous().getOrNull() ?: return
         sessionId++
@@ -141,13 +185,22 @@ class SpeechService : Service() {
         speak(engine, segment)
     }
 
-    private fun handleStop() {
+    private fun handleStop(error: String? = null) {
+        sessionId++
+        playJob?.cancel()
+        clearChapterTransition()
+        request?.let { SpeechPlanStore.clear(it) }
+        request = null
         tts?.stop()
         stateMachine.stop()
         SpeechProgressTracker.clear()
         releaseAudioFocus()
-        updatePlaybackState(PlaybackState.STATE_STOPPED)
+        updatePlaybackState(
+            if (error == null) PlaybackState.STATE_STOPPED else PlaybackState.STATE_ERROR,
+            errorMessage = error,
+        )
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private suspend fun ensureEngine(): TtsEngine? {
@@ -159,6 +212,9 @@ class SpeechService : Service() {
             tts = engine
             SpeechVoices.publish(engine.availableVoices())
             engine
+        } catch (e: CancellationException) {
+            engine.shutdown()
+            throw e
         } catch (e: Exception) {
             engine.shutdown()
             SpeechVoices.clear()
@@ -179,7 +235,7 @@ class SpeechService : Service() {
         }
         val ok = engine.speak(segment.text, utteranceIdFor(stateMachine.position.segmentIndex))
         if (!ok) {
-            updatePlaybackState(PlaybackState.STATE_ERROR, errorMessage = "TTS 合成失败")
+            handleStop("TTS 合成失败")
             return
         }
         updatePlaybackState(PlaybackState.STATE_PLAYING, segmentIndex = stateMachine.position.segmentIndex)
@@ -190,71 +246,72 @@ class SpeechService : Service() {
     private fun createProgressListener() = object : UtteranceProgressListener() {
         private val mySession = sessionId
 
-        override fun onStart(utteranceId: String?) {
-            val seg = segmentIndexFrom(utteranceId) ?: return
-            if (isStale(mySession)) return
-            confirm(seg, 0)
-        }
+        override fun onStart(utteranceId: String?) = dispatch(utteranceId) { confirm(it, 0) }
 
-        override fun onDone(utteranceId: String?) {
-            val seg = segmentIndexFrom(utteranceId) ?: return
-            if (isStale(mySession)) return
-            // 该片段已完整播出，确认到片段末尾。
-            confirm(seg, segmentAt(seg)?.text?.length ?: 0)
+        override fun onDone(utteranceId: String?) = dispatch(utteranceId) { segment ->
+            confirm(segment, stateMachine.plan?.segmentAt(segment)?.text?.length ?: 0)
             onSegmentDone()
         }
 
         @Deprecated("Deprecated in Java")
-        override fun onError(utteranceId: String?) {
-            val seg = segmentIndexFrom(utteranceId) ?: return
-            if (isStale(mySession)) return
-            updatePlaybackState(PlaybackState.STATE_ERROR, errorMessage = "朗读片段失败")
+        override fun onError(utteranceId: String?) = dispatch(utteranceId) {
+            handleStop("朗读片段失败")
         }
 
-        override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
-            val seg = segmentIndexFrom(utteranceId) ?: return
-            if (isStale(mySession)) return
-            // 引擎支持可靠范围回调时提供词/字级进度；否则仅句子级（onStart/onDone）。
-            confirm(seg, start)
+        override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) =
+            dispatch(utteranceId) { confirm(it, start) }
+
+        private fun dispatch(utteranceId: String?, action: (Int) -> Unit) {
+            scope.launch {
+                if (mySession != sessionId || utteranceId == null) return@launch
+                val segment = stateMachine.position.segmentIndex
+                if (utteranceId == utteranceIdFor(segment)) action(segment)
+            }
         }
 
-        private fun confirm(seg: Int, charOffset: Int) {
-            stateMachine.onProgress(seg, charOffset)
-            val segment = segmentAt(seg)
+        private fun confirm(segment: Int, charOffset: Int) {
+            stateMachine.onProgress(segment, charOffset)
+            val plan = stateMachine.plan ?: return
             SpeechProgressTracker.onProgress(
-                bookId = stateMachine.plan?.bookId ?: "",
-                segmentIndex = seg,
+                bookId = plan.bookId,
+                segmentIndex = segment,
                 charOffset = charOffset,
-                anchor = segment?.anchorAt(charOffset),
+                anchor = plan.segmentAt(segment)?.anchorAt(charOffset),
             )
         }
-
-        private fun isStale(session: Long) = session != sessionId
-    }
-
-    private fun segmentAt(index: Int): SpeechSegment? = stateMachine.plan?.segmentAt(index)
-
-    private fun segmentIndexFrom(utteranceId: String?): Int? {
-        val id = utteranceId ?: return null
-        val sep = id.indexOf(':')
-        if (sep < 0) return null
-        val session = id.substring(0, sep).toLongOrNull() ?: return null
-        if (session != sessionId) return null
-        return id.substring(sep + 1).toIntOrNull()
     }
 
     private fun onSegmentDone() {
-        val next = stateMachine.advanceToNext()
         val engine = tts ?: return
-        if (next == null) {
-            // 计划播完：停止，释放焦点，但保留前台通知由上层决定是否退出。
-            stateMachine.stop()
-            SpeechProgressTracker.clear()
-            releaseAudioFocus()
-            updatePlaybackState(PlaybackState.STATE_STOPPED)
-            return
+        val next = stateMachine.advanceToNext()
+        if (next == null) loadNextChapter(engine) else speak(engine, next)
+    }
+
+    private fun loadNextChapter(engine: TtsEngine) {
+        if (chapterJob != null) return
+        val active = request ?: return handleStop()
+        val previous = stateMachine.plan ?: return handleStop()
+        updatePlaybackState(PlaybackState.STATE_BUFFERING)
+        chapterJob = scope.launch {
+            val next = try {
+                active.chapters.next(previous)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("SpeechService", "无法准备下一章", e)
+                chapterJob = null
+                handleStop("无法继续朗读下一章")
+                return@launch
+            }
+            chapterJob = null
+            if (next == null) {
+                handleStop()
+            } else if (chapterPaused) {
+                waitingChapter = next
+            } else {
+                playChapter(engine, next)
+            }
         }
-        speak(engine, next)
     }
 
     // ---- 音频焦点 ----
@@ -331,7 +388,10 @@ class SpeechService : Service() {
 
     private val sessionCallback = object : MediaSession.Callback() {
         override fun onPlay() {
-            if (stateMachine.state == SpeechStateMachine.State.PAUSED) handleResume() else handlePlay()
+            when {
+                chapterPaused || stateMachine.state == SpeechStateMachine.State.PAUSED -> handleResume()
+                chapterJob == null && stateMachine.state != SpeechStateMachine.State.PLAYING -> handlePlay()
+            }
         }
 
         override fun onPause() = handlePause()
@@ -435,6 +495,7 @@ class SpeechService : Service() {
         super.onDestroy()
         sessionId++
         scope.cancel()
+        request?.let { SpeechPlanStore.clear(it) }
         SpeechProgressTracker.clear()
         releaseAudioFocus()
         tts?.shutdown()

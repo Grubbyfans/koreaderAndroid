@@ -1,8 +1,10 @@
 package com.yuezhou.reader.reader
 
 import com.yuezhou.reader.core.speech.SentencePlanner
+import com.yuezhou.reader.core.speech.SpeechPlan
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -16,7 +18,7 @@ class EpubChapterTextSourceTest {
     lateinit var tempDir: File
 
     /** 构造一个最小 EPUB：两章，spine 顺序 chapter1 -> chapter2。 */
-    private fun buildEpub(): File {
+    private fun buildEpub(includeBlankPage: Boolean = false): File {
         val epub = File(tempDir, "sample.epub")
         ZipOutputStream(epub.outputStream()).use { zip ->
             fun put(name: String, content: String) {
@@ -37,10 +39,12 @@ class EpubChapterTextSourceTest {
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
   <manifest>
     <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="blank" href="blank.xhtml" media-type="application/xhtml+xml"/>
     <item id="c2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
   <spine>
     <itemref idref="c1"/>
+    ${if (includeBlankPage) """<itemref idref="blank"/>""" else ""}
     <itemref idref="c2"/>
   </spine>
 </package>""",
@@ -49,6 +53,7 @@ class EpubChapterTextSourceTest {
                 "OEBPS/chapter1.xhtml",
                 "<html><body><h1>第一章</h1><p>这是第一段。</p><p>这是第二段！</p><script>var x=1;</script></body></html>",
             )
+            put("OEBPS/blank.xhtml", "<html><body><img src='image.png'/></body></html>")
             put(
                 "OEBPS/chapter2.xhtml",
                 "<html><body><p>第二章内容。</p></body></html>",
@@ -78,6 +83,19 @@ class EpubChapterTextSourceTest {
         val units = source.extract()
         assertEquals(listOf("第二章内容。"), units.map { it.text })
         assertEquals("1:0", units[0].anchor.nodeId)
+    }
+
+    @Test
+    fun `续读跳过空白章节 并在最后一章结束`() {
+        val epub = buildEpub(includeBlankPage = true)
+        val initialUnits = EpubChapterTextSource(epub, chapterIndex = 0).extract()
+        val initial = SpeechPlan("sample", "", 0, SentencePlanner().plan(initialUnits))
+
+        val next = checkNotNull(EpubChapterTextSource.nextPlan(epub, initial))
+
+        assertEquals(2, next.chapterIndex)
+        assertEquals(listOf("第二章内容。"), next.segments.map { it.text })
+        assertNull(EpubChapterTextSource.nextPlan(epub, next))
     }
 
     @Test

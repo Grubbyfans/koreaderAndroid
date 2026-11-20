@@ -358,7 +358,7 @@ class ReaderWebView(context: Context) : WebView(context) {
             }
             "chapterText" -> {
                 val obj = parseJson(data)
-                ReaderEvent.ChapterText(parseChapterText(obj["items"]))
+                ReaderEvent.ChapterText(parseChapterText(obj["items"]), (obj["index"] as? Number)?.toInt())
             }
             "error" -> {
                 val obj = parseJson(data)

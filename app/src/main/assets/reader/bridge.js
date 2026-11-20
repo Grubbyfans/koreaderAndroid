@@ -165,8 +165,8 @@ window.__reader = {
                 post('chapterText', { items: [] })
                 return false
             }
-            // 取当前可见章节（第一项）；跨页可能有多项，但同一章节共享一个 index
-            const { doc, index } = contents[0]
+            const visibleIndex = view.lastLocation?.section?.current
+            const { doc, index } = contents.find(item => item.index === visibleIndex) ?? contents[0]
 
             // 反解起点：当前阅读位置的文本节点 + 节点内偏移
             let startNode = null

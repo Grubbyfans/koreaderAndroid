@@ -1,9 +1,12 @@
 package com.yuezhou.reader.reader
 
 import com.yuezhou.reader.core.speech.ChapterTextSource
+import com.yuezhou.reader.core.speech.SentencePlanner
+import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechTextUnit
 import com.yuezhou.reader.core.speech.SourceAnchor
 import java.io.File
+import java.net.URI
 import java.util.zip.ZipFile
 
 /**
@@ -29,44 +32,58 @@ class EpubChapterTextSource(
     private val chapterIndex: Int,
 ) : ChapterTextSource {
 
-    override fun extract(): List<SpeechTextUnit> {
-        return try {
-            ZipFile(epubFile).use { zip ->
-                val spineHrefs = locateSpine(zip) ?: return emptyList()
-                if (chapterIndex !in spineHrefs.indices) return emptyList()
-                val href = spineHrefs[chapterIndex]
-                val entry = zip.getEntry(href) ?: return emptyList()
-                val html = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
-                val text = HtmlTextExtractor.extract(html)
-                splitIntoUnits(text, chapterIndex)
-            }
-        } catch (e: Exception) {
-            emptyList()
+    override fun extract(): List<SpeechTextUnit> = try {
+        ZipFile(epubFile).use { zip ->
+            val href = locateSpine(zip)?.getOrNull(chapterIndex) ?: return@use emptyList()
+            extractChapter(zip, href, chapterIndex)
         }
-    }
-
-    /**
-     * 把一章纯文本按段落（换行）切分为 [SpeechTextUnit]，
-     * nodeId = `"$chapterIndex:$paraIndex"`，offset 为段内 0。
-     */
-    private fun splitIntoUnits(text: String, chapter: Int): List<SpeechTextUnit> {
-        val units = mutableListOf<SpeechTextUnit>()
-        var para = 0
-        for (paragraph in text.split('\n')) {
-            val cleaned = paragraph.trim()
-            if (cleaned.isEmpty()) continue
-            units.add(
-                SpeechTextUnit(
-                    text = cleaned,
-                    anchor = SourceAnchor(nodeId = "$chapter:$para", offset = 0),
-                )
-            )
-            para++
-        }
-        return units
+    } catch (e: Exception) {
+        emptyList()
     }
 
     companion object {
+        fun nextPlan(epubFile: File, after: SpeechPlan, checkActive: () -> Unit = {}): SpeechPlan? {
+            ZipFile(epubFile).use { zip ->
+                val spine = checkNotNull(locateSpine(zip)) { "无法读取 EPUB 章节顺序" }
+                val planner = SentencePlanner()
+                for (index in (after.chapterIndex + 1) until spine.size) {
+                    checkActive()
+                    val segments = planner.plan(extractChapter(zip, spine[index], index))
+                    if (segments.isNotEmpty()) {
+                        return after.copy(chapterIndex = index, segments = segments)
+                    }
+                }
+                return null
+            }
+        }
+
+        private fun extractChapter(zip: ZipFile, href: String, index: Int): List<SpeechTextUnit> {
+            val entry = zip.getEntry(href) ?: return emptyList()
+            if (entry.isDirectory) return emptyList()
+            val html = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+            return splitIntoUnits(HtmlTextExtractor.extract(html), index)
+        }
+
+        /**
+         * 把一章纯文本按段落（换行）切分为 [SpeechTextUnit]，
+         * nodeId = `"$chapterIndex:$paraIndex"`，offset 为段内 0。
+         */
+        private fun splitIntoUnits(text: String, chapter: Int): List<SpeechTextUnit> {
+            val units = mutableListOf<SpeechTextUnit>()
+            var para = 0
+            for (paragraph in text.split('\n')) {
+                val cleaned = paragraph.trim()
+                if (cleaned.isEmpty()) continue
+                units.add(
+                    SpeechTextUnit(
+                        text = cleaned,
+                        anchor = SourceAnchor(nodeId = "$chapter:$para", offset = 0),
+                    )
+                )
+                para++
+            }
+            return units
+        }
 
         /** 定位并解析 OPF，返回按 spine 顺序排列的 XHTML 相对路径列表。 */
         fun locateSpine(zip: ZipFile): List<String>? {
@@ -96,18 +113,24 @@ class EpubChapterTextSource(
             // spine：itemref 顺序
             val spineText = Regex("<spine[\\s\\S]*?</spine>", RegexOption.IGNORE_CASE)
                 .find(opfText)?.value ?: ""
-            val idrefRegex = Regex("idref=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
-            val hrefs = mutableListOf<String>()
-            for (m in idrefRegex.findAll(spineText)) {
-                val href = idToHref[m.groupValues[1]] ?: continue
-                hrefs.add(resolve(baseDir, href))
-            }
+            val itemRefs = Regex("""<itemref\b[^>]*>""", RegexOption.IGNORE_CASE)
+            val idrefRegex = Regex("""\bidref\s*=\s*["']([^"']+)["']""")
+            val nonLinear = Regex("""\blinear\s*=\s*["']no["']""")
+            val hrefs = itemRefs.findAll(spineText).map { item ->
+                val id = idrefRegex.find(item.value)?.groupValues?.get(1)
+                val href = idToHref[id]
+                // Preserve EPUB spine indices even for entries excluded from sequential reading.
+                if (href == null || nonLinear.containsMatchIn(item.value)) ""
+                else resolve(baseDir, href)
+            }.toList()
             return if (hrefs.isEmpty()) null else hrefs
         }
 
         private fun resolve(baseDir: String, href: String): String {
             val clean = href.substringBefore('#').substringBefore('?')
-            return if (clean.startsWith("/")) clean.removePrefix("/") else baseDir + clean
+            val decoded = runCatching { URI(clean).path }.getOrNull() ?: clean
+            val path = if (decoded.startsWith("/")) decoded else "/$baseDir$decoded"
+            return URI(null, null, path, null).normalize().path.removePrefix("/")
         }
     }
 }

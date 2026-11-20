@@ -42,3 +42,9 @@ interface ChapterTextSource {
  */
 fun speechUnit(text: String, nodeId: String, offset: Int = 0): SpeechTextUnit =
     SpeechTextUnit(text, SourceAnchor(nodeId, offset))
+
+
+/** Provides later chapters without relying on an active reader screen. */
+interface SpeechChapterSource : AutoCloseable {
+    suspend fun next(after: SpeechPlan): SpeechPlan?
+}

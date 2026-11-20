@@ -61,6 +61,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.reader.EpubImporter
+import com.yuezhou.reader.reader.EpubSpeechChapterSource
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.ReaderEvent
@@ -146,6 +147,7 @@ private fun ReaderScreen(
     var tocItems by remember { mutableStateOf<List<TocItem>>(emptyList()) }
     // 待打开的书：WebView 尚未创建时先暂存
     var pendingOpen by remember { mutableStateOf<Triple<String, String?, Uri?>?>(null) }
+    var openedSource by remember { mutableStateOf<Pair<String, Uri?>?>(null) }
     // 沉浸式面板显隐
     var panelVisible by remember { mutableStateOf(false) }
     // 朗读状态：是否正在朗读
@@ -307,7 +309,7 @@ private fun ReaderScreen(
             if (snap == null) speakRequested = false
             // 已确认朗读点 → 回写高亮到 WebView（CFI + 节点内偏移）
             val anchor = snap?.sourceAnchor
-            if (snap != null && anchor != null && anchor.nodeId.isNotBlank()) {
+            if (snap != null && snap.bookId == bookId && anchor?.nodeId?.startsWith("epubcfi(") == true) {
                 webView?.highlight(anchor.nodeId, anchor.offset)
             }
         }
@@ -323,8 +325,9 @@ private fun ReaderScreen(
     }
 
     // 从章节文本节点构造朗读计划并启动前台朗读服务。
-    fun startSpeech(nodes: List<com.yuezhou.reader.reader.ChapterTextNode>) {
+    fun startSpeech(nodes: List<com.yuezhou.reader.reader.ChapterTextNode>, chapterIndex: Int) {
         val id = bookId ?: return
+        val (fileName, source) = openedSource ?: return
         // 文本节点 → SpeechTextUnit：用 CFI 字符串作为 nodeId（跨章节唯一，映射回原文锚点）
         val units = nodes.map { node ->
             SpeechTextUnit(text = node.text, anchor = SourceAnchor(nodeId = node.cfi, offset = 0))
@@ -338,7 +341,7 @@ private fun ReaderScreen(
         val plan = SpeechPlan(
             bookId = id,
             fileGeneration = "",
-            chapterIndex = 0,
+            chapterIndex = chapterIndex,
             segments = segments,
         )
         try {
@@ -346,7 +349,7 @@ private fun ReaderScreen(
             SpeechPlanStore.putConfig(
                 SpeechConfig(rate = readerPrefs.speechRate, voiceName = readerPrefs.speechVoice)
             )
-            SpeechPlanStore.startAndPlay(context, plan)
+            SpeechPlanStore.startAndPlay(context, plan, EpubSpeechChapterSource(context, fileName, source))
             speakRequested = true
             status = "已开始朗读"
         } catch (e: Exception) {
@@ -401,10 +404,11 @@ private fun ReaderScreen(
             }
             is ReaderEvent.ChapterText -> {
                 speakRequested = false
-                if (event.items.isEmpty()) {
+                val chapterIndex = event.index
+                if (event.items.isEmpty() || chapterIndex == null) {
                     status = "本章无可朗读文本"
                 } else {
-                    startSpeech(event.items)
+                    startSpeech(event.items, chapterIndex)
                 }
             }
             is ReaderEvent.Error -> {
@@ -466,6 +470,7 @@ private fun ReaderScreen(
         wv.applySettings(prefs.fontSize, prefs.lineHeight, prefs.pageMargin, prefs.theme, prefs.vertical)
         pendingOpen?.let { (fileName, restoreCfi, source) ->
             pendingOpen = null
+            openedSource = fileName to source
             wv.openEpub(fileName, restoreCfi, source)
         }
     }
