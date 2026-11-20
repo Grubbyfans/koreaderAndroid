@@ -66,32 +66,39 @@ const slidePage = async (element, content, property, target, signal, mode = 'sli
 
 // 按模式构造翻页关键帧动画：
 // - slide：横向/纵向平移，轻盈滑动。
-// - simulate：perspective + rotateY 卷页，页面像纸张一样绕书脊翻转并带阴影。
-// - ripple：平移叠加 SVG 水波滤镜（feTurbulence + feDisplacementMap），字随波纹荡漾。
+// - simulate：2D skewX 斜切模拟纸张卷起（绕书脊倾斜），无透视缩放，文字不变形。
+// - ripple：平移叠加「周期性缩放/位移波动」模拟水波纹，页面像被水推着荡开。
 const pageAnimation = (content, horizontal, delta, mode) => {
     if (mode === 'simulate') {
-        const axis = horizontal ? 'rotateY' : 'rotateX'
-        const translate = horizontal
-            ? `translateX(${delta}px)` : `translateY(${delta}px)`
-        const back = horizontal ? 'perspective(1200px)' : 'perspective(1200px)'
-        // 卷页方向跟随翻页方向：delta 为当前偏移 - 目标偏移，正值表示向右翻（下一页在左）。
+        // delta 为当前偏移 - 目标偏移；sign 决定书脊在左还是右。
         const sign = Math.sign(delta) || 1
+        // 绕书脊侧旋转轴，用 skewX 做倾斜卷页（约 ±14° 的峰值斜切），
+        // 全程无 perspective，避免整屏文字透视缩放导致「字体忽大忽小」。
         content.style.transformOrigin = sign < 0 ? 'left center' : 'right center'
+        const skew = sign * 14
+        const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
         return content.animate(
             [
-                { transform: `perspective(1200px) rotateY(0deg)`, filter: 'brightness(1)' },
-                { transform: `perspective(1200px) ${axis}(${sign * 32}deg)`, filter: 'brightness(0.96)' },
-                { transform: `perspective(1200px) ${axis}(0deg) ${translate}`, filter: 'brightness(1)' },
+                { transform: `skewX(0deg)`, filter: 'brightness(1)' },
+                { transform: `skewX(${skew}deg)`, filter: 'brightness(0.94)' },
+                { transform: `skewX(0deg) ${translate}`, filter: 'brightness(1)' },
             ],
-            { duration: 380, easing: 'cubic-bezier(.3,.6,.3,1)', fill: 'forwards' },
+            { duration: 320, easing: 'cubic-bezier(.3,.6,.3,1)', fill: 'forwards' },
         )
     }
     if (mode === 'ripple') {
         const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
-        content.style.filter = 'url(#__yuezhou_ripple__)'
+        const axis = horizontal ? 'scaleX' : 'scaleY'
+        // 水波纹：移动过程中叠加 2 次「先压缩后舒展」的弹性波动，
+        // 页面像被水面波纹推着走，字随之轻微压缩/回弹，视觉上明显区别于纯滑动。
         return content.animate(
-            [{ transform: 'none' }, { transform: translate }],
-            { duration: 420, easing: 'cubic-bezier(.25,.55,.3,1)', fill: 'forwards' },
+            [
+                { transform: 'none' },
+                { transform: `${axis}(0.988) ${translate}`, offset: 0.35 },
+                { transform: `${axis}(1.006)`, offset: 0.6 },
+                { transform: translate, offset: 1 },
+            ],
+            { duration: 460, easing: 'cubic-bezier(.25,.55,.3,1)', fill: 'forwards' },
         )
     }
     const translate = horizontal ? `translateX(${delta}px)` : `translateY(${delta}px)`
