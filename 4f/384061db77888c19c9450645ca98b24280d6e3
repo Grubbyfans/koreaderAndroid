@@ -1,0 +1,19 @@
+reader/build.gradle.kts
+  s_a120608bc12eb8::t_1fa83346edddb3 4,33-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4f384061db77888c19c9450645ca98b24280d6e3",
+  "prompts": {},
+  "sessions": {
+    "s_a120608bc12eb8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f842-1a23-7393-9d79-da3e71891a18",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
