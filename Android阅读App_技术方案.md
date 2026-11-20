@@ -650,7 +650,9 @@ Keystore 保存加密密钥，凭据加密后放应用私有目录；日志及�
 
 开发环境会变化，本文不把任何一次检查结果当作长期事实。开始开发前必须在当前机器重新自检并记录日期、系统与各项版本，至少覆盖：操作系统与架构、JDK、Android SDK Platform/Build Tools/命令行工具、ADB、Android Studio、Node.js、磁盘空间、目标手机的系统版本/USB 调试/本地 TTS 与离线音色。未通过自检的项不得视为已具备。
 
-2026-11-19 22:14 当前环境自检快照（仅作示例，后续必须重查）：Windows 11（x86_64，Build 26100）。Node.js v22.22.2 可用；D: 剩余约 230 GiB，C: 剩余约 25 GiB（88% 已用，避免放缓存/SDK）。
+#### Windows 环境自检快照（2026-11-19 22:14）
+
+Windows 11（x86_64，Build 26100）。Node.js v22.22.2 可用；D: 剩余约 230 GiB，C: 剩余约 25 GiB（88% 已用，避免放缓存/SDK）。
 
 - Android Studio：已安装并正常运行，`D:\Android\Android Studio`，版本 `AI-262.10968`（2026.2.2）。首次启动曾因自动导入旧版 3.0 配置、联网拉取版本控制插件而卡死，已将旧配置目录移出扫描范围后正常启动。
 - JDK：Studio 自带 JBR `D:\Android\Android Studio\jbr\bin\java.exe`，OpenJDK 25.0.4；系统 PATH 中仍没有 `java`，Gradle 可直接使用 Studio 内置 JBR。
@@ -658,6 +660,18 @@ Keystore 保存加密密钥，凭据加密后放应用私有目录；日志及�
 - SDK 路径已设为 D 盘，避免占用紧张的 C 盘。
 - `ANDROID_HOME` / `ANDROID_SDK_ROOT` 仍为空；用 Studio 内置工具链时非强制，新建工程时确认 `local.properties` 的 `sdk.dir=D:\\Android\\Sdk` 即可。建议设 `GRADLE_USER_HOME` 到 D 盘（如 `D:\Android\gradle-home`）以免 Gradle 缓存继续吃 C 盘。
 - 真机 USB 调试与本地 TTS/离线音色本次未核实，不据此承诺可真机验收。
+
+#### macOS 环境自检快照（2026-11-20 09:38）
+
+macOS（Apple Silicon，darwin）。Node.js v22.22.2 可用；磁盘 `/` 剩余约 83 GiB（460 GiB 容量，已用约 19 GiB）。
+
+- Android Studio：常见安装路径（`~/Library/Android/sdk` 等）未发现 Android Studio，需安装 Apple Silicon 版。
+- JDK：系统 PATH 无 `java`（`java -version` 报 unable to locate Java Runtime），`JAVA_HOME` 为空；需随 Android Studio 安装其内置 JBR，或单独安装 JDK。
+- Android SDK：`ANDROID_HOME` / `ANDROID_SDK_ROOT` 均为空，`local.properties` 不存在；安装 SDK 后需创建 `local.properties` 指定 `sdk.dir`（如 `sdk.dir=/Users/<用户名>/Library/Android/sdk`）。
+- 磁盘充足，无需像 Windows 那样特意把 SDK/Gradle 缓存放到其它盘；`GRADLE_USER_HOME` 默认指向 `~/.gradle` 即可。
+- 真机 USB 调试与本地 TTS/离线音色本次未核实，不据此承诺可真机验收。
+
+> 以上两份快照仅作示例，每次开发前必须重新自检并记录当前日期、系统与各项版本，未通过自检的项不得视为已具备。
 
 Gradle 由项目 Wrapper 管理，无需单独安装。Node 使用所选打包工具支持的 LTS，并锁定版本和依赖。
 
@@ -718,15 +732,15 @@ Readest 仓库当前提供 AGPL-3.0 许可证。直接复制或改编其转换�
 
 当前插件可用于对照实现的文件：
 
-- [名称规则](D:/code/baiduPanSync/baidupansync.koplugin/modules/book_name.lua)
-- [列表协议](D:/code/baiduPanSync/baidupansync.koplugin/modules/library_catalog.lua)
-- [条目校验](D:/code/baiduPanSync/baidupansync.koplugin/modules/book_metadata.lua)
-- [进度协议](D:/code/baiduPanSync/baidupansync.koplugin/modules/progress_record.lua)
-- [云端业务流程](D:/code/baiduPanSync/baidupansync.koplugin/modules/cloud_service.lua)
-- [百度实现](D:/code/baiduPanSync/baidupansync.koplugin/modules/baidu_api.lua)
-- [插件运行说明](D:/code/baiduPanSync/baidupansync.koplugin/README.md)
+- [名称规则](D:/code/baiduPanSync/baidupansync.koplugin/modules/book_name.lua)（macOS：`/Users/zhou/workcode/studyCode/baiduPanSync/baidupansync.koplugin/modules/book_name.lua`）
+- [列表协议](D:/code/baiduPanSync/baidupansync.koplugin/modules/library_catalog.lua)（macOS：`/Users/zhou/workcode/studyCode/baiduPanSync/baidupansync.koplugin/modules/library_catalog.lua`）
+- [条目校验](D:/code/baiduPanSync/baidupansync.koplugin/modules/book_metadata.lua)（macOS：`/Users/zhou/workcode/studyCode/baiduPanSync/baidupansync.koplugin/modules/book_metadata.lua`）
+- [进度协议](D:/code/baiduPanSync/baidupansync.koplugin/modules/progress_record.lua)（macOS：`/Users/zhou/workcode/studyCode/baiduPanSync/baidupansync.koplugin/modules/progress_record.lua`）
+- [云端业务流程](D:/code/baiduPanSync/baidupansync.koplugin/modules/cloud_service.lua)（macOS：`/Users/zhou/workcode/studyCode/baiduPanSync/baidupansync.koplugin/modules/cloud_service.lua`）
+- [百度实现](D:/code/baiduPanSync/baidupansync.koplugin/modules/baidu_api.lua)（macOS：`/Users/zhou/workcode/studyCode/baiduPanSync/baidupansync.koplugin/modules/baidu_api.lua`）
+- [插件运行说明](D:/code/baiduPanSync/baidupansync.koplugin/README.md)（macOS：`/Users/zhou/workcode/studyCode/baiduPanSync/baidupansync.koplugin/README.md`）
 
-上述路径以用户提供的 `D:\code\baiduPanSync` 为准；开发前仍应自检目录存在、文件齐全且插件版本为 0.10.9。搬到新项目时应将对应协议和脱敏夹具纳入新仓库，记录来源提交，不能长期依赖这些本地绝对路径。旧版技术方案包含已淘汰设计，不能直接作为现行数据协议。
+上述路径分别以 Windows 的 `D:\code\baiduPanSync` 与 macOS 的 `/Users/zhou/workcode/studyCode/baiduPanSync` 为准；开发前仍应自检目录存在、文件齐全且插件版本为 0.10.9。搬到新项目时应将对应协议和脱敏夹具纳入新仓库，记录来源提交，不能长期依赖这些本地绝对路径。旧版技术方案包含已淘汰设计，不能直接作为现行数据协议。
 
 ### 18.1 可直接交给新项目的启动要求
 

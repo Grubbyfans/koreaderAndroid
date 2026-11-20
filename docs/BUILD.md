@@ -2,7 +2,7 @@
 
 ## 开发前自检
 
-每次开发前按方案 §15.1 重新自检并记录：OS/架构、JDK、Android SDK 组件、ADB、Android Studio、Node.js、磁盘空间、真机系统版本/USB 调试/TTS 音色。本机快照见方案 §15.1（2026-11-19 22:14）。
+每次开发前按方案 §15.1 重新自检并记录：OS/架构、JDK、Android SDK 组件、ADB、Android Studio、Node.js、磁盘空间、真机系统版本/USB 调试/TTS 音色。本机快照见方案 §15.1（Windows：2026-11-19 22:14；macOS：2026-11-20 09:38）。
 
 ## 依赖仓库
 

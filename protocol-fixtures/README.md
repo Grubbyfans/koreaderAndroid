@@ -12,4 +12,7 @@
 
 ## 来源
 
-字段结构对照 `D:\code\baiduPanSync\baidupansync.koplugin\modules\` 下的 `library_catalog.lua`、`book_metadata.lua`、`book_cover.lua`、`progress_record.lua`，开发前自检该文件齐全且插件为 0.10.9。JSON 值为本人工造的脱敏数据，不含真实账户内容。
+字段结构对照 BaiduPanSync 0.10.8/0.10.9 插件目录 `baidupansync.koplugin/modules/` 下的 `library_catalog.lua`、`book_metadata.lua`、`book_cover.lua`、`progress_record.lua`，开发前自检该文件齐全且插件为 0.10.9。JSON 值为本人工造的脱敏数据，不含真实账户内容。
+
+- **Windows** 插件路径：`D:\code\baiduPanSync\baidupansync.koplugin\modules\`
+- **macOS** 插件路径：`/Users/zhou/workcode/studyCode/baiduPanSync/baidupansync.koplugin/modules/`

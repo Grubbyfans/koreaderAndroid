@@ -34,4 +34,7 @@ Gradle 9.7.0 · AGP 9.3.1 · Kotlin 2.4.20 · Compose BOM 2026.09.00 · JDK 25�
 ./gradlew :app:assembleDebug
 ```
 
-SDK 路径由本机 `local.properties` 的 `sdk.dir` 指定（该文件不入库）。`GRADLE_USER_HOME` 建议指向 D 盘以避免占用 C 盘。
+SDK 路径由本机 `local.properties` 的 `sdk.dir` 指定（该文件不入库）。
+
+- **Windows**：`GRADLE_USER_HOME` 建议指向 D 盘（如 `D:\Android\gradle-home`）以避免占用 C 盘；`sdk.dir` 通常为 `D:\Android\Sdk`。
+- **macOS**：`sdk.dir` 通常为 `/Users/<用户名>/Library/Android/sdk`；`GRADLE_USER_HOME` 默认 `~/.gradle` 即可，无需另设。
