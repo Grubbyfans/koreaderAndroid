@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -55,7 +56,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -895,7 +895,7 @@ private fun CloudBookCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.75f)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(CoverPlaceholder.color(book.bookId)),
             contentAlignment = Alignment.Center,
         ) {
@@ -924,12 +924,17 @@ private fun CloudBookCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .size(20.dp)
+                        .size(22.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(Color.White.copy(alpha = 0.9f)),
+                        .background(Color.White.copy(alpha = 0.92f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("✓", color = YuezhouColors.Brand, style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        "✓",
+                        color = YuezhouColors.Brand,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }
@@ -937,10 +942,11 @@ private fun CloudBookCard(
         Text(
             text = book.bookId,
             style = MaterialTheme.typography.bodySmall,
+            color = YuezhouColors.TextPrimary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 6.dp),
+            modifier = Modifier.padding(top = 8.dp),
         )
     }
 }
@@ -1354,8 +1360,15 @@ private fun BookCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.75f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(CoverPlaceholder.color(book.bookId)),
+                .clip(RoundedCornerShape(10.dp))
+                .background(CoverPlaceholder.color(book.bookId))
+                .then(
+                    if (selecting && checked) {
+                        Modifier.border(2.dp, YuezhouColors.Brand, RoundedCornerShape(10.dp))
+                    } else {
+                        Modifier
+                    },
+                ),
             contentAlignment = Alignment.Center,
         ) {
             val cover = book.coverPng
@@ -1384,9 +1397,14 @@ private fun BookCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .size(20.dp)
+                        .size(22.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (checked) YuezhouColors.Brand else Color.White.copy(alpha = 0.9f)),
+                        .background(if (checked) YuezhouColors.Brand else Color.White.copy(alpha = 0.9f))
+                        .border(
+                            1.dp,
+                            if (checked) Color.Transparent else YuezhouColors.Divider,
+                            androidx.compose.foundation.shape.CircleShape,
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (checked) {
@@ -1394,6 +1412,7 @@ private fun BookCard(
                             "✓",
                             color = Color.White,
                             style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
                         )
                     }
                 }
@@ -1403,22 +1422,43 @@ private fun BookCard(
         Text(
             text = book.title,
             style = MaterialTheme.typography.bodySmall,
+            color = YuezhouColors.TextPrimary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 6.dp),
+            modifier = Modifier.padding(top = 8.dp),
         )
 
-        book.percent?.let { p ->
-            LinearProgressIndicator(
-                progress = { p.toFloat() },
-                color = YuezhouColors.Brand,
-                trackColor = YuezhouColors.Divider,
+        if (book.percent != null) {
+            val p = book.percent!!.coerceIn(0.0, 1.0)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .height(3.dp),
-            )
+                    .padding(top = 6.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(1.5.dp))
+                        .background(YuezhouColors.Divider),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(p.coerceAtLeast(0.01).toFloat())
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(1.5.dp))
+                            .background(YuezhouColors.Brand),
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "${(p * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = YuezhouColors.TextSecondary,
+                )
+            }
         }
     }
 }
