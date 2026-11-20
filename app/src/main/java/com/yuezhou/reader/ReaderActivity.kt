@@ -358,6 +358,8 @@ private fun ReaderPanel(
 ) {
     // 设置区折叠状态
     var settingsExpanded by remember { mutableStateOf(false) }
+    // 进度滑块拖动中的本地预览值；null 表示未在拖动（跟随真实 fraction）
+    var fractionPreview by remember { mutableStateOf<Float?>(null) }
     Column(modifier = Modifier.fillMaxSize()) {
         // 顶部栏
         Surface(
@@ -407,16 +409,25 @@ private fun ReaderPanel(
             ) {
                 // 进度
                 if (fraction != null) {
+                    val shownFraction = fractionPreview ?: fraction
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "进度 ${(fraction * 100).toInt()}%",
+                            "进度 ${(shownFraction * 100).toInt()}%",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.width(12.dp))
                         Slider(
-                            value = fraction,
-                            onValueChange = { onFractionSeek(it) },
+                            value = shownFraction,
+                            onValueChange = { fractionPreview = it },
+                            onValueChangeFinished = {
+                                // 松手才真正跳转，避免拖动中连续重排全文
+                                val target = fractionPreview
+                                if (target != null) {
+                                    onFractionSeek(target)
+                                    fractionPreview = null
+                                }
+                            },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -451,20 +462,30 @@ private fun SettingsControls(
     prefs: ReaderPreferences,
     onPrefsChange: (ReaderPreferences) -> Unit,
 ) {
+    // 拖动中的本地预览值；null 表示未拖动（跟随真实 prefs），松手才提交，避免连续写 DataStore + 重排全文
+    var fontSizePreview by remember { mutableStateOf<Int?>(null) }
+    var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
     Column(modifier = Modifier.fillMaxWidth()) {
         // 字号
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("字号", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.width(12.dp))
             Text(
-                "${prefs.fontSize}",
+                "${fontSizePreview ?: prefs.fontSize}",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.width(32.dp),
                 textAlign = TextAlign.Center,
             )
             Slider(
-                value = prefs.fontSize.toFloat(),
-                onValueChange = { onPrefsChange(prefs.copy(fontSize = it.toInt())) },
+                value = (fontSizePreview ?: prefs.fontSize).toFloat(),
+                onValueChange = { fontSizePreview = it.toInt() },
+                onValueChangeFinished = {
+                    val v = fontSizePreview
+                    if (v != null) {
+                        onPrefsChange(prefs.copy(fontSize = v))
+                        fontSizePreview = null
+                    }
+                },
                 valueRange = 12f..30f,
                 modifier = Modifier.weight(1f),
             )
@@ -474,14 +495,21 @@ private fun SettingsControls(
             Text("行距", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.width(12.dp))
             Text(
-                String.format("%.1f", prefs.lineHeight),
+                String.format("%.1f", lineHeightPreview ?: prefs.lineHeight),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.width(32.dp),
                 textAlign = TextAlign.Center,
             )
             Slider(
-                value = prefs.lineHeight.toFloat(),
-                onValueChange = { onPrefsChange(prefs.copy(lineHeight = it.toDouble())) },
+                value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
+                onValueChange = { lineHeightPreview = it.toDouble() },
+                onValueChangeFinished = {
+                    val v = lineHeightPreview
+                    if (v != null) {
+                        onPrefsChange(prefs.copy(lineHeight = v))
+                        lineHeightPreview = null
+                    }
+                },
                 valueRange = 1.2f..2.5f,
                 modifier = Modifier.weight(1f),
             )
