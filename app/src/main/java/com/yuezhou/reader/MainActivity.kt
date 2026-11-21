@@ -302,8 +302,10 @@ private fun BookshelfScreen() {
                 remoteFetchedAt = lib.fetchedAt
                 remoteFromCache = false
                 status = msg
+                snackbarHostState.showSnackbar(msg)
             } catch (e: Exception) {
                 remoteError = e.message ?: "更新书库失败"
+                snackbarHostState.showSnackbar("更新书库失败：${e.message ?: "未知错误"}")
             } finally {
                 remoteLoading = false
             }
@@ -434,10 +436,18 @@ private fun BookshelfScreen() {
                     // 云端：主动刷新按钮（主动更新：强制拉列表 + 发现外部上传）
                     FloatingActionButton(
                         onClick = { refreshRemoteLibrary() },
-                        containerColor = YuezhouColors.Brand,
+                        containerColor = if (remoteLoading) YuezhouColors.Brand.copy(alpha = 0.6f) else YuezhouColors.Brand,
                         contentColor = Color.White,
                     ) {
-                        Text("刷新", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                        if (remoteLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                color = Color.White,
+                                strokeWidth = 2.5.dp,
+                            )
+                        } else {
+                            Text("刷新", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                        }
                     }
                 }
             }
@@ -1109,6 +1119,27 @@ private fun CloudBookshelfContent(
         }
         else -> {
             Column(Modifier.fillMaxSize()) {
+                // 刷新中：顶部轻量进度条，明确「更新书库」正在进行
+                if (loading) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = YuezhouColors.Brand,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "更新书库中…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.Brand,
+                        )
+                    }
+                }
                 backendLabel?.let {
                     Text(
                         buildString {
