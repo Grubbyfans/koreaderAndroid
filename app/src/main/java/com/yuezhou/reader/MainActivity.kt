@@ -1006,12 +1006,13 @@ private fun CloudBookshelfContent(
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
 ) {
     when {
-        loading -> {
+        // 仅首次加载（尚无任何数据）时显示转圈；已有列表时静默刷新，避免切 tab 闪烁
+        loading && books.isEmpty() -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
-        error != null -> {
+        error != null && books.isEmpty() -> {
             EmptyState(
                 icon = Icons.Filled.List,
                 title = "云端书库加载失败",
