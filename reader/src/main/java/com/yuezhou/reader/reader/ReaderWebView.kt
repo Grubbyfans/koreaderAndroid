@@ -85,6 +85,9 @@ class ReaderWebView(context: Context) : WebView(context) {
     /** 上次滑动回调时的触摸点 Y 坐标，用于计算相邻两次回调的位移增量。 */
     private var lastScrollTouchY = Float.NaN
 
+    /** 当前手势是否已识别为「左侧亮度滑动」。激活期间吞掉所有触摸事件，阻止左右/纵向位移干扰。 */
+    private var brightnessGestureActive = false
+
     /** 当前是否已加载宿主页面。 */
     var isPageLoaded = false
         private set
@@ -102,6 +105,7 @@ class ReaderWebView(context: Context) : WebView(context) {
         val taps = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(event: MotionEvent): Boolean {
                 lastScrollTouchY = Float.NaN
+                brightnessGestureActive = false
                 return true
             }
 
@@ -136,12 +140,14 @@ class ReaderWebView(context: Context) : WebView(context) {
                     if (delta != 0f) onBrightnessScroll?.invoke(delta)
                 }
                 lastScrollTouchY = y
+                brightnessGestureActive = true
                 return true
             }
         })
         setOnTouchListener { _, event ->
             taps.onTouchEvent(event)
-            false
+            // 亮度滑动激活期间吞掉事件，阻止 WebView 接收横向/纵向位移（左右滑动不干扰调亮度）
+            brightnessGestureActive
         }
         settings.apply {
             javaScriptEnabled = true
