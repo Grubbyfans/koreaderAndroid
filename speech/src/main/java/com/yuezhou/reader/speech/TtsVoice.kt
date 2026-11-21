@@ -31,20 +31,30 @@ data class TtsVoice(
 
     /**
      * 音色性别推断（仅用于 UI 分组展示，非严格判定）：
-     * 依据音色/引擎名中的常见关键词（male/female/men/women/female 等）。
+     * 依据音色/引擎名中的常见关键词（male/female、男/女、常见国产引擎命名等）。
      * 无法判断时返回 null。
      */
     val gender: Gender?
         get() {
             val haystack = (name + " " + enginePackage).lowercase()
-            return when {
-                haystack.contains("female") || haystack.contains("women") ||
-                    haystack.contains("woman") || haystack.contains("femail") ||
-                    haystack.contains("xiaofei") || haystack.contains("xiaoyan") -> Gender.FEMALE
-                haystack.contains("male") || haystack.contains("man") ||
-                    haystack.contains("men") -> Gender.MALE
-                else -> null
-            }
+            // 女声关键词
+            val femaleHints = listOf(
+                "female", "women", "woman", "femail",
+                "xiaofei", "xiaoyan", "xiaoxiao", "xiaoyi", "xiaomeng", "xiaoxuan",
+                "晓晓", "晓伊", "晓梦", "晓萱", "晓菲", "晓妍",
+                "女",
+            )
+            // 男声关键词（放在女声之后判断，避免 "female" 命中 "male"）
+            val maleHints = listOf(
+                "male", "man", "men",
+                "yunxi", "yunyang", "yunfeng", "yunjian", "yunhao",
+                "云希", "云扬", "云风", "云健", "云皓",
+                "男",
+            )
+            // 先判女声，因为 female 含 male 子串
+            if (femaleHints.any { haystack.contains(it) }) return Gender.FEMALE
+            if (maleHints.any { haystack.contains(it) }) return Gender.MALE
+            return null
         }
 
     /** 音色性别（仅用于 UI 展示）。 */

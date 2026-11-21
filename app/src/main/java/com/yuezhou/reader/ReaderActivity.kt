@@ -877,7 +877,16 @@ private fun ReaderScreen(
                     onOpenToc = { scope.launch { drawerState.open() } },
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
-                    onPrefsChange = { p -> scope.launch { ReaderSettings.save(context, p) } },
+                    onPrefsChange = { p ->
+                        scope.launch { ReaderSettings.save(context, p) }
+                        // 音色变更且正在朗读：重启朗读使其立即生效
+                        if (p.speechVoice != readerPrefs.speechVoice && speaking) {
+                            SpeechPlanStore.stop(context)
+                            status = "已切换音色，重新朗读…"
+                            speakRequested = true
+                            webView?.requestChapterText(currentCfi)
+                        }
+                    },
                     onSync = { openSyncDialog() },
                     onSpeak = {
                         if (speaking) {
@@ -1313,7 +1322,9 @@ private fun SpeechVoicePreference(voices: List<TtsVoice>, selectedName: String, 
         voices.groupBy { it.locale.toLanguageTag() }.values.flatMap { byLocale ->
             byLocale.sortedBy { it.name }.mapIndexed { index, voice ->
                 val localeName = voice.locale.getDisplayName(chinese).ifBlank { "语言未知" }
-                voice to "$localeName · 音色 ${index + 1}"
+                // 展示名：优先音色真实名，退化到「语言 · 音色 N」
+                val display = voice.displayName.ifBlank { "音色 ${index + 1}" }
+                voice to "$localeName · $display"
             }
         }.sortedWith(compareBy(
             { it.first.locale.language != "zh" },
@@ -1336,20 +1347,28 @@ private fun SpeechVoicePreference(voices: List<TtsVoice>, selectedName: String, 
             onDismissRequest = { open = false },
             title = { Text("朗读音色") },
             text = {
-                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
                     item {
-                        SpeechVoiceOption("系统默认", null, selectedName.isBlank()) {
+                        SpeechVoiceOption("系统默认（跟随引擎）", null, selectedName.isBlank()) {
                             open = false
                             onSelect("")
                         }
                     }
+                    // 按性别分组展示，便于区分男声/女声
                     items(labels, key = { it.first.name }) { (voice, label) ->
                         val availability = when {
                             voice.isOfflineCapable -> "离线"
                             voice.isNetworkConnectionRequired -> "需要联网"
                             else -> "语音数据未安装"
                         }
-                        SpeechVoiceOption(label, "$availability · ${voice.displayName}", voice.name == selectedName) {
+                        val genderTag = when (voice.gender) {
+                            TtsVoice.Gender.FEMALE -> "女声"
+                            TtsVoice.Gender.MALE -> "男声"
+                            null -> ""
+                        }
+                        val details = listOf(availability, genderTag, voice.displayName)
+                            .filter { it.isNotBlank() }.joinToString(" · ")
+                        SpeechVoiceOption(label, details, voice.name == selectedName) {
                             open = false
                             onSelect(voice.name)
                         }
