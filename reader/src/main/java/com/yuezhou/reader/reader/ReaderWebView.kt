@@ -205,6 +205,8 @@ class ReaderWebView(context: Context) : WebView(context) {
             // 允许混合内容（本地 https 来源内部 fetch）
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         }
+        // 吞掉长按事件，避免亮度/翻页手势过程中误触 WebView 文本选择
+        setOnLongClickListener { true }
         webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(
                 view: WebView,

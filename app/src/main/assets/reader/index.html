@@ -8,6 +8,12 @@
         html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
         #reader { position: fixed; inset: 0; }
         foliate-view { width: 100%; height: 100%; }
+        /* 禁用文本选择与长按选词，避免亮度滑动/翻页手势误触文本选择 */
+        html, body, #reader, foliate-view, * {
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
     </style>
 </head>
 <body>
