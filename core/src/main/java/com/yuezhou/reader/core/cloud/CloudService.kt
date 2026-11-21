@@ -336,9 +336,18 @@ class CloudService(private val backend: CloudBackend) {
             }
             val entry = entries.single()
             val fileName = entry.path.substringAfterLast('/')
+            // 用 stat（filemetas）拿真实大小：百度 list 接口对部分文件（尤其第三方/外部上传）
+            // 返回的 size 可能是错误占位值，而 filemetas 才是权威。stat 失败时回退 list 的 size。
+            val realSize = try {
+                backend.stat(entry.path).size
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                entry.size
+            }.takeIf { it > 0 } ?: entry.size
             // 已在列表且文件名/大小一致 → 无变化，跳过
             val existing = index.books.firstOrNull { it.bookId == bookId }
-            if (existing != null && existing.fileName == fileName && existing.size == entry.size) {
+            if (existing != null && existing.fileName == fileName && existing.size == realSize) {
                 continue
             }
             // 保留已有封面引用
@@ -349,7 +358,7 @@ class CloudService(private val backend: CloudBackend) {
                 LibraryCatalog.buildBookEntry(
                     bookId = bookId,
                     fileName = fileName,
-                    size = entry.size,
+                    size = realSize,
                     uploadedAt = uploadedAt,
                     coverPath = prev?.coverPath,
                     coverVersion = prev?.coverVersion,
