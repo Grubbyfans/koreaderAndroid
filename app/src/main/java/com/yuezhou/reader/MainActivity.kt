@@ -664,7 +664,8 @@ private fun BookshelfScreen() {
                         fileName = detail.fileName,
                         total = detail.size,
                     )
-                    downloadJob = scope.launch {
+                    // 用 lifecycleScope 而非 rememberCoroutineScope：切后台/锁屏不取消，下载持续到 Activity 销毁
+                    downloadJob = lifecycleOwner.lifecycleScope.launch {
                         val result = try {
                             cloudSync.downloadBook(detail, ReaderActivity::isBookOpen) { received, total ->
                                 downloadTask = downloadTask?.copy(received = received, total = total)
