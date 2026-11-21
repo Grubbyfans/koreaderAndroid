@@ -417,6 +417,18 @@ class CloudSync(private val context: Context) {
     }
 
     /**
+     * 发现并登记外部上传的 EPUB（方案 §10）。返回实际新增/更新的条目数（0=无变化）。
+     * 不失效列表缓存，由调用方决定是否强制重拉。失败抛异常。
+     */
+    suspend fun discoverExternalBooks(): Int = withContext(Dispatchers.IO) {
+        val backend = backend() ?: throw CloudException(
+            ErrorCode.INVALID_INPUT, "尚未配置云后端，请先在设置页配置 WebDAV 或百度网盘",
+        )
+        backend.ensureAuthorized()
+        CloudService(backend).discoverExternalBooks().changed
+    }
+
+    /**
      * 「主动更新书库」：强制刷新列表并登记外部上传的 EPUB（方案 §10）。
      * 返回用户可读的结果描述；失败抛异常由 UI 提示。
      */
