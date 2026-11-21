@@ -87,21 +87,27 @@ internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int, onWei
             )
         }
     }
-    // 字重：连续滑块（100~900 步进 100），0 表示书籍默认
+    // 字重：连续滑块（100~900 步进 100），0 表示书籍默认。
+    // 拖动中用本地预览值，松手才回调 onWeightChange，避免每次拖动都重排全文导致滑块卡顿拖不动。
+    var weightPreview by remember { mutableStateOf<Int?>(null) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("字重", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.width(12.dp))
         Text(
-            weightLabel(selectedWeight),
+            weightLabel(weightPreview ?: selectedWeight),
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.width(48.dp),
             textAlign = TextAlign.Center,
         )
         Slider(
-            value = (if (selectedWeight == 0) 400 else selectedWeight).toFloat(),
-            onValueChange = { v ->
-                // 拖动中即时应用，松手后写入 DataStore（onWeightChange 由上层接 onPrefsChange）
-                onWeightChange(v.toInt() / 100 * 100)
+            value = (weightPreview ?: if (selectedWeight == 0) 400 else selectedWeight).toFloat(),
+            onValueChange = { v -> weightPreview = (v.toInt() / 100 * 100).coerceAtLeast(100) },
+            onValueChangeFinished = {
+                val w = weightPreview
+                if (w != null) {
+                    onWeightChange(w)
+                    weightPreview = null
+                }
             },
             valueRange = 100f..900f,
             steps = 7,
