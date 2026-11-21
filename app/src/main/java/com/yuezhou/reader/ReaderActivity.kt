@@ -2,6 +2,7 @@ package com.yuezhou.reader
 
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -66,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +85,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.EpubSpeechChapterSource
 import com.yuezhou.reader.reader.CloudSync
@@ -154,7 +157,7 @@ class ReaderActivity : ComponentActivity() {
     private fun hideNavigationBar() {
         WindowCompat.getInsetsController(window, window.decorView).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            hide(WindowInsetsCompat.Type.navigationBars())
+            hide(WindowInsetsCompat.Type.systemBars())
         }
     }
 
@@ -175,6 +178,8 @@ private fun ReaderScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    // Activity 级作用域：切后台/退出时 rememberCoroutineScope 会被取消，上传/记录须用它
+    val appScope = LocalLifecycleOwner.current.lifecycleScope
     var webView by remember { mutableStateOf<ReaderWebView?>(null) }
     var title by remember { mutableStateOf(bookId ?: "阅读") }
     var loading by remember { mutableStateOf(true) }
@@ -215,6 +220,8 @@ private fun ReaderScreen(
     // 阅读设置（DataStore）
     val loadedPrefs by ReaderSettings.flow(context).collectAsStateWithLifecycle(initialValue = null)
     val readerPrefs = loadedPrefs ?: ReaderPreferences()
+    // 让被 WebView/生命周期回调长期持有的闭包始终读到最新的 prefs（避免 stale closure）
+    val latestPrefs by rememberUpdatedState(readerPrefs)
     // 当前 TTS 引擎可用音色（服务就绪后发布）
     val availableVoices by SpeechVoices.voices.collectAsStateWithLifecycle()
 
@@ -243,6 +250,8 @@ private fun ReaderScreen(
     var autoPulled by remember { mutableStateOf(false) }
     var autoSyncBusy by remember { mutableStateOf(false) }
     val syncLogStore = remember { SyncLogStore(context) }
+    // 缓存最近一次定位对应的 xpointer，供退出时上传（避免退出时 WebView 已不可用导致转换失败）
+    var lastXPointer by remember { mutableStateOf<String?>(null) }
 
     suspend fun jumpAndSave(
         id: String,
@@ -269,7 +278,8 @@ private fun ReaderScreen(
 
     /** 自动拉取云端进度并覆盖本地（自动同步开启时，书打开定位后调用一次）。 */
     fun autoPullRemoteProgress() {
-        if (!readerPrefs.autoSync) return
+        Log.d("AutoSync", "autoPullRemoteProgress 被调用, autoSync=${latestPrefs.autoSync}, autoPulled=$autoPulled, bookId=$bookId, webView=${webView != null}, lastPosition=$lastPosition")
+        if (!latestPrefs.autoSync) return
         if (autoPulled) return
         val id = bookId ?: return
         val wv = webView ?: return
@@ -301,30 +311,28 @@ private fun ReaderScreen(
     }
 
     /** 自动上传本机进度覆盖云端（自动同步开启时，退出/切出时调用）。 */
-    fun autoPushProgress() {
-        if (!readerPrefs.autoSync) return
+    suspend fun autoPushProgress() {
+        Log.d("AutoSync", "autoPushProgress 执行, autoSync=${latestPrefs.autoSync}, bookId=$bookId, lastPosition=$lastPosition, lastXPointer=$lastXPointer")
+        if (!latestPrefs.autoSync) return
         val id = bookId ?: return
-        val pos = lastPosition
-        val wv = webView
-        if (pos == null || wv == null) return
+        val pos = lastPosition ?: return
         if (autoSyncBusy) return
         autoSyncBusy = true
-        scope.launch {
-            try {
-                val xpointer = wv.cfiToXPointer(pos.first)
-                val msg = if (xpointer == null) {
-                    "位置无法转换，已跳过上传"
-                } else {
-                    CloudSync(context).uploadLocalProgress(id, xpointer, pos.second) ?: "已覆盖云端进度"
-                }
-                syncLogStore.append("push", title, xpointer != null, msg)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                syncLogStore.append("push", title, false, e.message ?: "上传失败")
-            } finally {
-                autoSyncBusy = false
+        try {
+            val xpointer = lastXPointer
+            val msg = if (xpointer == null) {
+                "位置尚未转换，已跳过上传"
+            } else {
+                CloudSync(context).uploadLocalProgress(id, xpointer, pos.second) ?: "已覆盖云端进度"
             }
+            syncLogStore.append("push", title, xpointer != null, msg)
+            Log.d("AutoSync", "push 完成: $msg")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            syncLogStore.append("push", title, false, e.message ?: "上传失败")
+        } finally {
+            autoSyncBusy = false
         }
     }
 
@@ -367,12 +375,15 @@ private fun ReaderScreen(
     fun leaveReader() {
         if (leaving) return
         leaving = true
-        scope.launch {
-            flushProgress()
-            // 自动同步：退出前上传本机进度覆盖云端
-            autoPushProgress()
-            onBack()
+        // 自动同步：上传进度放后台（NonCancellable），不阻塞退出、也不因 Activity 销毁而丢失。
+        // 进度 flush（本地写，毫秒级）先同步完成，再退出。
+        appScope.launch {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                flushProgress()
+                autoPushProgress()
+            }
         }
+        onBack()
     }
 
     // 打开进度同步面板：读本机 + 云端进度对照
@@ -558,9 +569,11 @@ private fun ReaderScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE && !leaving) {
-                scope.launch {
-                    flushProgress()
-                    autoPushProgress()
+                appScope.launch {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        flushProgress()
+                        autoPushProgress()
+                    }
                 }
             }
         }
@@ -598,7 +611,16 @@ private fun ReaderScreen(
                         delay(300)
                         store.saveProgress(bookId, cfi, fraction?.toDouble())
                     }
+                    // 缓存最新定位对应的 xpointer，供退出/切出时上传（此时 WebView 仍就绪，转换可靠）
+                    val wvForConvert = webView
+                    if (wvForConvert != null) {
+                        scope.launch {
+                            val xp = wvForConvert.cfiToXPointer(cfi)
+                            if (xp != null) lastXPointer = xp
+                        }
+                    }
                     // 自动同步：首次定位到本地位置后，拉取云端进度覆盖本地（仅一次）
+                    Log.d("AutoSync", "Relocated 触发, cfi=$cfi, autoSync=${latestPrefs.autoSync}")
                     autoPullRemoteProgress()
                 }
             }

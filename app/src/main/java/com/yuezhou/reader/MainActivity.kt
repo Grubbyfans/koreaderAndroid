@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
+import com.yuezhou.reader.reader.db.SyncLogEntity
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
@@ -1315,6 +1316,14 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
     var showReading by rememberSaveable { mutableStateOf(false) }
     val credentialStore = remember(context) { CloudCredentialStore(context) }
 
+    // 是否进入「同步记录」二级页面
+    var showSyncLogPage by rememberSaveable { mutableStateOf(false) }
+
+    if (showSyncLogPage) {
+        SyncLogPage(onBack = { showSyncLogPage = false })
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1344,40 +1353,9 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
                 )
             }
             Spacer(Modifier.height(8.dp))
-            // 最近 20 次同步记录
-            var syncLogs by remember { mutableStateOf<List<com.yuezhou.reader.reader.db.SyncLogEntity>>(emptyList()) }
-            var showSyncLogs by remember { mutableStateOf(false) }
-            TextButton(
-                onClick = {
-                    scope.launch {
-                        syncLogs = SyncLogStore(context).recent()
-                        showSyncLogs = !showSyncLogs
-                    }
-                },
-            ) {
-                Text(if (showSyncLogs) "收起同步记录" else "查看最近 20 次同步记录")
-            }
-            if (showSyncLogs) {
-                if (syncLogs.isEmpty()) {
-                    Text(
-                        "暂无同步记录（开启自动同步后，拉取/上传进度时会生成）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YuezhouColors.TextSecondary,
-                    )
-                } else {
-                    syncLogs.forEach { log ->
-                        val dirLabel = if (log.direction == "pull") "拉取" else "上传"
-                        val time = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                            .format(java.util.Date(log.at))
-                        val ok = if (log.success) "成功" else "失败"
-                        Text(
-                            "[$time] $dirLabel · $ok · ${log.bookTitle}\n${log.message}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (log.success) YuezhouColors.TextSecondary else MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(vertical = 2.dp),
-                        )
-                    }
-                }
+            // 同步记录入口：点击进入独立页面
+            TextButton(onClick = { showSyncLogPage = true }) {
+                Text("查看最近 20 次同步记录")
             }
         }
 
@@ -1556,6 +1534,110 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
                             color = YuezhouColors.TextSecondary,
                             modifier = Modifier.padding(vertical = 2.dp),
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncLogPage(onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var logs by remember { mutableStateOf<List<SyncLogEntity>?>(null) }
+
+    LaunchedEffect(Unit) {
+        logs = SyncLogStore(context).recent()
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // 顶部栏：返回 + 标题
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onBack) {
+                Text("← 返回", color = YuezhouColors.BrandDark)
+            }
+            Text(
+                "同步记录（最近 20 次）",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(64.dp))
+        }
+        // 记录列表
+        val list = logs
+        if (list == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            }
+        } else if (list.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "暂无同步记录\n开启自动同步后，拉取/上传进度时会生成",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YuezhouColors.TextSecondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(list, key = { it.id }) { log ->
+                    val dirLabel = if (log.direction == "pull") "拉取" else "上传"
+                    val time = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                        .format(java.util.Date(log.at))
+                    val ok = if (log.success) "成功" else "失败"
+                    val okColor = if (log.success) YuezhouColors.BrandDark else MaterialTheme.colorScheme.error
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = YuezhouColors.Surface,
+                        border = BorderStroke(1.dp, YuezhouColors.Divider),
+                    ) {
+                        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    dirLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = okColor,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    ok,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = okColor,
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    time,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = YuezhouColors.TextSecondary,
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                log.bookTitle,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (log.message.isNotBlank()) {
+                                Text(
+                                    log.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = YuezhouColors.TextSecondary,
+                                )
+                            }
+                        }
                     }
                 }
             }
