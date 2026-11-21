@@ -6,29 +6,29 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 /**
- * 阅舟全局主题：配色向微信读书靠齐。
+ * 静读全局主题：配色向微信读书靠齐。
  *
- * 微信读书视觉特征：以白色/极浅灰为底，青绿色（#07C160 系）作为品牌点缀，
- * 大面积留白、低饱和、去重边框，营造简洁轻盈的阅读氛围。
+ * 微信读书视觉特征：以白色/极浅灰为底，天蓝色（#37A7FF 系）作为品牌点缀，
+ * 冷色系、大面积留白、低饱和、去重边框，营造简洁轻盈的阅读氛围。
  */
 object YuezhouColors {
-    /** 品牌主色：微信读书标志性的青绿色。 */
-    val Brand = Color(0xFF07C160)
+    /** 品牌主色：微信读书标志性的天蓝色。 */
+    val Brand = Color(0xFF37A7FF)
 
     /** 主色深色变体（文字/按压/强调）。 */
-    val BrandDark = Color(0xFF06AD56)
+    val BrandDark = Color(0xFF1E8AE8)
 
-    /** 背景：微信读书的米白底色。 */
-    val Background = Color(0xFFF7F7F7)
+    /** 背景：微信读书的极浅灰底色。 */
+    val Background = Color(0xFFF7F8FA)
 
     /** 卡片/表面：纯白。 */
     val Surface = Color(0xFFFFFFFF)
 
-    /** 浅青绿容器（选中态/强调背景）。 */
-    val BrandContainer = Color(0xFFE7F8EF)
+    /** 浅蓝容器（选中态/强调背景）。 */
+    val BrandContainer = Color(0xFFE8F4FF)
 
-    /** 更浅的青绿（次级选中背景，几乎无存在感）。 */
-    val BrandContainerSoft = Color(0xFFF2FBF6)
+    /** 更浅的蓝（次级选中背景，几乎无存在感）。 */
+    val BrandContainerSoft = Color(0xFFF2F8FF)
 
     /** 主文字：近黑。 */
     val TextPrimary = Color(0xFF1A1A1A)
