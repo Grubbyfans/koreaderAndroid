@@ -83,6 +83,9 @@ class TtsEngine(private val context: Context) {
     fun setVoice(voiceName: String): Boolean {
         val t = _tts ?: return false
         val voice = t.voices?.firstOrNull { it.name == voiceName } ?: return false
+        // Android TTS：切换音色后须按其 locale 重新 setLanguage，
+        // 否则部分引擎（尤其三星 SMT）setVoice 返回 SUCCESS 但实际不生效。
+        voice.locale?.let { t.setLanguage(it) }
         return t.setVoice(voice) == TextToSpeech.SUCCESS
     }
 
@@ -101,7 +104,10 @@ class TtsEngine(private val context: Context) {
     fun applyConfig(rate: Float, voiceName: String) {
         val t = _tts ?: return
         if (rate > 0f) t.setSpeechRate(rate)
-        if (voiceName.isNotBlank()) setVoice(voiceName)
+        if (voiceName.isNotBlank()) {
+            val ok = setVoice(voiceName)
+            android.util.Log.d("TtsEngine", "applyConfig 设置音色 '$voiceName' -> $ok, 当前可用音色: ${t.voices?.joinToString { it.name } ?: "null"}")
+        }
     }
 
     /** 朗读一段文本。@param utteranceId 稳定标识，用于回调映射。返回是否已入队。 */

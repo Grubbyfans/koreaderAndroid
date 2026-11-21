@@ -551,9 +551,10 @@ private fun ReaderScreen(
             segments = segments,
         )
         try {
-            // 注入朗读配置（语速 + 音色），服务在开始朗读时应用
+            // 注入朗读配置（语速 + 音色），服务在开始朗读时应用。
+            // 用 latestPrefs（rememberUpdatedState）确保读到最新值，避免闭包捕获旧音色。
             SpeechPlanStore.putConfig(
-                SpeechConfig(rate = readerPrefs.speechRate, voiceName = readerPrefs.speechVoice)
+                SpeechConfig(rate = latestPrefs.speechRate, voiceName = latestPrefs.speechVoice)
             )
             // 若本机有「本章」的朗读位置记录，从该片段续读（片段级别恢复）。
             // load 为 suspend，须在协程中读取；读不到则从头开始。
@@ -878,13 +879,18 @@ private fun ReaderScreen(
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
                     onPrefsChange = { p ->
-                        scope.launch { ReaderSettings.save(context, p) }
-                        // 音色变更且正在朗读：重启朗读使其立即生效
-                        if (p.speechVoice != readerPrefs.speechVoice && speaking) {
-                            SpeechPlanStore.stop(context)
-                            status = "已切换音色，重新朗读…"
-                            speakRequested = true
-                            webView?.requestChapterText(currentCfi)
+                        val voiceChanged = p.speechVoice != readerPrefs.speechVoice
+                        scope.launch {
+                            ReaderSettings.save(context, p)
+                            // 音色变更且正在朗读：保存完成、等 DataStore flow 传播到 latestPrefs 后
+                            // 再重启朗读，确保 startSpeech 读到新音色。
+                            if (voiceChanged && speaking) {
+                                delay(120)
+                                SpeechPlanStore.stop(context)
+                                status = "已切换音色，重新朗读…"
+                                speakRequested = true
+                                webView?.requestChapterText(currentCfi)
+                            }
                         }
                     },
                     onSync = { openSyncDialog() },

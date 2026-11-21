@@ -54,13 +54,14 @@ data class TtsVoice(
             // 先判女声，因为 female 含 male 子串
             if (femaleHints.any { haystack.contains(it) }) return Gender.FEMALE
             if (maleHints.any { haystack.contains(it) }) return Gender.MALE
-            // 三星 SMT 引擎命名规律：音色名形如 en-US-SMTg02 / ja-JP-SMTf00 / zh-CN-SMTl02，
-            // "SMT" 后紧跟的字母表示性别：g/f = 女声，l/m = 男声。
+            // 三星 SMT 引擎命名规律：音色名形如 zh-CN-SMTg02 / zh-CN-SMTl02 / ja-JP-SMTf00 / ja-JP-SMTm00，
+            // "SMT" 后紧跟的字母表示性别（经真机实测确认）：
+            //   f / l = 女声，g / m = 男声。
             val samsungMatch = Regex("smt([glfmi])", RegexOption.IGNORE_CASE).find(name)
             if (samsungMatch != null) {
                 return when (samsungMatch.groupValues[1].lowercase()) {
-                    "g", "f" -> Gender.FEMALE
-                    "l", "m" -> Gender.MALE
+                    "f", "l" -> Gender.FEMALE
+                    "g", "m" -> Gender.MALE
                     else -> null
                 }
             }
