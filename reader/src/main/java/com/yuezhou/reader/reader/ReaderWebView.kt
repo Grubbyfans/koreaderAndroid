@@ -82,8 +82,8 @@ class ReaderWebView(context: Context) : WebView(context) {
     /** 左侧边缘滑动回调（参数为本次垂直位移增量 px，正=下滑/增亮，负=上滑/减暗）。 */
     var onBrightnessScroll: ((Float) -> Unit)? = null
 
-    /** 上次 onScroll 累计垂直距离，用于计算每次回调的增量。 */
-    private var lastScrollY = 0f
+    /** 上次滑动回调时的触摸点 Y 坐标，用于计算相邻两次回调的位移增量。 */
+    private var lastScrollTouchY = Float.NaN
 
     /** 当前是否已加载宿主页面。 */
     var isPageLoaded = false
@@ -100,7 +100,10 @@ class ReaderWebView(context: Context) : WebView(context) {
         }
         // Use system tap thresholds and leave drag, pinch and selection events with WebView.
         val taps = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(event: MotionEvent): Boolean = true
+            override fun onDown(event: MotionEvent): Boolean {
+                lastScrollTouchY = Float.NaN
+                return true
+            }
 
             override fun onSingleTapUp(event: MotionEvent): Boolean {
                 if (width <= 0) return false
@@ -123,12 +126,16 @@ class ReaderWebView(context: Context) : WebView(context) {
             ): Boolean {
                 // 仅左侧边缘区域（约左 1/4）的垂直滑动用于调节亮度，其余区域交还 WebView 处理
                 if (e1 == null || width <= 0 || e1.x >= width * 0.25f) {
-                    lastScrollY = 0f
+                    lastScrollTouchY = Float.NaN
                     return false
                 }
-                val delta = lastScrollY - distanceY // distanceY 为累计值，差值为本次增量
-                lastScrollY = distanceY
-                if (delta != 0f) onBrightnessScroll?.invoke(delta)
+                // 用相邻两次回调的绝对 Y 坐标差值作为本次增量，避免 distanceY 累计值方向混乱
+                val y = e2.y
+                if (!lastScrollTouchY.isNaN()) {
+                    val delta = y - lastScrollTouchY // 手指下滑 delta>0 → 增亮
+                    if (delta != 0f) onBrightnessScroll?.invoke(delta)
+                }
+                lastScrollTouchY = y
                 return true
             }
         })
