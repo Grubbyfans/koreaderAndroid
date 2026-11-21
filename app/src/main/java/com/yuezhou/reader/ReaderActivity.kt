@@ -90,6 +90,7 @@ import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.ReaderEvent
 import com.yuezhou.reader.reader.ReaderWebView
 import com.yuezhou.reader.reader.SpeechPositionStore
+import com.yuezhou.reader.reader.SyncLogStore
 import com.yuezhou.reader.reader.TocItem
 import com.yuezhou.reader.core.speech.SentencePlanner
 import com.yuezhou.reader.core.speech.SourceAnchor
@@ -102,6 +103,7 @@ import com.yuezhou.reader.speech.SpeechVoices
 import com.yuezhou.reader.speech.TtsEngine
 import com.yuezhou.reader.speech.TtsVoice
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -237,6 +239,95 @@ private fun ReaderScreen(
         store.saveProgress(id, pos.first, pos.second)
     }
 
+    // 是否已执行过本次打开的自动拉取（避免重复）
+    var autoPulled by remember { mutableStateOf(false) }
+    var autoSyncBusy by remember { mutableStateOf(false) }
+    val syncLogStore = remember { SyncLogStore(context) }
+
+    suspend fun jumpAndSave(
+        id: String,
+        wv: ReaderWebView,
+        previous: Pair<String, Double?>,
+        target: Pair<String, Double?>,
+    ): Boolean {
+        val requestId = java.util.UUID.randomUUID().toString()
+        val result = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        saveJob?.cancel()
+        pendingJump = requestId to result
+        try {
+            wv.verifyJump(requestId, target.first, previous.first)
+            val verified = kotlinx.coroutines.withTimeoutOrNull(8_000) { result.await() }
+            if (verified == null) wv.goToCfi(previous.first)
+            if (verified != true) return false
+            store.saveProgress(id, target.first, target.second)
+            lastPosition = target
+            return true
+        } finally {
+            pendingJump = null
+        }
+    }
+
+    /** 自动拉取云端进度并覆盖本地（自动同步开启时，书打开定位后调用一次）。 */
+    fun autoPullRemoteProgress() {
+        if (!readerPrefs.autoSync) return
+        if (autoPulled) return
+        val id = bookId ?: return
+        val wv = webView ?: return
+        autoPulled = true
+        scope.launch {
+            try {
+                val remote = CloudSync(context).fetchRemoteProgressLocation(id)
+                if (remote == null) {
+                    syncLogStore.append("pull", title, false, "云端暂无进度")
+                    return@launch
+                }
+                val previous = lastPosition
+                if (previous == null) {
+                    syncLogStore.append("pull", title, false, "本机尚未定位")
+                    return@launch
+                }
+                val cfi = wv.xPointerToCfi(remote)
+                val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to null)
+                syncLogStore.append(
+                    "pull", title, applied,
+                    if (applied) "已覆盖本地进度" else "云端落点无法确认，保留本地",
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                syncLogStore.append("pull", title, false, e.message ?: "拉取失败")
+            }
+        }
+    }
+
+    /** 自动上传本机进度覆盖云端（自动同步开启时，退出/切出时调用）。 */
+    fun autoPushProgress() {
+        if (!readerPrefs.autoSync) return
+        val id = bookId ?: return
+        val pos = lastPosition
+        val wv = webView
+        if (pos == null || wv == null) return
+        if (autoSyncBusy) return
+        autoSyncBusy = true
+        scope.launch {
+            try {
+                val xpointer = wv.cfiToXPointer(pos.first)
+                val msg = if (xpointer == null) {
+                    "位置无法转换，已跳过上传"
+                } else {
+                    CloudSync(context).uploadLocalProgress(id, xpointer, pos.second) ?: "已覆盖云端进度"
+                }
+                syncLogStore.append("push", title, xpointer != null, msg)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                syncLogStore.append("push", title, false, e.message ?: "上传失败")
+            } finally {
+                autoSyncBusy = false
+            }
+        }
+    }
+
     /**
      * 左侧滑动调节亮度：delta 为本次垂直位移增量（px），正=下滑增亮，负=上滑减暗。
      * 通过 Activity 窗口亮度覆盖实现（screenBrightness，范围 0.0..1.0），
@@ -278,6 +369,8 @@ private fun ReaderScreen(
         leaving = true
         scope.launch {
             flushProgress()
+            // 自动同步：退出前上传本机进度覆盖云端
+            autoPushProgress()
             onBack()
         }
     }
@@ -293,29 +386,6 @@ private fun ReaderScreen(
             flushProgress()
             syncInfo = CloudSync(context).progressInfo(id)
             syncLoading = false
-        }
-    }
-
-    suspend fun jumpAndSave(
-        id: String,
-        wv: ReaderWebView,
-        previous: Pair<String, Double?>,
-        target: Pair<String, Double?>,
-    ): Boolean {
-        val requestId = java.util.UUID.randomUUID().toString()
-        val result = kotlinx.coroutines.CompletableDeferred<Boolean>()
-        saveJob?.cancel()
-        pendingJump = requestId to result
-        try {
-            wv.verifyJump(requestId, target.first, previous.first)
-            val verified = kotlinx.coroutines.withTimeoutOrNull(8_000) { result.await() }
-            if (verified == null) wv.goToCfi(previous.first)
-            if (verified != true) return false
-            store.saveProgress(id, target.first, target.second)
-            lastPosition = target
-            return true
-        } finally {
-            pendingJump = null
         }
     }
 
@@ -483,12 +553,15 @@ private fun ReaderScreen(
         }
     }
 
-    // 生命周期：切后台/退出时立即保存进度
+    // 生命周期：切后台/退出时立即保存进度；自动同步开启时同时上传覆盖云端
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE && !leaving) {
-                scope.launch { flushProgress() }
+                scope.launch {
+                    flushProgress()
+                    autoPushProgress()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -525,6 +598,8 @@ private fun ReaderScreen(
                         delay(300)
                         store.saveProgress(bookId, cfi, fraction?.toDouble())
                     }
+                    // 自动同步：首次定位到本地位置后，拉取云端进度覆盖本地（仅一次）
+                    autoPullRemoteProgress()
                 }
             }
             is ReaderEvent.TocLoaded -> {

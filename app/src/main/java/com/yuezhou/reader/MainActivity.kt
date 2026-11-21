@@ -67,6 +67,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -108,6 +109,7 @@ import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.LocalScanner
 import com.yuezhou.reader.reader.TempFileCleanup
+import com.yuezhou.reader.reader.SyncLogStore
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -1322,6 +1324,61 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
     ) {
         SettingsCard("书籍同步", highlighted = true) {
             BookUploadControls(cloudSync, uploadQueue, cloudLoading)
+        }
+
+        SettingsCard("自动同步进度") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("自动同步", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "进入书籍自动拉取云端进度覆盖本地；退出或切出时自动上传覆盖云端",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                }
+                Switch(
+                    checked = prefs.autoSync,
+                    onCheckedChange = { enabled ->
+                        scope.launch { ReaderSettings.save(context, prefs.copy(autoSync = enabled)) }
+                    },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            // 最近 20 次同步记录
+            var syncLogs by remember { mutableStateOf<List<com.yuezhou.reader.reader.db.SyncLogEntity>>(emptyList()) }
+            var showSyncLogs by remember { mutableStateOf(false) }
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        syncLogs = SyncLogStore(context).recent()
+                        showSyncLogs = !showSyncLogs
+                    }
+                },
+            ) {
+                Text(if (showSyncLogs) "收起同步记录" else "查看最近 20 次同步记录")
+            }
+            if (showSyncLogs) {
+                if (syncLogs.isEmpty()) {
+                    Text(
+                        "暂无同步记录（开启自动同步后，拉取/上传进度时会生成）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                } else {
+                    syncLogs.forEach { log ->
+                        val dirLabel = if (log.direction == "pull") "拉取" else "上传"
+                        val time = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                            .format(java.util.Date(log.at))
+                        val ok = if (log.success) "成功" else "失败"
+                        Text(
+                            "[$time] $dirLabel · $ok · ${log.bookTitle}\n${log.message}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (log.success) YuezhouColors.TextSecondary else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(vertical = 2.dp),
+                        )
+                    }
+                }
+            }
         }
 
         SettingsCard("云端账号") {

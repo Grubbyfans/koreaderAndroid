@@ -31,6 +31,8 @@ data class ReaderPreferences(
     val speechVoice: String = "",
     val fontId: String = "book",
     val fontWeight: Int = 0,
+    /** 是否开启自动进度同步：开启时进入书籍自动拉取云端进度覆盖本地，退出/切出时自动上传覆盖云端。 */
+    val autoSync: Boolean = false,
 )
 
 private val Context.readerDataStore by preferencesDataStore(name = "reader_settings")
@@ -47,6 +49,7 @@ object ReaderSettings {
     private val KEY_PAGE_ANIMATION = stringPreferencesKey("page_animation")
     private val KEY_SPEECH_RATE = floatPreferencesKey("speech_rate")
     private val KEY_SPEECH_VOICE = stringPreferencesKey("speech_voice")
+    private val KEY_AUTO_SYNC = booleanPreferencesKey("auto_sync")
 
     /** 读取阅读设置（Flow，随变更更新）。 */
     fun flow(context: Context): Flow<ReaderPreferences> =
@@ -62,6 +65,7 @@ object ReaderSettings {
                 pageAnimation = prefs[KEY_PAGE_ANIMATION] ?: "slide",
                 speechRate = prefs[KEY_SPEECH_RATE] ?: 1.0f,
                 speechVoice = prefs[KEY_SPEECH_VOICE] ?: "",
+                autoSync = prefs[KEY_AUTO_SYNC] ?: false,
             )
         }
 
@@ -84,6 +88,7 @@ object ReaderSettings {
             it[KEY_PAGE_ANIMATION] = prefs.pageAnimation
             it[KEY_SPEECH_RATE] = prefs.speechRate
             it[KEY_SPEECH_VOICE] = prefs.speechVoice
+            it[KEY_AUTO_SYNC] = prefs.autoSync
         }
     }
 }

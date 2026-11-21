@@ -22,14 +22,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PendingPublicationEntity::class,
         DiagnosticEventEntity::class,
         SpeechPositionEntity::class,
+        SyncLogEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pendingPublicationDao(): PendingPublicationDao
     abstract fun diagnosticEventDao(): DiagnosticEventDao
     abstract fun speechPositionDao(): SpeechPositionDao
+    abstract fun syncLogDao(): SyncLogDao
 
     companion object {
         private val isolatePublications = object : Migration(1, 2) {
@@ -68,6 +70,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val addSyncLog = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE sync_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        direction TEXT NOT NULL,
+                        bookTitle TEXT NOT NULL,
+                        at INTEGER NOT NULL,
+                        success INTEGER NOT NULL,
+                        message TEXT NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -77,7 +94,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yuezhou_reader.db",
-                ).addMigrations(isolatePublications, addSpeechPosition).build().also { instance = it }
+                ).addMigrations(isolatePublications, addSpeechPosition, addSyncLog).build().also { instance = it }
             }
     }
 }
