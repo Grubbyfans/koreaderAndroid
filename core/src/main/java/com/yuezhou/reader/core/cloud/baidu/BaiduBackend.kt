@@ -157,17 +157,22 @@ class BaiduBackend private constructor(
         if (full == root) {
             return CloudStat(EntryType.Directory)
         }
+        // 用 filemetas 拿真实大小：百度 list 接口对部分文件（尤其第三方上传）返回的 size
+        // 可能是错误的占位值，而 filemetas 返回的才是权威大小。WebDAV 的 stat 无此问题。
         val clean = path.trimEnd('/')
-        val parent = clean.substringBeforeLast('/', "").let { if (it == clean) "" else it }
-        var page: String? = null
-        while (true) {
-            val r = list(parent, page)
-            for (e in r.entries) if (e.path == clean) {
-                return CloudStat(e.type, e.size, e.etag, e.weakEtag)
-            }
-            page = r.continuation ?: break
+        val fsId = statFsId(clean)
+        val v = http.request(
+            "https://pan.baidu.com/rest/2.0/xpan/multimedia",
+            params = mapOf("method" to "filemetas", "dlink" to "1", "fsids" to "[$fsId]"),
+        )
+        val item = (v["list"] as? JsonArray)?.firstOrNull() as? JsonObject
+        val itemPath = item?.let { BaiduJson.strField(it, "path") }
+        val itemFsId = item?.let { BaiduJson.strField(it, "fs_id") }
+        val itemSize = item?.let { BaiduJson.longField(it, "size") }
+        if (item == null || itemPath != full || itemFsId != fsId || itemSize == null || itemSize < 0) {
+            throw fail(ErrorCode.NOT_FOUND, "百度应用目录中不存在该条目")
         }
-        throw fail(ErrorCode.NOT_FOUND, "百度应用目录中不存在该条目")
+        return CloudStat(EntryType.File, itemSize)
     }
 
     // endregion
