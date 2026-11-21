@@ -176,6 +176,9 @@ private fun BookshelfScreen() {
     // —— 云端书库状态 ——
     var remoteBooks by remember { mutableStateOf<List<CloudSync.RemoteBook>>(emptyList()) }
     var remoteLoading by remember { mutableStateOf(false) }
+    // 仅「主动点刷新按钮」时置 true，用于显示顶部「更新书库中…」进度条；
+    // 切 tab 的静默加载（命中缓存）不显示，避免顶部进度条闪现。
+    var remoteRefreshing by remember { mutableStateOf(false) }
     var remoteError by remember { mutableStateOf<String?>(null) }
     var remoteBackendLabel by remember { mutableStateOf<String?>(null) }
     // 列表缓存状态（方案 §12.1：显示最后成功获取时间与是否命中缓存）
@@ -309,6 +312,7 @@ private fun BookshelfScreen() {
         if (uploadQueue.busy || remoteLoading) return
         scope.launch {
             remoteLoading = true
+            remoteRefreshing = true
             remoteError = null
             try {
                 val msg = cloudSync.refreshLibrary()
@@ -325,6 +329,7 @@ private fun BookshelfScreen() {
                 snackbarHostState.showSnackbar("更新书库失败：${e.message ?: "未知错误"}")
             } finally {
                 remoteLoading = false
+                remoteRefreshing = false
             }
         }
     }
@@ -533,6 +538,7 @@ private fun BookshelfScreen() {
                         BookScope.云端 -> CloudBookshelfContent(
                             books = remoteBooks,
                             loading = remoteLoading,
+                            showRefreshBar = remoteRefreshing,
                             error = remoteError,
                             backendLabel = remoteBackendLabel,
                             fetchedAt = remoteFetchedAt,
@@ -1104,6 +1110,7 @@ private fun BookScopeSwitch(current: BookScope, onSelect: (BookScope) -> Unit) {
 private fun CloudBookshelfContent(
     books: List<CloudSync.RemoteBook>,
     loading: Boolean,
+    showRefreshBar: Boolean,
     error: String?,
     backendLabel: String?,
     fetchedAt: Long,
@@ -1136,8 +1143,8 @@ private fun CloudBookshelfContent(
         }
         else -> {
             Column(Modifier.fillMaxSize()) {
-                // 刷新中：顶部轻量进度条，明确「更新书库」正在进行
-                if (loading) {
+                // 刷新中：顶部轻量进度条，明确「更新书库」正在进行（仅主动刷新时显示）
+                if (showRefreshBar) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
