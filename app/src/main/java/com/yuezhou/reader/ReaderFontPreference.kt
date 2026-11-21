@@ -2,14 +2,14 @@ package com.yuezhou.reader
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -21,7 +21,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.reader.ReaderFontStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -36,21 +38,21 @@ private val defaultFonts = listOf(
     ReaderFontStore.Font("mono", "系统等宽"),
 )
 
-private val fontWeights = mapOf(
-    0 to "书籍默认",
-    400 to "常规",
-    500 to "中等",
-    700 to "加粗",
-)
+// 字重显示名：0 表示书籍默认，其余为 CSS font-weight 数值（100~900）。
+private fun weightLabel(weight: Int): String = when (weight) {
+    0 -> "书籍默认"
+    400 -> "常规"
+    700 -> "加粗"
+    else -> weight.toString()
+}
 
 @Composable
-internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int) {
+internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int, onWeightChange: (Int) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(context) { ReaderFontStore(context) }
     var installed by remember(store) { mutableStateOf(store.installed()) }
     var selecting by remember { mutableStateOf(false) }
-    var showWeights by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -85,24 +87,26 @@ internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int) {
             )
         }
     }
+    // 字重：连续滑块（100~900 步进 100），0 表示书籍默认
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("字重", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Box {
-            TextButton(onClick = { showWeights = true }) {
-                Text(fontWeights[selectedWeight] ?: fontWeights.getValue(0))
-            }
-            DropdownMenu(expanded = showWeights, onDismissRequest = { showWeights = false }) {
-                for ((weight, label) in fontWeights) {
-                    DropdownMenuItem(
-                        text = { Text(if (weight == selectedWeight) "✓ $label" else label) },
-                        onClick = {
-                            showWeights = false
-                            scope.launch { ReaderSettings.selectFontWeight(context, weight) }
-                        },
-                    )
-                }
-            }
-        }
+        Text("字重", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            weightLabel(selectedWeight),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.width(48.dp),
+            textAlign = TextAlign.Center,
+        )
+        Slider(
+            value = (if (selectedWeight == 0) 400 else selectedWeight).toFloat(),
+            onValueChange = { v ->
+                // 拖动中即时应用，松手后写入 DataStore（onWeightChange 由上层接 onPrefsChange）
+                onWeightChange(v.toInt() / 100 * 100)
+            },
+            valueRange = 100f..900f,
+            steps = 7,
+            modifier = Modifier.weight(1f),
+        )
     }
     error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
 

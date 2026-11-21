@@ -1185,7 +1185,9 @@ private fun SettingsControls(
     // 语速预览值；null 表示未拖动
     var ratePreview by remember { mutableStateOf<Float?>(null) }
     Column(modifier = Modifier.fillMaxWidth()) {
-        ReaderFontPreference(prefs.fontId, prefs.fontWeight)
+        ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
+            onPrefsChange(prefs.copy(fontWeight = w))
+        })
         // 字号
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("字号", style = MaterialTheme.typography.bodyMedium)

@@ -385,11 +385,25 @@ function textStyle() {
             line-height: inherit;
         }
         ${fontStyle(s.fontId)}
-        ${s.fontWeight >= 400 && s.fontWeight <= 700 ? `
-            html body, html body :is(p, div, li, blockquote, td, th):not(:where(pre *, code *, svg *, math *)) {
-                font-weight: ${s.fontWeight} !important;
-            }
-        ` : ''}
+        ${weightStyle(s.fontWeight)}
+    `
+}
+
+// 字重注入：支持任意 100~900 值。当字体本身缺对应字重（如内置字体仅有 Regular/Bold）
+// 时，font-weight 回退到最近字重导致「加粗无感」，此时用 -webkit-text-stroke 描边模拟加粗
+// （KOReader 的做法），描边宽度随 weight 增大而增大。
+function weightStyle(weight) {
+    const w = Number(weight)
+    if (!(w >= 100 && w <= 900)) return ''
+    const stroke = w > 400 ? Math.max(0, (w - 400) / 1000).toFixed(3) : 0
+    const strokeCss = stroke > 0
+        ? `-webkit-text-stroke: ${stroke}px currentColor;`
+        : ''
+    return `
+        html body, html body :is(p, div, li, blockquote, td, th):not(:where(pre *, code *, svg *, math *)) {
+            font-weight: ${w} !important;
+            ${strokeCss}
+        }
     `
 }
 

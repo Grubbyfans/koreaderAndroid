@@ -1451,7 +1451,9 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             }
             Spacer(Modifier.height(4.dp))
 
-            ReaderFontPreference(prefs.fontId, prefs.fontWeight)
+            ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
+                scope.launch { ReaderSettings.save(context, prefs.copy(fontWeight = w)) }
+            })
 
             // 字号
             Text("默认字号：${fontSizePreview ?: prefs.fontSize}", style = MaterialTheme.typography.bodyMedium)
