@@ -90,6 +90,8 @@ object ReaderSettings {
     suspend fun save(context: Context, prefs: ReaderPreferences) {
         context.readerDataStore.edit { it ->
             it[KEY_FONT_SIZE] = prefs.fontSize
+            it[KEY_FONT_ID] = prefs.fontId
+            it[KEY_FONT_WEIGHT] = prefs.fontWeight
             it[KEY_LINE_HEIGHT] = prefs.lineHeight
             it[KEY_PAGE_MARGIN] = prefs.pageMargin
             it[KEY_THEME] = prefs.theme
