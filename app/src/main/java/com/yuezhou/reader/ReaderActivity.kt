@@ -50,6 +50,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -195,6 +196,12 @@ private fun ReaderScreen(
     var openedSource by remember { mutableStateOf<Pair<String, Uri?>?>(null) }
     // 沉浸式面板显隐
     var panelVisible by remember { mutableStateOf(false) }
+    // 亮度：0..1，null 表示跟随系统；左侧滑动调节后为具体值
+    var brightness by remember { mutableStateOf<Float?>(null) }
+    // 亮度浮层是否显示（滑动调节时短暂显示）
+    var brightnessVisible by remember { mutableStateOf(false) }
+    // 亮度浮层自动隐藏去抖
+    var brightnessHideJob by remember { mutableStateOf<Job?>(null) }
     // 朗读状态：是否正在朗读
     var speaking by remember { mutableStateOf(false) }
     // 朗读中，用于「朗读」按钮切换为「停止」
@@ -228,6 +235,42 @@ private fun ReaderScreen(
         val pos = lastPosition ?: return
         val id = bookId ?: return
         store.saveProgress(id, pos.first, pos.second)
+    }
+
+    /**
+     * 左侧滑动调节亮度：delta 为本次垂直位移增量（px），正=下滑增亮，负=上滑减暗。
+     * 通过 Activity 窗口亮度覆盖实现（screenBrightness，范围 0.0..1.0），
+     * 不影响系统全局亮度；首次调节前读取系统当前亮度作为起点。
+     */
+    fun adjustBrightness(ctx: android.content.Context, delta: Float) {
+        val activity = ctx as? android.app.Activity ?: return
+        val window = activity.window
+        // 首次调节：以系统当前亮度为起点（否则从默认值跳变）
+        var current = brightness ?: run {
+            val sys = try {
+                android.provider.Settings.System.getInt(
+                    ctx.contentResolver,
+                    android.provider.Settings.System.SCREEN_BRIGHTNESS,
+                ) / 255f
+            } catch (_: Exception) {
+                0.5f
+            }
+            sys
+        }
+        // 灵敏度：约 600px 滑动对应满量程
+        val step = delta / 600f
+        current = (current + step).coerceIn(0.02f, 1f)
+        brightness = current
+        val attrs = window.attributes
+        attrs.screenBrightness = current
+        window.attributes = attrs
+        // 显示浮层并自动隐藏
+        brightnessVisible = true
+        brightnessHideJob?.cancel()
+        brightnessHideJob = scope.launch {
+            delay(1200)
+            brightnessVisible = false
+        }
     }
 
     fun leaveReader() {
@@ -618,6 +661,9 @@ private fun ReaderScreen(
                         wv.onPageTap = { dir ->
                             if (dir > 0) wv.nextPage() else wv.prevPage()
                         }
+                        wv.onBrightnessScroll = { delta ->
+                            adjustBrightness(ctx, delta)
+                        }
                         wv.verticalMode = readerPrefs.vertical
                         webView = wv
                     }
@@ -645,6 +691,45 @@ private fun ReaderScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(12.dp),
                     )
+                }
+            }
+
+            // 亮度浮层：左侧滑动调节亮度时显示当前百分比
+            AnimatedVisibility(
+                visible = brightnessVisible,
+                enter = fadeIn(tween(160)),
+                exit = fadeOut(tween(200)),
+                modifier = Modifier.align(Alignment.Center),
+            ) {
+                val b = brightness ?: 0.5f
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = YuezhouColors.Surface,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.padding(24.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            "亮度",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = YuezhouColors.TextSecondary,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "${(b * 100).toInt()}%",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = YuezhouColors.TextPrimary,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = b.coerceIn(0f, 1f),
+                            modifier = Modifier.width(160.dp),
+                        )
+                    }
                 }
             }
 

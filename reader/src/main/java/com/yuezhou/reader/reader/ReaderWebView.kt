@@ -79,6 +79,12 @@ class ReaderWebView(context: Context) : WebView(context) {
     /** 翻页点击回调（左右 1/3 区域单击时触发，参数为翻页方向）。 */
     var onPageTap: ((Int) -> Unit)? = null // +1 下一页 / -1 上一页
 
+    /** 左侧边缘滑动回调（参数为本次垂直位移增量 px，正=下滑/增亮，负=上滑/减暗）。 */
+    var onBrightnessScroll: ((Float) -> Unit)? = null
+
+    /** 上次 onScroll 累计垂直距离，用于计算每次回调的增量。 */
+    private var lastScrollY = 0f
+
     /** 当前是否已加载宿主页面。 */
     var isPageLoaded = false
         private set
@@ -106,6 +112,23 @@ class ReaderWebView(context: Context) : WebView(context) {
                         else -> onTap?.invoke()
                     }
                 }
+                return true
+            }
+
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float,
+            ): Boolean {
+                // 仅左侧边缘区域（约左 1/4）的垂直滑动用于调节亮度，其余区域交还 WebView 处理
+                if (e1 == null || width <= 0 || e1.x >= width * 0.25f) {
+                    lastScrollY = 0f
+                    return false
+                }
+                val delta = lastScrollY - distanceY // distanceY 为累计值，差值为本次增量
+                lastScrollY = distanceY
+                if (delta != 0f) onBrightnessScroll?.invoke(delta)
                 return true
             }
         })
