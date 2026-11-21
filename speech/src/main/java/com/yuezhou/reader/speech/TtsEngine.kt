@@ -158,6 +158,9 @@ class TtsEngine(private val context: Context) {
                     onResult(emptyList())
                     return@TextToSpeech
                 }
+                // 先切到中文，让引擎（如三星 SMT）返回对应语言的中文音色；
+                // 否则默认语言下 getVoices() 只返回英文/日文等音色，看不到中文男女声。
+                engine.setLanguage(Locale.SIMPLIFIED_CHINESE)
                 @Suppress("DEPRECATION")
                 val voices = engine.voices?.map { v ->
                     TtsVoice(
