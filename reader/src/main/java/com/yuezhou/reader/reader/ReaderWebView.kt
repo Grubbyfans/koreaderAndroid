@@ -167,10 +167,10 @@ class ReaderWebView(context: Context) : WebView(context) {
                 }
 
                 if (scrollAxisLocked == true) {
-                    // 锁定为亮度滑动：用相邻两次回调的绝对 Y 坐标差值作为增量（正=下滑增亮）
+                    // 锁定为亮度滑动：用相邻两次回调的绝对 Y 坐标差值作为增量（正=上滑增亮）
                     val y = e2.y
                     if (!lastScrollTouchY.isNaN()) {
-                        val delta = y - lastScrollTouchY
+                        val delta = lastScrollTouchY - y
                         if (delta != 0f) onBrightnessScroll?.invoke(delta)
                     }
                     lastScrollTouchY = y
