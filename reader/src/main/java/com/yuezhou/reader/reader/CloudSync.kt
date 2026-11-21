@@ -13,6 +13,7 @@ import com.yuezhou.reader.core.cloud.baidu.BaiduBackend
 import com.yuezhou.reader.core.cloud.webdav.WebDavBackend
 import com.yuezhou.reader.core.protocol.BookNames
 import com.yuezhou.reader.core.protocol.LibraryCatalog
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -566,6 +567,7 @@ class CloudSync(private val context: Context) {
                 if (remoteStat != null && remoteStat.size > 0) {
                     effectiveSize = remoteStat.size
                 }
+                Log.d("CloudSync", "download ${book.fileName}: declaredSize=$declaredSize, statSize=${remoteStat?.size}, effectiveSize=$effectiveSize")
                 check(effectiveSize in 1..(1024L * 1024 * 1024)) { "云端文件大小无效，请确认文件在云端完整" }
 
                 val store = LibraryStore(context)
@@ -578,23 +580,23 @@ class CloudSync(private val context: Context) {
                 check(target.parentFile?.usableSpace?.let { it >= effectiveSize } == true) { "应用存储空间不足" }
                 val tmp = File.createTempFile("download-", ".part", target.parentFile)
                 try {
-                    // 传输阶段：进度分母固定有效大小，进度封顶 95%（留 5% 给落盘）
-                    backend.downloadTo("books/${book.fileName}", tmp, maxBytes = effectiveSize) { received, total ->
-                        val ratio = if (effectiveSize > 0) (received.toDouble() / effectiveSize) else 0.0
-                        val capped = (ratio * 95.0).toLong().coerceIn(0L, 95L)
-                        onProgress?.invoke(capped, 100L, DownloadPhase.Transferring)
+                    // 传输阶段：onProgress 统一用「字节」语义，received=已下载字节，total=有效总大小，
+                    // 让 UI 正确显示「x.x MB / 8.1 MB」。传输进度封顶在 95%（留 5% 给落盘阶段）。
+                    backend.downloadTo("books/${book.fileName}", tmp, maxBytes = effectiveSize) { received, _ ->
+                        val cappedReceived = (received.toDouble() * 0.95).toLong().coerceAtMost(effectiveSize)
+                        onProgress?.invoke(cappedReceived, effectiveSize, DownloadPhase.Transferring)
                     }
                     check(tmp.length() == effectiveSize) { "下载大小与云端不符，请先更新书库" }
 
                     // 落盘阶段：校验（解压校验整个 EPUB）→ 提取封面/书名 → 发布，均无字节进度，
-                    // 用 synthetic 进度逐步推进，让 UI 明确「仍在工作」而非卡住。
-                    onProgress?.invoke(96, 100L, DownloadPhase.Verifying)
+                    // 用 effectiveSize 的 96%~100% 区间模拟推进，让进度条从 95% 平滑收尾到 100%。
+                    onProgress?.invoke(effectiveSize * 96 / 100, effectiveSize, DownloadPhase.Verifying)
                     CoverExtractor.validatePackage(tmp)
                     check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
-                    onProgress?.invoke(97, 100L, DownloadPhase.Extracting)
+                    onProgress?.invoke(effectiveSize * 97 / 100, effectiveSize, DownloadPhase.Extracting)
                     val cover = CoverExtractor.extract(tmp)
                     val title = CoverExtractor.extractTitle(tmp)
-                    onProgress?.invoke(98, 100L, DownloadPhase.Publishing)
+                    onProgress?.invoke(effectiveSize * 98 / 100, effectiveSize, DownloadPhase.Publishing)
                     val source = destination?.let { directory.publish(it, tmp, fileName) }
                     if (source == null) {
                         Files.move(
@@ -623,7 +625,7 @@ class CloudSync(private val context: Context) {
                         }
                     }
 
-                    onProgress?.invoke(100, 100L, DownloadPhase.Publishing)
+                    onProgress?.invoke(effectiveSize, effectiveSize, DownloadPhase.Publishing)
                     Result.success(fileName)
                 } finally {
                     // 主动取消时文件流可能仍占用，delete 失败则注册 deleteOnExit 兜底，
