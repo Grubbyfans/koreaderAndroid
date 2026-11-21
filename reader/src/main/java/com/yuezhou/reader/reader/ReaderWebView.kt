@@ -88,6 +88,19 @@ class ReaderWebView(context: Context) : WebView(context) {
     /** 当前手势是否已识别为「左侧亮度滑动」。激活期间吞掉所有触摸事件，阻止左右/纵向位移干扰。 */
     private var brightnessGestureActive = false
 
+    /**
+     * 滑动方向锁定：
+     * - null 表示尚未确定主导方向；
+     * - true 表示已锁定为「亮度滑动」（垂直为主）；
+     * - false 表示已锁定为「横向滑动」（交还 WebView，如左右翻页）。
+     * 一旦锁定，同一手势内不再切换，避免斜向滑动在两种模式间来回抖动。
+     */
+    private var scrollAxisLocked: Boolean? = null
+
+    /** 累计的横向/纵向位移，用于判定主导方向（超过阈值才锁定）。 */
+    private var accumX = 0f
+    private var accumY = 0f
+
     /** 当前是否已加载宿主页面。 */
     var isPageLoaded = false
         private set
@@ -106,6 +119,9 @@ class ReaderWebView(context: Context) : WebView(context) {
             override fun onDown(event: MotionEvent): Boolean {
                 lastScrollTouchY = Float.NaN
                 brightnessGestureActive = false
+                scrollAxisLocked = null
+                accumX = 0f
+                accumY = 0f
                 return true
             }
 
@@ -128,23 +144,54 @@ class ReaderWebView(context: Context) : WebView(context) {
                 distanceX: Float,
                 distanceY: Float,
             ): Boolean {
-                // 仅左侧边缘区域（约左 1/4）的垂直滑动用于调节亮度，其余区域交还 WebView 处理
-                if (e1 == null || width <= 0 || e1.x >= width * 0.25f) {
+                if (e1 == null || width <= 0) {
                     lastScrollTouchY = Float.NaN
                     return false
                 }
-                // 用相邻两次回调的绝对 Y 坐标差值作为本次增量，避免 distanceY 累计值方向混乱
-                val y = e2.y
-                if (!lastScrollTouchY.isNaN()) {
-                    val delta = y - lastScrollTouchY // 手指下滑 delta>0 → 增亮
-                    if (delta != 0f) onBrightnessScroll?.invoke(delta)
+                // 仅左侧边缘区域（约左 1/4）参与亮度滑动判定；右侧区域一律交还 WebView
+                val inLeftZone = e1.x < width * 0.25f
+
+                // 累积位移，用于方向锁定判定（distanceX/distanceY 是相对手势起点的累计值）
+                accumX += distanceX
+                accumY += distanceY
+
+                // 未锁定时：累计位移超过阈值再判定主导方向，避免轻触/抖动误判
+                if (scrollAxisLocked == null) {
+                    val absX = kotlin.math.abs(accumX)
+                    val absY = kotlin.math.abs(accumY)
+                    if (absX < TOUCH_SLOP && absY < TOUCH_SLOP) {
+                        return false
+                    }
+                    // 主导方向：垂直明显大于水平（约 1.5 倍）且在左区 → 亮度滑动；否则视为横向/普通滚动
+                    scrollAxisLocked = inLeftZone && absY > absX * 1.5f
                 }
-                lastScrollTouchY = y
-                brightnessGestureActive = true
-                return true
+
+                if (scrollAxisLocked == true) {
+                    // 锁定为亮度滑动：用相邻两次回调的绝对 Y 坐标差值作为增量（正=下滑增亮）
+                    val y = e2.y
+                    if (!lastScrollTouchY.isNaN()) {
+                        val delta = y - lastScrollTouchY
+                        if (delta != 0f) onBrightnessScroll?.invoke(delta)
+                    }
+                    lastScrollTouchY = y
+                    brightnessGestureActive = true
+                    return true
+                }
+                // 横向主导：交还 WebView 处理（左右翻页等）
+                return false
             }
         })
         setOnTouchListener { _, event ->
+            // 手势结束时清空方向锁定与亮度激活状态，避免状态残留到下一次手势
+            when (event.actionMasked) {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    brightnessGestureActive = false
+                    scrollAxisLocked = null
+                    accumX = 0f
+                    accumY = 0f
+                    lastScrollTouchY = Float.NaN
+                }
+            }
             taps.onTouchEvent(event)
             // 亮度滑动激活期间吞掉事件，阻止 WebView 接收横向/纵向位移（左右滑动不干扰调亮度）
             brightnessGestureActive
@@ -205,6 +252,9 @@ class ReaderWebView(context: Context) : WebView(context) {
 
     companion object {
         private const val TAG = "ReaderWebView"
+
+        /** 方向锁定判定阈值（px）：累计位移超过此值才判定主导方向，避免轻触/抖动误判。 */
+        private const val TOUCH_SLOP = 24f
     }
 
     /**
