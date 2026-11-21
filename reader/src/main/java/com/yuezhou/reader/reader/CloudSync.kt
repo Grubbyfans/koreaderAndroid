@@ -544,13 +544,29 @@ class CloudSync(private val context: Context) {
                 require(BookNames.cloudId(book.fileName).first == book.bookId) {
                     "云端 EPUB 文件名无效"
                 }
-                check(book.size in 1..(1024L * 1024 * 1024)) { "书库记录中的文件大小无效，请先更新书库" }
                 check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
                 val directory = DownloadDirectory(context)
                 val backend = backend() ?: return@withLock Result.failure(
                     IllegalStateException("尚未配置云后端"),
                 )
                 backend.ensureAuthorized()
+
+                // 以云端实际文件大小为权威：library.json 里的 size 可能因外部端写入错误
+                // （如 KOReader 端登记的占位值）而失真，直接用它会导致进度/大小显示错误，
+                // 更严重的是 maxBytes 被错误值截断下载。这里用 stat 拿到真实大小做兜底。
+                val declaredSize = book.size
+                var effectiveSize = declaredSize
+                val remoteStat = try {
+                    backend.stat("books/${book.fileName}")
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+                if (remoteStat != null && remoteStat.size > 0) {
+                    effectiveSize = remoteStat.size
+                }
+                check(effectiveSize in 1..(1024L * 1024 * 1024)) { "云端文件大小无效，请确认文件在云端完整" }
 
                 val store = LibraryStore(context)
                 // 下载前清理历史残留的 .part 临时文件（主动取消/进程被杀遗留）
@@ -559,16 +575,16 @@ class CloudSync(private val context: Context) {
                 val destination = local?.tree ?: directory.uri
                 val fileName = local?.fileName ?: book.fileName
                 val target = File(EpubImporter.epubDir(context), fileName)
-                check(target.parentFile?.usableSpace?.let { it >= book.size } == true) { "应用存储空间不足" }
+                check(target.parentFile?.usableSpace?.let { it >= effectiveSize } == true) { "应用存储空间不足" }
                 val tmp = File.createTempFile("download-", ".part", target.parentFile)
                 try {
-                    // 传输阶段：进度分母固定 book.size，进度封顶 95%（留 5% 给落盘）
-                    backend.downloadTo("books/${book.fileName}", tmp, maxBytes = book.size) { received, total ->
-                        val ratio = if (book.size > 0) (received.toDouble() / book.size) else 0.0
+                    // 传输阶段：进度分母固定有效大小，进度封顶 95%（留 5% 给落盘）
+                    backend.downloadTo("books/${book.fileName}", tmp, maxBytes = effectiveSize) { received, total ->
+                        val ratio = if (effectiveSize > 0) (received.toDouble() / effectiveSize) else 0.0
                         val capped = (ratio * 95.0).toLong().coerceIn(0L, 95L)
                         onProgress?.invoke(capped, 100L, DownloadPhase.Transferring)
                     }
-                    check(tmp.length() == book.size) { "下载大小与书库不符，请先更新书库" }
+                    check(tmp.length() == effectiveSize) { "下载大小与云端不符，请先更新书库" }
 
                     // 落盘阶段：校验（解压校验整个 EPUB）→ 提取封面/书名 → 发布，均无字节进度，
                     // 用 synthetic 进度逐步推进，让 UI 明确「仍在工作」而非卡住。
@@ -587,9 +603,26 @@ class CloudSync(private val context: Context) {
                             StandardCopyOption.REPLACE_EXISTING,
                         )
                     }
-                    store.registerBook(fileName, cover, title, source, destination, book.size).getOrThrow()
+                    store.registerBook(fileName, cover, title, source, destination, effectiveSize).getOrThrow()
                     if (source != null) target.delete()
                     invalidateListCache()
+
+                    // 下载成功后发现 library.json 里的 size 与实际不符（常见于外部上传登记时
+                    // 后端返回了错误的 size），主动回写修正云端列表，让后续列表/详情显示正确大小，
+                    // 也同步 KOReader 端。
+                    if (declaredSize != effectiveSize) {
+                        runCatching {
+                            CloudService(backend).repairPublication(
+                                bookId = book.bookId,
+                                fileName = book.fileName,
+                                size = effectiveSize,
+                                coverPath = book.coverPath,
+                                coverVersion = book.coverVersion,
+                            )
+                            invalidateListCache()
+                        }
+                    }
+
                     onProgress?.invoke(100, 100L, DownloadPhase.Publishing)
                     Result.success(fileName)
                 } finally {
