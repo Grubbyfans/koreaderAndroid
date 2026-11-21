@@ -667,8 +667,17 @@ private fun BookshelfScreen() {
                     // 用 lifecycleScope 而非 rememberCoroutineScope：切后台/锁屏不取消，下载持续到 Activity 销毁
                     downloadJob = lifecycleOwner.lifecycleScope.launch {
                         val result = try {
-                            cloudSync.downloadBook(detail, ReaderActivity::isBookOpen) { received, total ->
-                                downloadTask = downloadTask?.copy(received = received, total = total)
+                            cloudSync.downloadBook(detail, ReaderActivity::isBookOpen) { received, total, phase ->
+                                downloadTask = downloadTask?.copy(
+                                    received = received,
+                                    total = total,
+                                    phase = when (phase) {
+                                        com.yuezhou.reader.reader.CloudSync.DownloadPhase.Transferring -> DownloadPhase.Transferring
+                                        com.yuezhou.reader.reader.CloudSync.DownloadPhase.Verifying -> DownloadPhase.Verifying
+                                        com.yuezhou.reader.reader.CloudSync.DownloadPhase.Extracting -> DownloadPhase.Extracting
+                                        com.yuezhou.reader.reader.CloudSync.DownloadPhase.Publishing -> DownloadPhase.Publishing
+                                    },
+                                )
                             }
                         } catch (e: CancellationException) {
                             downloadTask = null
@@ -734,11 +743,18 @@ private fun BookshelfScreen() {
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 Spacer(Modifier.height(4.dp))
-                                Text(
-                                    "${formatSize(task.received)} / ${formatSize(task.total)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = YuezhouColors.TextSecondary,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        when (task.phase) {
+                                            DownloadPhase.Transferring -> "${formatSize(task.received)} / ${formatSize(task.total)}"
+                                            DownloadPhase.Verifying -> "正在校验文件…"
+                                            DownloadPhase.Extracting -> "正在提取封面…"
+                                            DownloadPhase.Publishing -> "正在保存到本机…"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = YuezhouColors.TextSecondary,
+                                    )
+                                }
                             }
                             DownloadStatus.Done -> {
                                 Text("下载完成", style = MaterialTheme.typography.bodyMedium, color = YuezhouColors.Brand)
@@ -924,6 +940,7 @@ private data class DownloadTask(
     val total: Long,
     val received: Long = 0L,
     val status: DownloadStatus = DownloadStatus.Downloading,
+    val phase: DownloadPhase = DownloadPhase.Transferring,
     val error: String? = null,
 ) {
     val percent: Int
@@ -931,6 +948,9 @@ private data class DownloadTask(
 }
 
 private enum class DownloadStatus { Downloading, Done, Failed }
+
+/** 下载所处阶段（传输 vs 落盘），用于进度文案。 */
+private enum class DownloadPhase { Transferring, Verifying, Extracting, Publishing }
 
 /** 自绘下载图标（material-icons-core 无 Download，用描边路径绘制向下箭头+托盘）。 */
 private val DownloadIcon: ImageVector by lazy {

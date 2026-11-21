@@ -520,17 +520,24 @@ class CloudSync(private val context: Context) {
     }
 
     /**
+     * 下载阶段，供 UI 展示下载当前所处阶段（传输 vs 落盘），避免落盘耗时被误判为「卡住」。
+     */
+    enum class DownloadPhase { Transferring, Verifying, Extracting, Publishing }
+
+    /**
      * 从云端下载一本书到本地并登记书库。
      *
      * 对齐方案 §11.5 下载：下载正文到 files/epub/（临时文件 → 校验 → 发布），
      * 成功后提取封面/书名登记本地书库。返回最终落盘的文件名。
      *
-     * @param onProgress 下载进度回调（received, total），供 UI 展示进度；total 可能为 0/-1（未知）。
+     * @param onProgress 下载进度回调（received, total, phase）。
+     *   传输阶段 total 固定为 [book.size]（不被 HTTP Content-Length 污染，避免进度停在 98%）；
+     *   落盘阶段（校验/提取/发布）用 synthetic 进度 0..100 表示，phase 标明当前步骤。
      */
     suspend fun downloadBook(
         book: RemoteBook,
         isOpen: (String) -> Boolean,
-        onProgress: ((received: Long, total: Long) -> Unit)? = null,
+        onProgress: ((received: Long, total: Long, phase: DownloadPhase) -> Unit)? = null,
     ): Result<String> = withContext(Dispatchers.IO) {
         downloadMutex.withLock {
             try {
@@ -555,14 +562,23 @@ class CloudSync(private val context: Context) {
                 check(target.parentFile?.usableSpace?.let { it >= book.size } == true) { "应用存储空间不足" }
                 val tmp = File.createTempFile("download-", ".part", target.parentFile)
                 try {
+                    // 传输阶段：进度分母固定 book.size，进度封顶 95%（留 5% 给落盘）
                     backend.downloadTo("books/${book.fileName}", tmp, maxBytes = book.size) { received, total ->
-                        onProgress?.invoke(received, if (total > 0) total else book.size)
+                        val ratio = if (book.size > 0) (received.toDouble() / book.size) else 0.0
+                        val capped = (ratio * 95.0).toLong().coerceIn(0L, 95L)
+                        onProgress?.invoke(capped, 100L, DownloadPhase.Transferring)
                     }
                     check(tmp.length() == book.size) { "下载大小与书库不符，请先更新书库" }
+
+                    // 落盘阶段：校验（解压校验整个 EPUB）→ 提取封面/书名 → 发布，均无字节进度，
+                    // 用 synthetic 进度逐步推进，让 UI 明确「仍在工作」而非卡住。
+                    onProgress?.invoke(96, 100L, DownloadPhase.Verifying)
                     CoverExtractor.validatePackage(tmp)
                     check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
+                    onProgress?.invoke(97, 100L, DownloadPhase.Extracting)
                     val cover = CoverExtractor.extract(tmp)
                     val title = CoverExtractor.extractTitle(tmp)
+                    onProgress?.invoke(98, 100L, DownloadPhase.Publishing)
                     val source = destination?.let { directory.publish(it, tmp, fileName) }
                     if (source == null) {
                         Files.move(
@@ -574,6 +590,7 @@ class CloudSync(private val context: Context) {
                     store.registerBook(fileName, cover, title, source, destination, book.size).getOrThrow()
                     if (source != null) target.delete()
                     invalidateListCache()
+                    onProgress?.invoke(100, 100L, DownloadPhase.Publishing)
                     Result.success(fileName)
                 } finally {
                     // 主动取消时文件流可能仍占用，delete 失败则注册 deleteOnExit 兜底，
