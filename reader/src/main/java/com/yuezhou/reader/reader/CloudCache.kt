@@ -148,7 +148,9 @@ class CloudCache(private val context: Context) {
     private data class CoverMeta(val coverVersion: String, val failed: Boolean)
 
     private fun coverKey(namespace: String, bookId: String): String =
-        "$namespace/$bookId"
+        // 目录名已按 namespace 隔离，这里只需保证文件名合法且不冲突：
+        // 用 bookId 的 sanitize 版本 + 稳定 hash，避免中文/特殊字符书名在 sanitize 后互相碰撞。
+        sanitize(bookId).ifBlank { "_" } + "_" + (bookId.hashCode() and 0x7fffffff)
 
     // endregion
 }

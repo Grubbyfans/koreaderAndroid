@@ -365,7 +365,9 @@ class CloudSync(private val context: Context) {
             val cached = cache.readList(ns)
             if (cached != null) {
                 collector.recordCacheHit("列表")
+                val t0 = System.currentTimeMillis()
                 val fromCacheBooks = decodeCachedBooks(cached.raw, backend)
+                Log.d("CloudSync", "listBooks cache hit: decode=${System.currentTimeMillis() - t0}ms, books=${fromCacheBooks.size}")
                 collector.recordPhase("读列表", System.currentTimeMillis() - start)
                 diagnostics.append("读云端书库", collector.snapshot())
                 return@withContext RemoteLibrary(
@@ -510,12 +512,14 @@ class CloudSync(private val context: Context) {
         }
 
         // 联网拉取
+        val t0 = System.currentTimeMillis()
         val bytes = try {
             val raw = backend.downloadBytes("covers/$bookId.json", 128 * 1024).toString(Charsets.UTF_8)
             com.yuezhou.reader.core.protocol.CoverFile.decode(raw).pngBytes
         } catch (e: Exception) {
             null
         }
+        Log.d("CloudSync", "fetchCover $bookId: network ${System.currentTimeMillis() - t0}ms, hit=${bytes != null}")
         if (bytes != null) {
             coverCache[memKey] = bytes
             cache.writeCover(namespace, bookId, coverVersion, bytes)

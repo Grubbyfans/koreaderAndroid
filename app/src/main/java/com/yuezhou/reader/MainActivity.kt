@@ -278,17 +278,21 @@ private fun BookshelfScreen() {
                 remoteBackendLabel = lib.backendLabel
                 remoteFetchedAt = lib.fetchedAt
                 remoteFromCache = lib.fromCache
-                // 命中缓存时，后台静默「发现外部新书」：刚在网盘上传的 EPUB 尚未登记，
-                // 纯读缓存看不到。发现新增则强制重拉一次列表并提示。
+                // 命中缓存：列表已秒显，这里的「发现外部新书」放后台独立执行，
+                // 不阻塞 remoteLoading，避免切 tab 时总显示「更新书库中…」。
                 if (lib.fromCache) {
-                    val changed = runCatching { cloudSync.discoverExternalBooks() }.getOrDefault(0)
-                    if (changed > 0) {
-                        val fresh = cloudSync.listBooks(force = true)
-                        remoteBooks = fresh.books
-                        remoteBackendLabel = fresh.backendLabel
-                        remoteFetchedAt = fresh.fetchedAt
-                        remoteFromCache = false
-                        snackbarHostState.showSnackbar("发现 ${changed} 本新书")
+                    scope.launch {
+                        val changed = runCatching { cloudSync.discoverExternalBooks() }.getOrDefault(0)
+                        if (changed > 0) {
+                            runCatching {
+                                val fresh = cloudSync.listBooks(force = true)
+                                remoteBooks = fresh.books
+                                remoteBackendLabel = fresh.backendLabel
+                                remoteFetchedAt = fresh.fetchedAt
+                                remoteFromCache = false
+                                snackbarHostState.showSnackbar("发现 ${changed} 本新书")
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
