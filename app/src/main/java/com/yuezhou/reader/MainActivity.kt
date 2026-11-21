@@ -81,10 +81,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
@@ -394,10 +402,8 @@ private fun BookshelfScreen() {
                         // 下载任务入口：有任务时显示下载图标，点击查看任务状态
                         if (downloadTask != null) {
                             IconButton(onClick = { downloadTasksOpen = true }) {
-                                Icon(
-                                    DownloadIcon,
-                                    contentDescription = "下载任务",
-                                    tint = YuezhouColors.Brand,
+                                AnimatedDownloadIcon(
+                                    downloading = downloadTask?.status == DownloadStatus.Downloading,
                                 )
                             }
                         }
@@ -976,6 +982,56 @@ private val DownloadIcon: ImageVector by lazy {
             lineTo(20f, 19f)
         }
     }.build()
+}
+
+/**
+ * 右上角下载图标，带下载中动效：
+ * - 下载中：箭头上下浮动（模拟「往下搬运」），外层叠加一圈旋转的进度弧线；
+ * - 完成/失败：静态图标。
+ */
+@Composable
+private fun AnimatedDownloadIcon(downloading: Boolean) {
+    val transition = rememberInfiniteTransition(label = "download")
+    val floatY by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 700, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "float",
+    )
+    val rotate by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "rotate",
+    )
+
+    Box(contentAlignment = Alignment.Center) {
+        // 下载中的旋转进度弧线
+        if (downloading) {
+            CircularProgressIndicator(
+                progress = { 0.3f },
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp,
+                color = YuezhouColors.Brand,
+                trackColor = YuezhouColors.Brand.copy(alpha = 0.15f),
+            )
+        }
+        // 箭头上下浮动
+        Icon(
+            DownloadIcon,
+            contentDescription = "下载任务",
+            tint = YuezhouColors.Brand,
+            modifier = Modifier
+                .size(20.dp)
+                .graphicsLayer { translationY = if (downloading) floatY else 0f },
+        )
+    }
 }
 
 /** 本地/云端切换条：胶囊滑块式分段控件。 */
