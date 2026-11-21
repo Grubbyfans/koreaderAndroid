@@ -33,6 +33,8 @@ data class ReaderPreferences(
     val fontWeight: Int = 0,
     /** 是否开启自动进度同步：开启时进入书籍自动拉取云端进度覆盖本地，退出/切出时自动上传覆盖云端。 */
     val autoSync: Boolean = false,
+    /** 阅读亮度（0.0..1.0）；-1f 表示未设置，跟随系统。 */
+    val brightness: Float = -1f,
 )
 
 private val Context.readerDataStore by preferencesDataStore(name = "reader_settings")
@@ -50,6 +52,7 @@ object ReaderSettings {
     private val KEY_SPEECH_RATE = floatPreferencesKey("speech_rate")
     private val KEY_SPEECH_VOICE = stringPreferencesKey("speech_voice")
     private val KEY_AUTO_SYNC = booleanPreferencesKey("auto_sync")
+    private val KEY_BRIGHTNESS = floatPreferencesKey("brightness")
 
     /** 读取阅读设置（Flow，随变更更新）。 */
     fun flow(context: Context): Flow<ReaderPreferences> =
@@ -66,6 +69,7 @@ object ReaderSettings {
                 speechRate = prefs[KEY_SPEECH_RATE] ?: 1.0f,
                 speechVoice = prefs[KEY_SPEECH_VOICE] ?: "",
                 autoSync = prefs[KEY_AUTO_SYNC] ?: false,
+                brightness = prefs[KEY_BRIGHTNESS] ?: -1f,
             )
         }
 
@@ -75,6 +79,11 @@ object ReaderSettings {
 
     suspend fun selectFontWeight(context: Context, weight: Int) {
         context.readerDataStore.edit { it[KEY_FONT_WEIGHT] = weight }
+    }
+
+    /** 单独保存阅读亮度（0.0..1.0）。 */
+    suspend fun saveBrightness(context: Context, brightness: Float) {
+        context.readerDataStore.edit { it[KEY_BRIGHTNESS] = brightness }
     }
 
     /** 保存整份设置。 */
@@ -89,6 +98,7 @@ object ReaderSettings {
             it[KEY_SPEECH_RATE] = prefs.speechRate
             it[KEY_SPEECH_VOICE] = prefs.speechVoice
             it[KEY_AUTO_SYNC] = prefs.autoSync
+            it[KEY_BRIGHTNESS] = prefs.brightness
         }
     }
 }

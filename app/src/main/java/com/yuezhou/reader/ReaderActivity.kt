@@ -205,10 +205,14 @@ private fun ReaderScreen(
     var panelVisible by remember { mutableStateOf(false) }
     // 亮度：0..1，null 表示跟随系统；左侧滑动调节后为具体值
     var brightness by remember { mutableStateOf<Float?>(null) }
+    // 本次打开是否已恢复过记忆亮度（避免 prefs 刷新时重复应用）
+    var brightnessRestored by remember { mutableStateOf(false) }
     // 亮度浮层是否显示（滑动调节时短暂显示）
     var brightnessVisible by remember { mutableStateOf(false) }
     // 亮度浮层自动隐藏去抖
     var brightnessHideJob by remember { mutableStateOf<Job?>(null) }
+    // 亮度持久化去抖
+    var brightnessSaveJob by remember { mutableStateOf<Job?>(null) }
     // 朗读状态：是否正在朗读
     var speaking by remember { mutableStateOf(false) }
     // 朗读中，用于「朗读」按钮切换为「停止」
@@ -339,22 +343,27 @@ private fun ReaderScreen(
     /**
      * 左侧滑动调节亮度：delta 为本次垂直位移增量（px），正=下滑增亮，负=上滑减暗。
      * 通过 Activity 窗口亮度覆盖实现（screenBrightness，范围 0.0..1.0），
-     * 不影响系统全局亮度；首次调节前读取系统当前亮度作为起点。
+     * 仅在本阅读页生效，不影响系统全局亮度；退出页面后随 Activity 销毁自动释放。
+     * 调节结果持久化记忆，下次打开书自动恢复。
      */
     fun adjustBrightness(ctx: android.content.Context, delta: Float) {
         val activity = ctx as? android.app.Activity ?: return
         val window = activity.window
-        // 首次调节：以系统当前亮度为起点（否则从默认值跳变）
+        // 首次调节：优先用记忆亮度，其次读系统当前亮度作为起点（否则从默认值跳变）
         var current = brightness ?: run {
-            val sys = try {
-                android.provider.Settings.System.getInt(
-                    ctx.contentResolver,
-                    android.provider.Settings.System.SCREEN_BRIGHTNESS,
-                ) / 255f
-            } catch (_: Exception) {
-                0.5f
+            val remembered = latestPrefs.brightness
+            if (remembered >= 0f) {
+                remembered
+            } else {
+                try {
+                    android.provider.Settings.System.getInt(
+                        ctx.contentResolver,
+                        android.provider.Settings.System.SCREEN_BRIGHTNESS,
+                    ) / 255f
+                } catch (_: Exception) {
+                    0.5f
+                }
             }
-            sys
         }
         // 灵敏度：约 600px 滑动对应满量程
         val step = delta / 600f
@@ -363,6 +372,12 @@ private fun ReaderScreen(
         val attrs = window.attributes
         attrs.screenBrightness = current
         window.attributes = attrs
+        // 持久化记忆（去抖，随滑随手势频繁调用合并写入）
+        brightnessSaveJob?.cancel()
+        brightnessSaveJob = appScope.launch {
+            delay(400)
+            ReaderSettings.saveBrightness(context, current)
+        }
         // 显示浮层并自动隐藏
         brightnessVisible = true
         brightnessHideJob?.cancel()
@@ -706,6 +721,19 @@ private fun ReaderScreen(
             pendingOpen = null
             openedSource = fileName to source
             wv.openEpub(fileName, restoreCfi, source)
+        }
+        // 打开书时恢复记忆亮度（仅首次，避免 prefs 变更反复覆盖用户当前调节）
+        if (!brightnessRestored) {
+            brightnessRestored = true
+            val remembered = prefs.brightness
+            if (remembered >= 0f) {
+                brightness = remembered
+                val attrs = (context as? android.app.Activity)?.window?.attributes
+                if (attrs != null) {
+                    attrs.screenBrightness = remembered
+                    (context as android.app.Activity).window.attributes = attrs
+                }
+            }
         }
     }
 
