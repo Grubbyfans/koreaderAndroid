@@ -39,6 +39,7 @@ private val defaultFonts = listOf(
 private val fontWeights = mapOf(
     0 to "书籍默认",
     400 to "常规",
+    500 to "中等",
     700 to "加粗",
 )
 

@@ -311,14 +311,21 @@ function toTocItem(node) {
     }
 }
 
-// 主题：设置 foliate-view 根元素与 iframe 的背景/文字色
-function applyTheme() {
+// 统一主题色板：阅读背景 + 文字色。theme 取值：light/sepia/dark/green/night-blue
+function themePalette(theme) {
     const themes = {
         light: { bg: '#faf9f7', fg: '#1a1a1a' },
         sepia: { bg: '#f5ecd7', fg: '#3a3226' },
         dark: { bg: '#1a1a1a', fg: '#c8c8c8' },
+        green: { bg: '#cce8cf', fg: '#1f3a24' },
+        'night-blue': { bg: '#0d1b2a', fg: '#a8c0d8' },
     }
-    const t = themes[currentSettings.theme] || themes.light
+    return themes[theme] || themes.light
+}
+
+// 主题：设置 foliate-view 根元素与 iframe 的背景/文字色
+function applyTheme() {
+    const t = themePalette(currentSettings.theme)
     const root = document.getElementById('reader')
     if (root) {
         root.style.background = t.bg
@@ -362,12 +369,7 @@ function fontStyle(id) {
 // 向每个已加载章节的 iframe document 注入字号/行距/主题样式
 function textStyle() {
     const s = currentSettings
-    const themes = {
-        light: { bg: '#faf9f7', fg: '#1a1a1a' },
-        sepia: { bg: '#f5ecd7', fg: '#3a3226' },
-        dark: { bg: '#1a1a1a', fg: '#c8c8c8' },
-    }
-    const t = themes[s.theme] || themes.light
+    const t = themePalette(s.theme)
     // 注意：不再注入 body 的 padding，边距由 foliate 的 gap/margin 属性控制，
     // 避免与 foliate 内置的 grid 边距（--_gap）叠加导致左右留白过大。
     return `
@@ -383,7 +385,7 @@ function textStyle() {
             line-height: inherit;
         }
         ${fontStyle(s.fontId)}
-        ${s.fontWeight === 400 || s.fontWeight === 700 ? `
+        ${s.fontWeight >= 400 && s.fontWeight <= 700 ? `
             html body, html body :is(p, div, li, blockquote, td, th):not(:where(pre *, code *, svg *, math *)) {
                 font-weight: ${s.fontWeight} !important;
             }

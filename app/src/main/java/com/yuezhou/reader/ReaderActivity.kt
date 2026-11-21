@@ -1021,6 +1021,8 @@ private fun formatTime(millis: Long): String {
 private fun themeBackground(theme: String): Color = when (theme) {
     "sepia" -> Color(0xFFF5ECD7)
     "dark" -> Color(0xFF1A1A1A)
+    "green" -> Color(0xFFCCE8CF)
+    "night-blue" -> Color(0xFF0D1B2A)
     else -> Color(0xFFFAF9F7)
 }
 
@@ -1240,6 +1242,8 @@ private fun SettingsControls(
                 "light" to "浅色",
                 "sepia" to "米黄",
                 "dark" to "深色",
+                "green" to "护眼",
+                "night-blue" to "夜蓝",
             ).forEach { (value, label) ->
                 TextButton(onClick = { onPrefsChange(prefs.copy(theme = value)) }) {
                     Text(

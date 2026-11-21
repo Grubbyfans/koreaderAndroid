@@ -1392,7 +1392,7 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             Text("主题", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("light" to "浅色", "sepia" to "护眼", "dark" to "深色").forEach { (value, label) ->
+                listOf("light" to "浅色", "sepia" to "护眼", "dark" to "深色", "green" to "青绿", "night-blue" to "夜蓝").forEach { (value, label) ->
                     val selected = prefs.theme == value
                     Text(
                         label,
