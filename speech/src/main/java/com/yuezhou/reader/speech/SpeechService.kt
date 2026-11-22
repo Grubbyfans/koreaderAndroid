@@ -28,6 +28,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -61,6 +63,12 @@ class SpeechService : Service() {
 
     /** 每次开始朗读递增的会话 ID；旧回调据此作废。 */
     private var sessionId = 0L
+
+    /** 看门狗协程：检测引擎后台静默（三星 SMT 等引擎切后台后可能空合成丢弃队列），自动续播剩余段。 */
+    private var watchdogJob: Job? = null
+
+    /** 连续多少次检测到静默才触发续播，避免引擎短暂的合成间隙被误判。 */
+    private var silentStreak = 0
 
     /** 耳机断开监听。 */
     private var becomingNoisyRegistered = false
@@ -149,6 +157,56 @@ class SpeechService : Service() {
             return
         }
         updatePlaybackState(PlaybackState.STATE_PLAYING, segmentIndex = start)
+        startWatchdog()
+    }
+
+    // ---- 看门狗：检测引擎后台静默并自动续播 ----
+
+    /**
+     * 启动看门狗：周期检测 TTS 引擎是否「静默但有剩余未读段」。
+     *
+     * 背景：三星 SMT 等系统引擎在 App 切后台后，可能把 QUEUE_ADD 队列里的后续片段
+     * 空合成（生成 0 字节音频）并丢弃，导致既无声也无 onDone 回调，朗读停在中间。
+     * 看门狗发现这种静默后，从当前游标段起重新连续入队剩余段，让朗读继续。
+     */
+    private fun startWatchdog() {
+        watchdogJob?.cancel()
+        silentStreak = 0
+        val mySession = sessionId
+        watchdogJob = scope.launch {
+            while (isActive) {
+                delay(WATCHDOG_INTERVAL_MS)
+                if (mySession != sessionId) return@launch
+                if (stateMachine.state != SpeechStateMachine.State.PLAYING) continue
+                val engine = tts ?: continue
+                val plan = stateMachine.plan ?: continue
+                // 本章还有未读段，但引擎已静默 → 疑似队列被引擎丢弃
+                val pos = stateMachine.position.segmentIndex
+                if (pos >= plan.segments.lastIndex) {
+                    // 已到章末（等末句 onDone 触发跨章），不属于静默续播范畴
+                    silentStreak = 0
+                    continue
+                }
+                if (!engine.isSpeaking()) {
+                    silentStreak++
+                    Log.w(TAG, "看门狗检测到引擎静默 pos=$pos/${plan.segments.lastIndex}, streak=$silentStreak")
+                    if (silentStreak >= WATCHDOG_THRESHOLD) {
+                        silentStreak = 0
+                        Log.w(TAG, "看门狗触发续播：从段 $pos 重新连续入队剩余段")
+                        engine.stop()
+                        speakFrom(engine, pos)
+                    }
+                } else {
+                    silentStreak = 0
+                }
+            }
+        }
+    }
+
+    private fun stopWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = null
+        silentStreak = 0
     }
 
     private fun clearChapterTransition() {
@@ -168,6 +226,7 @@ class SpeechService : Service() {
         Log.d(TAG, "handlePause() 进入, state=${stateMachine.state}, segment=${stateMachine.position.segmentIndex}, chapterJob=${chapterJob != null}, waitingChapter=${waitingChapter != null}")
         if (chapterJob != null || waitingChapter != null) chapterPaused = true
         sessionId++
+        stopWatchdog()
         tts?.stop()
         stateMachine.pause()
         updatePlaybackState(PlaybackState.STATE_PAUSED)
@@ -227,6 +286,7 @@ class SpeechService : Service() {
     private fun handleStop(error: String? = null) {
         sessionId++
         playJob?.cancel()
+        stopWatchdog()
         clearChapterTransition()
         request?.let { SpeechPlanStore.clear(it) }
         request = null
@@ -612,5 +672,11 @@ class SpeechService : Service() {
         private const val TAG = "SpeechService"
         private const val CHANNEL_ID = "speech"
         private const val NOTIFICATION_ID = 1001
+
+        /** 看门狗轮询间隔（毫秒）。 */
+        private const val WATCHDOG_INTERVAL_MS = 2000L
+
+        /** 连续静默多少次才触发续播（约 2s × 3 = 6s 容忍，避免误判正常句间停顿）。 */
+        private const val WATCHDOG_THRESHOLD = 3
     }
 }
