@@ -17,9 +17,9 @@ import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.yuezhou.reader.core.speech.SpeechPlan
-import com.yuezhou.reader.core.speech.SpeechSegment
 import com.yuezhou.reader.core.speech.SpeechStateMachine
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
@@ -118,12 +118,37 @@ class SpeechService : Service() {
         sessionId++
         engine.listener = createProgressListener()
         speakFrom(engine, startSegment)
+        // 预取下一章：末句 onDone 到达时下一章已就绪，跨章切换不再被「拉取耗时 + 回调延迟」卡住
+        prefetchNextChapter()
     }
 
-    /** 从指定片段开始朗读（越界取边界）；0 表示从头。 */
+    /**
+     * 从指定片段起，把本章剩余片段一次性连续入队（QUEUE_ADD），交由 TTS 引擎自行连续朗读。
+     * 不再依赖逐句 onDone 回调驱动续播——onDone 仅用于推进进度游标与高亮。
+     */
     private fun speakFrom(engine: TtsEngine, fromSegment: Int) {
-        val segment = stateMachine.play(fromSegment).getOrNull() ?: return
-        speak(engine, segment)
+        val plan = stateMachine.plan ?: return
+        if (plan.segments.isEmpty()) return
+        val start = fromSegment.coerceIn(0, plan.segments.lastIndex)
+        // 定位游标到起始段
+        stateMachine.play(start)
+        val remaining = plan.segments.drop(start).filter { !it.text.isBlank() }
+        if (remaining.isEmpty()) {
+            // 本章无可朗读文本，直接跨章
+            onSegmentDone()
+            return
+        }
+        val pairs = plan.segments.withIndex()
+            .drop(start)
+            .filter { !it.value.text.isBlank() }
+            .map { it.value.text to utteranceIdFor(it.index) }
+        val queued = engine.speakAll(pairs)
+        Log.d(TAG, "speakFrom() 从段 $start 连续入队 $queued/${remaining.size} 段, state=${stateMachine.state}")
+        if (queued < 0) {
+            handleStop("TTS 合成失败")
+            return
+        }
+        updatePlaybackState(PlaybackState.STATE_PLAYING, segmentIndex = start)
     }
 
     private fun clearChapterTransition() {
@@ -140,14 +165,17 @@ class SpeechService : Service() {
     }
 
     private fun handlePause() {
+        Log.d(TAG, "handlePause() 进入, state=${stateMachine.state}, segment=${stateMachine.position.segmentIndex}, chapterJob=${chapterJob != null}, waitingChapter=${waitingChapter != null}")
         if (chapterJob != null || waitingChapter != null) chapterPaused = true
         sessionId++
         tts?.stop()
         stateMachine.pause()
         updatePlaybackState(PlaybackState.STATE_PAUSED)
+        Log.d(TAG, "handlePause() 完成, state=${stateMachine.state}")
     }
 
     private fun handleResume() {
+        Log.d(TAG, "handleResume() 进入, state=${stateMachine.state}, segment=${stateMachine.position.segmentIndex}")
         val engine = tts ?: return
         chapterPaused = false
         val next = waitingChapter
@@ -160,10 +188,12 @@ class SpeechService : Service() {
             updatePlaybackState(PlaybackState.STATE_BUFFERING)
             return
         }
-        val segment = stateMachine.resume().getOrNull() ?: return
+        // 从暂停位置起，把剩余段连续入队继续读
+        val fromSegment = stateMachine.position.segmentIndex
+        stateMachine.resume().getOrNull() ?: return
         sessionId++
         engine.listener = createProgressListener()
-        speak(engine, segment)
+        speakFrom(engine, fromSegment)
     }
 
     private fun handleNext() {
@@ -176,19 +206,22 @@ class SpeechService : Service() {
             loadNextChapter(engine)
             return
         }
-        val segment = stateMachine.next().getOrNull() ?: return
+        stateMachine.next().getOrNull() ?: return
         sessionId++
         engine.listener = createProgressListener()
-        speak(engine, segment)
+        // 连续入队：从目标段起把剩余段一次性入队
+        engine.stop()
+        speakFrom(engine, stateMachine.position.segmentIndex)
     }
 
     private fun handlePrevious() {
         if (chapterJob != null || waitingChapter != null) return
         val engine = tts ?: return
-        val segment = stateMachine.previous().getOrNull() ?: return
+        stateMachine.previous().getOrNull() ?: return
         sessionId++
         engine.listener = createProgressListener()
-        speak(engine, segment)
+        engine.stop()
+        speakFrom(engine, stateMachine.position.segmentIndex)
     }
 
     private fun handleStop(error: String? = null) {
@@ -229,34 +262,35 @@ class SpeechService : Service() {
         }
     }
 
-    private fun speak(engine: TtsEngine, segment: SpeechSegment) {
-        if (segment.text.isBlank()) {
-            onSegmentDone()
-            return
-        }
-        val ok = engine.speak(segment.text, utteranceIdFor(stateMachine.position.segmentIndex))
-        if (!ok) {
-            handleStop("TTS 合成失败")
-            return
-        }
-        updatePlaybackState(PlaybackState.STATE_PLAYING, segmentIndex = stateMachine.position.segmentIndex)
-    }
-
     private fun utteranceIdFor(segmentIndex: Int) = "$sessionId:$segmentIndex"
 
     private fun createProgressListener() = object : UtteranceProgressListener() {
         private val mySession = sessionId
 
-        override fun onStart(utteranceId: String?) = dispatch(utteranceId) { confirm(it, 0) }
+        override fun onStart(utteranceId: String?) {
+            Log.d(TAG, "onStart utteranceId=$utteranceId, mySession=$mySession, curSession=$sessionId")
+            dispatch(utteranceId) { confirm(it, 0) }
+        }
 
-        override fun onDone(utteranceId: String?) = dispatch(utteranceId) { segment ->
-            confirm(segment, stateMachine.plan?.segmentAt(segment)?.text?.length ?: 0)
-            onSegmentDone()
+        override fun onDone(utteranceId: String?) {
+            Log.d(TAG, "onDone utteranceId=$utteranceId, mySession=$mySession, curSession=$sessionId")
+            dispatch(utteranceId) { segment ->
+                confirm(segment, stateMachine.plan?.segmentAt(segment)?.text?.length ?: 0)
+                // 连续入队模型：仅当读完的是本章最后一段时才跨章；否则引擎会自行继续读队列中的下一段
+                val isLast = stateMachine.plan?.let { segment >= it.segments.lastIndex } == true
+                if (isLast) {
+                    Log.d(TAG, "onDone 本章最后一段 segment=$segment, 触发跨章")
+                    onSegmentDone()
+                }
+            }
         }
 
         @Deprecated("Deprecated in Java")
-        override fun onError(utteranceId: String?) = dispatch(utteranceId) {
-            handleStop("朗读片段失败")
+        override fun onError(utteranceId: String?) {
+            Log.w(TAG, "onError utteranceId=$utteranceId, mySession=$mySession, curSession=$sessionId")
+            dispatch(utteranceId) {
+                handleStop("朗读片段失败")
+            }
         }
 
         override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) =
@@ -264,10 +298,25 @@ class SpeechService : Service() {
 
         private fun dispatch(utteranceId: String?, action: (Int) -> Unit) {
             scope.launch {
-                if (mySession != sessionId || utteranceId == null) return@launch
-                val segment = stateMachine.position.segmentIndex
-                if (utteranceId == utteranceIdFor(segment)) action(segment)
+                if (mySession != sessionId || utteranceId == null) {
+                    Log.w(TAG, "dispatch 丢弃回调: utteranceId=$utteranceId, mySession=$mySession, curSession=$sessionId, reason=${if (mySession != sessionId) "sessionId不一致" else "utteranceId为null"}")
+                    return@launch
+                }
+                // 从 utteranceId 解析段号（格式 "sessionId:segmentIndex"），
+                // 连续入队模型下回调段号不依赖当前游标，直接解析更可靠。
+                val segment = parseSegment(utteranceId)
+                if (segment >= 0) {
+                    action(segment)
+                } else {
+                    Log.w(TAG, "dispatch 无法解析段号: utteranceId=$utteranceId")
+                }
             }
+        }
+
+        private fun parseSegment(utteranceId: String): Int {
+            val idx = utteranceId.lastIndexOf(':')
+            if (idx < 0) return -1
+            return utteranceId.substring(idx + 1).toIntOrNull() ?: -1
         }
 
         private fun confirm(segment: Int, charOffset: Int) {
@@ -286,9 +335,50 @@ class SpeechService : Service() {
     }
 
     private fun onSegmentDone() {
-        val engine = tts ?: return
-        val next = stateMachine.advanceToNext()
-        if (next == null) loadNextChapter(engine) else speak(engine, next)
+        Log.d(TAG, "onSegmentDone() 进入, state=${stateMachine.state}, 当前segment=${stateMachine.position.segmentIndex}")
+        val engine = tts ?: run {
+            Log.w(TAG, "onSegmentDone() engine 为空, 中断续播!")
+            return
+        }
+        // 连续入队模型下，onSegmentDone 仅在「整章读完（末句 onDone）」时被调用，语义为跨章。
+        switchToNextChapter(engine)
+    }
+
+    /** 开始读当前章时预取下一章到 [waitingChapter]，使跨章切换不被拉取耗时卡住。 */
+    private fun prefetchNextChapter() {
+        if (chapterJob != null || waitingChapter != null) return
+        val active = request ?: return
+        val previous = stateMachine.plan ?: return
+        chapterJob = scope.launch {
+            val next = try {
+                active.chapters.next(previous)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "预取下一章失败", e)
+                chapterJob = null
+                return@launch
+            }
+            chapterJob = null
+            waitingChapter = next
+            Log.d(TAG, "预取下一章完成: ${next?.chapterIndex ?: "已是最后一章"}")
+        }
+    }
+
+    /** 末句读完时切换到下一章：优先用已预取的 [waitingChapter]，否则即时拉取。 */
+    private fun switchToNextChapter(engine: TtsEngine) {
+        val waiting = waitingChapter
+        if (waiting != null) {
+            waitingChapter = null
+            if (chapterPaused) {
+                waitingChapter = waiting
+            } else {
+                playChapter(engine, waiting)
+            }
+            return
+        }
+        // 预取尚未完成，即时拉取（兜底）
+        loadNextChapter(engine)
     }
 
     private fun loadNextChapter(engine: TtsEngine) {
@@ -359,12 +449,21 @@ class SpeechService : Service() {
     }
 
     private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        Log.d(TAG, "音频焦点变化 change=$change (${focusChangeName(change)}) state=${stateMachine.state}")
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS -> handlePause()
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> handlePause()
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> { /* 朗读暂不降音量，保持继续 */ }
             AudioManager.AUDIOFOCUS_GAIN -> if (stateMachine.state == SpeechStateMachine.State.PAUSED) handleResume()
         }
+    }
+
+    private fun focusChangeName(change: Int): String = when (change) {
+        AudioManager.AUDIOFOCUS_GAIN -> "GAIN"
+        AudioManager.AUDIOFOCUS_LOSS -> "LOSS"
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> "LOSS_TRANSIENT"
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> "LOSS_TRANSIENT_CAN_DUCK"
+        else -> "UNKNOWN"
     }
 
     private fun registerBecomingNoisy() {
@@ -510,6 +609,7 @@ class SpeechService : Service() {
     }
 
     companion object {
+        private const val TAG = "SpeechService"
         private const val CHANNEL_ID = "speech"
         private const val NOTIFICATION_ID = 1001
     }

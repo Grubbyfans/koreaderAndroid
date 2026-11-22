@@ -117,6 +117,33 @@ class TtsEngine(private val context: Context) {
         return t.speak(text, queueMode, null, utteranceId) == TextToSpeech.SUCCESS
     }
 
+    /**
+     * 把一整章的若干片段连续入队，交由引擎自行连续朗读（不依赖逐句回调驱动）。
+     *
+     * 首段用 [TextToSpeech.QUEUE_FLUSH] 清空可能残留的旧队列，其余段用
+     * [TextToSpeech.QUEUE_ADD] 追加。切后台后引擎内部队列继续播放，不受进程 CPU
+     * 调度延迟导致的 [UtteranceProgressListener.onDone] 延迟影响。
+     *
+     * @param segments 待朗读的（片段文本, utteranceId）序列；空片段会被跳过。
+     * @return 实际成功入队的片段数；首段入队失败返回 -1 表示整体失败。
+     */
+    fun speakAll(segments: List<Pair<String, String>>): Int {
+        val t = _tts ?: return -1
+        var queued = 0
+        for ((index, pair) in segments.withIndex()) {
+            val (text, utteranceId) = pair
+            if (text.isBlank()) continue
+            val mode = if (queued == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            val ok = t.speak(text, mode, null, utteranceId) == TextToSpeech.SUCCESS
+            if (!ok) {
+                // 首段就失败 → 整体失败；后续段失败 → 已入队的部分仍会播，但停止继续追加
+                return if (queued == 0) -1 else queued
+            }
+            queued++
+        }
+        return queued
+    }
+
     /** 停止当前朗读并清空队列。 */
     fun stop(): Boolean {
         val t = _tts ?: return false
