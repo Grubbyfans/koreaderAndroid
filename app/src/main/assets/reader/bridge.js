@@ -333,6 +333,8 @@ function applyTheme() {
     }
     // foliate-view 及内部 iframe 透明，露出根背景
     view.style.background = t.bg
+    // 刷新 foliate-paginator 的 #background 边缘填充（否则切主题后屏幕边缘残留旧色）
+    try { view.renderer?.refreshBackground?.() } catch (e) { /* ignore */ }
 }
 
 const systemFontFamilies = new Map([

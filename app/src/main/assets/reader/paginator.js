@@ -1180,6 +1180,14 @@ export class Paginator extends HTMLElement {
         // needed because the resize observer doesn't work in Firefox
         this.#view?.document?.fonts?.ready?.then(() => this.#view.expand())
     }
+    // 阅舟新增：主题切换后，iframe 的 html/body 背景已变，但本元素用来填 iframe
+    // 边缘的 #background 仍停留在旧色。此方法重新读取 doc 背景并刷新 #background，
+    // 供 bridge.js 在 applyTheme 后调用，避免「切主题后屏幕边缘残留旧背景色」。
+    refreshBackground() {
+        if (!this.#view?.document) return
+        requestAnimationFrame(() =>
+            this.#background.style.background = getBackground(this.#view.document))
+    }
     focusView() {
         this.#view.document.defaultView.focus()
     }
