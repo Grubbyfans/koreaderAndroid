@@ -1,7 +1,9 @@
 package com.yuezhou.reader
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -201,6 +203,11 @@ private fun BookshelfScreen() {
     var scanDialogOpen by remember { mutableStateOf(false) }
     var scanning by remember { mutableStateOf(false) }
     var scanUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    // 通知权限（Android 13+）：前台服务进度通知需要；下载前请求
+    val requestNotificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* 无论是否授权都继续下载；未授权时前台服务通知不显示，但仍能保活 */ }
 
     val pickDirectory = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -700,12 +707,23 @@ private fun BookshelfScreen() {
                 }
                 TextButton(enabled = !taskRunning, onClick = {
                     detailBook = null
+                    // Android 13+ 先请求通知权限（前台服务进度通知需要）
+                    if (Build.VERSION.SDK_INT >= 33 &&
+                        androidx.core.content.ContextCompat.checkSelfPermission(
+                            context,
+                            android.Manifest.permission.POST_NOTIFICATIONS,
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        requestNotificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
                     // 后台启动下载，不阻塞阅读；同时只有一个任务
                     downloadTask = DownloadTask(
                         bookId = detail.bookId,
                         fileName = detail.fileName,
                         total = detail.size,
                     )
+                    // 启动前台服务保活：切后台/锁屏时系统不冻结进程网络，避免 readTimeout 导致下载失败
+                    DownloadForegroundService.start(context, detail.fileName)
                     // 用 lifecycleScope 而非 rememberCoroutineScope：切后台/锁屏不取消，下载持续到 Activity 销毁
                     downloadJob = lifecycleOwner.lifecycleScope.launch {
                         val result = try {
@@ -720,12 +738,15 @@ private fun BookshelfScreen() {
                                         com.yuezhou.reader.reader.CloudSync.DownloadPhase.Publishing -> DownloadPhase.Publishing
                                     },
                                 )
+                                DownloadForegroundService.updateProgress(context, detail.fileName, received, total)
                             }
                         } catch (e: CancellationException) {
                             downloadTask = null
                             downloadJob = null
+                            DownloadForegroundService.stop(context)
                             return@launch
                         }
+                        DownloadForegroundService.stop(context)
                         if (result.isSuccess) {
                             downloadTask = downloadTask?.copy(status = DownloadStatus.Done, received = downloadTask?.total ?: detail.size)
                             refreshKey++
@@ -820,6 +841,7 @@ private fun BookshelfScreen() {
                             downloadJob?.cancel()
                             downloadTask = null
                             downloadJob = null
+                            DownloadForegroundService.stop(context)
                             downloadTasksOpen = false
                             scope.launch { snackbarHostState.showSnackbar("已取消下载") }
                         }) { Text("取消下载", color = MaterialTheme.colorScheme.error) }
