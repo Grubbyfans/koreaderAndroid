@@ -1,0 +1,23 @@
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  s_01ceea952b99e9::t_6afeb05efe1a01 1488-1491
+app/src/main/java/com/yuezhou/reader/SpeechBackgroundSettings.kt
+  s_01ceea952b99e9::t_6afeb05efe1a01 1-131
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_01ceea952b99e9::t_6afeb05efe1a01 619-624,938
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "df05a9c82b01126a31d6b16cb538f46c5bdbb200",
+  "prompts": {},
+  "sessions": {
+    "s_01ceea952b99e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207f5-a95c-7ce0-8172-433da1801be7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
