@@ -1,0 +1,51 @@
+core/build.gradle.kts
+  s_01ceea952b99e9::t_a3c0f9add1afd3 27
+speech/src/main/java/com/yuezhou/reader/speech/SpeechPlanStore.kt
+  s_01ceea952b99e9::t_a3c0f9add1afd3 27,102-113
+  s_01ceea952b99e9::t_ac7dc9d2d07262 114
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  s_01ceea952b99e9::t_a3c0f9add1afd3 56,1486-1499
+core/src/main/java/com/yuezhou/reader/core/speech/SpeechSegment.kt
+  s_01ceea952b99e9::t_a3c0f9add1afd3 39-40,68-69,99-105
+  s_01ceea952b99e9::t_6c9508b693699d 86-87
+speech/src/main/java/com/yuezhou/reader/speech/SpeechCommands.kt
+  s_01ceea952b99e9::t_a3c0f9add1afd3 35-37
+novel-text/src/main/java/com/yuezhou/reader/noveltext/NovelTextParser.kt
+  s_01ceea952b99e9::t_6c9508b693699d 4-6
+app/src/main/java/com/yuezhou/reader/ReaderSettings.kt
+  s_01ceea952b99e9::t_a3c0f9add1afd3 38-39,64,86,105-108,125
+reader/src/test/java/com/yuezhou/reader/reader/EpubChapterTextSourceTest.kt
+  s_01ceea952b99e9::t_6c9508b693699d 66-78
+  s_01ceea952b99e9::t_39b7c5a841f02b 65
+speech/src/main/java/com/yuezhou/reader/speech/SpeechCoordinator.kt
+  s_01ceea952b99e9::t_a3c0f9add1afd3 302
+core/src/main/java/com/yuezhou/reader/core/speech/SpeechTextPlanning.kt
+  s_01ceea952b99e9::t_a3c0f9add1afd3 1-36
+core/src/test/java/com/yuezhou/reader/core/speech/SpeechTextPlanningTest.kt
+  s_01ceea952b99e9::t_6c9508b693699d 1-40,42-47
+  s_01ceea952b99e9::t_df09305faa2c06 41
+reader/src/main/java/com/yuezhou/reader/reader/EpubChapterTextSource.kt
+  s_01ceea952b99e9::t_a3c0f9add1afd3 4-5,53-58
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_01ceea952b99e9::t_6c9508b693699d 227,535-542,544-567,902-904
+  s_01ceea952b99e9::t_a3c0f9add1afd3 102
+speech/src/main/java/com/yuezhou/reader/speech/SpeechService.kt
+  s_01ceea952b99e9::t_6c9508b693699d 382
+  s_01ceea952b99e9::t_a3c0f9add1afd3 28,149,190-212,1112-1117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a3902fdef359396eaca878936e3a26fe918a8b23",
+  "prompts": {},
+  "sessions": {
+    "s_01ceea952b99e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207f5-a95c-7ce0-8172-433da1801be7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
