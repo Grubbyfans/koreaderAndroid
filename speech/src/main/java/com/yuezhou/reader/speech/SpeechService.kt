@@ -412,14 +412,8 @@ class SpeechService : Service() {
                 Log.d(TAG, "D_SEG_DONE index=${event.index}")
                 stateMachine.onSegmentCompleted(event.index)
                 val segment = plan.segmentAt(event.index) ?: return
-                SpeechProgressTracker.onProgress(
-                    bookId = plan.bookId,
-                    chapterIndex = plan.chapterIndex,
-                    segmentIndex = event.index,
-                    charOffset = segment.text.length,
-                    anchor = segment.endAnchor,
-                    endAnchor = segment.endAnchor,
-                )
+                // UI 保持整句高亮到下一句真正开始；完成只更新持久化游标，
+                // 不发布句尾的空范围，否则会盖掉正在显示的背景色。
                 // 完成即把游标推进到下一句起点（含稳定锚点），恢复时从下一句继续，
                 // 不因写「已完成句末」而重读；本章末句则保留末句末位锚点。
                 val next = plan.segmentAt(event.index + 1)

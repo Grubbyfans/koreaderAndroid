@@ -135,6 +135,13 @@ class SynthesizedAudio(
  */
 interface PcmPlayer {
 
+    fun interface StartListener {
+        /** 播放头越过该句第一帧时通知，不能在合成或入队时通知。 */
+        fun onStarted(segmentIndex: Int, generation: Long)
+    }
+
+    fun setStartListener(listener: StartListener?)
+
     fun interface CompletionListener {
         /** 第 [segmentIndex] 句实际播完；[generation] 用于过滤旧队列。 */
         fun onCompleted(segmentIndex: Int, generation: Long)

@@ -63,6 +63,9 @@ internal class FakeSynthesizer : SpeechSynthesizer {
 internal class FakePcmPlayer : PcmPlayer {
 
     private var listener: PcmPlayer.CompletionListener? = null
+    private var startListener: PcmPlayer.StartListener? = null
+    private val started = mutableSetOf<Int>()
+    var autoStart = true
     private val inFlight = ArrayDeque<Pair<Int, Long>>()
 
     val enqueued = mutableListOf<Int>()
@@ -77,6 +80,10 @@ internal class FakePcmPlayer : PcmPlayer {
     var released = false
         private set
 
+    override fun setStartListener(listener: PcmPlayer.StartListener?) {
+        startListener = listener
+    }
+
     override fun setCompletionListener(listener: PcmPlayer.CompletionListener?) {
         this.listener = listener
     }
@@ -88,12 +95,14 @@ internal class FakePcmPlayer : PcmPlayer {
         paused = false
         enqueued.clear()
         inFlight.clear()
+        started.clear()
     }
 
     override fun enqueue(segmentIndex: Int, audio: SynthesizedAudio): Boolean {
         if (stopped) return false
         enqueued += segmentIndex
         inFlight += segmentIndex to beginGeneration
+        if (autoStart && !paused) startNext()
         return true
     }
 
@@ -103,6 +112,7 @@ internal class FakePcmPlayer : PcmPlayer {
 
     override fun resume() {
         paused = false
+        if (autoStart) startNext()
     }
 
     override fun stop() {
@@ -119,7 +129,17 @@ internal class FakePcmPlayer : PcmPlayer {
     fun completeNext(): Boolean {
         val item = inFlight.removeFirstOrNull() ?: return false
         listener?.onCompleted(item.first, item.second)
+        if (autoStart && !paused) startNext()
         return true
+    }
+
+    fun startNext() {
+        val item = inFlight.firstOrNull() ?: return
+        if (started.add(item.first)) startListener?.onStarted(item.first, item.second)
+    }
+
+    fun start(index: Int, generation: Long) {
+        startListener?.onStarted(index, generation)
     }
 
     /** 伪造指定代次的完成回调（用于旧代次竞态测试）。 */

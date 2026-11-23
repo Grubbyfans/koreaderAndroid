@@ -24,17 +24,18 @@ class AudioTrackPcmPlayer : PcmPlayer {
 
     private val lock = Any()
     private var listener: PcmPlayer.CompletionListener? = null
+    private var startListener: PcmPlayer.StartListener? = null
+    private val notificationLock = Any()
 
     private var track: AudioTrack? = null
     private var sampleRate = 0
     private var generation = -1L
     private var paused = false
 
-    private var writtenFrames = 0L
     private var wrapBase = 0L
     private var lastRawHead = 0
     private var markerArmed = false
-    private val boundaries = ArrayDeque<Boundary>()
+    private val timeline = PcmSegmentTimeline()
 
     private val markerThread = HandlerThread("PcmPlayerMarker").apply { start() }
     private val markerHandler = Handler(markerThread.looper)
@@ -51,6 +52,10 @@ class AudioTrackPcmPlayer : PcmPlayer {
         override fun onPeriodicNotification(track: AudioTrack?) = pollAndNotify()
     }
 
+    override fun setStartListener(listener: PcmPlayer.StartListener?) {
+        synchronized(lock) { startListener = listener }
+    }
+
     override fun setCompletionListener(listener: PcmPlayer.CompletionListener?) {
         synchronized(lock) { this.listener = listener }
     }
@@ -60,11 +65,10 @@ class AudioTrackPcmPlayer : PcmPlayer {
         synchronized(lock) {
             old = releaseTrackLocked()
             this.generation = generation
-            writtenFrames = 0
             wrapBase = 0
             lastRawHead = 0
             markerArmed = false
-            boundaries.clear()
+            timeline.clear()
             paused = false
         }
         old?.let { runCatching { it.release() } }
@@ -85,6 +89,8 @@ class AudioTrackPcmPlayer : PcmPlayer {
                 existing
             }
             gen = generation
+            // 阻塞写入前登记起点，播放中的长句也能及时触发 Started。
+            timeline.append(segmentIndex, samples.size)
         }
 
         var offset = 0
@@ -105,10 +111,10 @@ class AudioTrackPcmPlayer : PcmPlayer {
 
         synchronized(lock) {
             if (track !== current || generation != gen) return false
-            writtenFrames += samples.size
-            boundaries.addLast(Boundary(segmentIndex, writtenFrames))
+            timeline.markWritten(segmentIndex)
             armMarkerLocked()
         }
+        pollAndNotify()
         return true
     }
 
@@ -131,12 +137,11 @@ class AudioTrackPcmPlayer : PcmPlayer {
         synchronized(lock) {
             old = releaseTrackLocked()
             generation = -1L
-            writtenFrames = 0
             wrapBase = 0
             lastRawHead = 0
             markerArmed = false
             paused = false
-            boundaries.clear()
+            timeline.clear()
         }
         old?.let { t ->
             runCatching { t.pause() }
@@ -149,7 +154,10 @@ class AudioTrackPcmPlayer : PcmPlayer {
     override fun release() {
         stop()
         alive = false
-        synchronized(lock) { listener = null }
+        synchronized(lock) {
+            listener = null
+            startListener = null
+        }
         markerHandler.removeCallbacksAndMessages(null)
         markerThread.quitSafely()
         monitorThread.interrupt()
@@ -208,34 +216,37 @@ class AudioTrackPcmPlayer : PcmPlayer {
     }
 
     private fun pollAndNotify() {
-        val completed: List<Boundary>
-        synchronized(lock) {
-            if (track == null) return
-            completed = drainLocked()
+        // marker 与轮询共用发送序列，避免下一句 Started 超过前一句 Completed。
+        synchronized(notificationLock) {
+            val events: List<PcmSegmentTimeline.Event>
+            val gen: Long
+            val started: PcmPlayer.StartListener?
+            val completed: PcmPlayer.CompletionListener?
+            synchronized(lock) {
+                if (track == null) return
+                gen = generation
+                started = startListener
+                completed = listener
+                events = timeline.drain(currentFramesLocked())
+                if (events.any { it is PcmSegmentTimeline.Event.Completed }) markerArmed = false
+                armMarkerLocked()
+            }
+            for (event in events) {
+                when (event) {
+                    is PcmSegmentTimeline.Event.Started -> started?.onStarted(event.index, gen)
+                    is PcmSegmentTimeline.Event.Completed -> completed?.onCompleted(event.index, gen)
+                }
+            }
         }
-        notifyCompleted(completed)
-    }
-
-    private fun drainLocked(): List<Boundary> {
-        if (boundaries.isEmpty()) return emptyList()
-        val frames = currentFramesLocked()
-        val done = ArrayList<Boundary>(2)
-        while (boundaries.isNotEmpty() && boundaries.first().endFrame <= frames) {
-            done.add(boundaries.removeFirst())
-            markerArmed = false
-        }
-        armMarkerLocked()
-        return done
     }
 
     /** 把通知 marker 指向最早尚未完成的边界；要求该边界的 PCM 已全部写入。 */
     private fun armMarkerLocked() {
         val t = track ?: return
         if (markerArmed) return
-        val first = boundaries.firstOrNull() ?: return
-        if (first.endFrame > writtenFrames) return
-        if (first.endFrame <= currentFramesLocked()) return
-        val wrapped = first.endFrame - wrapBase
+        val endFrame = timeline.nextMarkerFrame ?: return
+        if (endFrame <= currentFramesLocked()) return
+        val wrapped = endFrame - wrapBase
         if (wrapped >= WRAP_LIMIT) return
         runCatching { t.setNotificationMarkerPosition(wrapped.toInt()) }
             .onSuccess { markerArmed = true }
@@ -251,18 +262,6 @@ class AudioTrackPcmPlayer : PcmPlayer {
         return wrapBase + raw
     }
 
-    private fun notifyCompleted(completed: List<Boundary>) {
-        if (completed.isEmpty()) return
-        val callback: PcmPlayer.CompletionListener?
-        val gen: Long
-        synchronized(lock) {
-            callback = listener
-            gen = generation
-        }
-        val target = callback ?: return
-        for (b in completed) target.onCompleted(b.index, gen)
-    }
-
     private fun monitorLoop() {
         while (alive) {
             try {
@@ -271,21 +270,14 @@ class AudioTrackPcmPlayer : PcmPlayer {
                 return
             }
             if (!alive) return
-            val completed: List<Boundary>
-            synchronized(lock) {
-                if (track == null) continue
-                completed = drainLocked()
-            }
-            notifyCompleted(completed)
+            pollAndNotify()
         }
     }
-
-    private data class Boundary(val index: Int, val endFrame: Long)
 
     private companion object {
         const val MIN_BUFFER_BYTES = 32 * 1024
         const val WRITE_CHUNK_SAMPLES = 4096
-        const val MONITOR_INTERVAL_MS = 100L
+        const val MONITOR_INTERVAL_MS = 20L
         const val WRAP_LIMIT = 1L shl 31
         const val WRAP_DETECT_THRESHOLD = 1L shl 30
     }

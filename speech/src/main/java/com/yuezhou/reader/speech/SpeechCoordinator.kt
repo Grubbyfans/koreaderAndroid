@@ -74,6 +74,8 @@ class SpeechCoordinator(
     private var pcmPendingBytes = 0L
     private val pendingBytes = HashMap<Int, Long>()
     private val inFlightSegments = java.util.concurrent.atomic.AtomicInteger(0)
+    private val playerSignals = Channel<PlayerSignal>(Channel.UNLIMITED)
+    private var startedIndex = -1
 
     /** 当前句序号（Started/seek 设置，不代表完成）。 */
     val currentSegmentIndex: Int get() = currentIndex
@@ -93,7 +95,19 @@ class SpeechCoordinator(
     fun playbackPositionMs(): Long = player.positionMs()
 
     init {
-        player.setCompletionListener { index, generation -> onPlayerCompleted(index, generation) }
+        player.setStartListener { index, generation -> playerSignals.trySend(PlayerSignal(index, generation, true)) }
+        player.setCompletionListener { index, generation -> playerSignals.trySend(PlayerSignal(index, generation, false)) }
+        scope.launch {
+            for (signal in playerSignals) {
+                val finished = mutex.withLock {
+                    if (signal.started) {
+                        handleStarted(signal.index, signal.generation)
+                        null
+                    } else handleCompleted(signal.index, signal.generation)
+                }
+                if (finished != null) onChapterCompleted?.invoke(finished)
+            }
+        }
     }
 
     override suspend fun prepare(config: SpeechEngineConfig): PrepareResult {
@@ -125,6 +139,7 @@ class SpeechCoordinator(
             val restartIndex = maxOf(stateMachine.currentSegmentIndex, stateMachine.lastCompletedSegmentIndex)
             cancelPipelineLocked()
             stateMachine.play(restartIndex)
+            startedIndex = -1
             currentIndex = stateMachine.currentSegmentIndex
             timeline++
             player.begin(timeline)
@@ -167,6 +182,7 @@ class SpeechCoordinator(
             stopLocked()
             synthesizer.release()
             player.release()
+            playerSignals.close()
         }
     }
 
@@ -184,6 +200,7 @@ class SpeechCoordinator(
         chapterTriggered = false
         stateMachine.load(plan)
         stateMachine.play(fromIndex)
+        startedIndex = -1
         currentIndex = stateMachine.currentSegmentIndex
         completedIndex = stateMachine.lastCompletedSegmentIndex
         timeline++
@@ -205,6 +222,8 @@ class SpeechCoordinator(
     }
 
     private suspend fun cancelPipelineLocked() {
+        // 在停止写入前失效旧回调，防止取消中的 write 失败污染新播放。
+        timeline++
         val job = pipeline ?: return
         pipeline = null
         job.cancel()
@@ -323,7 +342,7 @@ class SpeechCoordinator(
                 ready.receiveCatching().getOrNull() ?: break
             }
             if (!isCurrent(token, generation)) break
-            eventFlow.tryEmit(SpeechPlaybackEvent.SegmentStarted(token, item.index))
+            inFlightSegments.incrementAndGet()
             if (!player.enqueue(item.index, item.audio)) {
                 if (isCurrent(token, generation)) {
                     eventFlow.tryEmit(
@@ -332,16 +351,19 @@ class SpeechCoordinator(
                 }
                 break
             }
-            inFlightSegments.incrementAndGet()
             expected = item.index + 1
         }
     }
 
-    private fun onPlayerCompleted(index: Int, generation: Long) {
-        scope.launch {
-            val plan = mutex.withLock { handleCompleted(index, generation) }
-            if (plan != null) onChapterCompleted?.invoke(plan)
-        }
+    private fun handleStarted(index: Int, generation: Long) {
+        if (generation != timeline || index <= startedIndex) return
+        val plan = activePlan ?: return
+        val token = activeToken ?: return
+        if (index !in plan.segments.indices) return
+        startedIndex = index
+        stateMachine.onSegmentStarted(index)
+        currentIndex = index
+        eventFlow.tryEmit(SpeechPlaybackEvent.SegmentStarted(token, index))
     }
 
     private suspend fun handleCompleted(index: Int, generation: Long): SpeechPlan? {
@@ -368,6 +390,8 @@ class SpeechCoordinator(
 
     private fun isCurrent(token: SessionToken, generation: Long): Boolean =
         activeToken == token && timeline == generation
+
+    private data class PlayerSignal(val index: Int, val generation: Long, val started: Boolean)
 
     private data class Ready(val index: Int, val audio: SynthesizedAudio)
 }

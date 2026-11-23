@@ -253,6 +253,32 @@ class SpeechCoordinatorTest {
     }
 
     @Test
+    fun `预生成入队不会提前切换高亮且旧代次开始事件无效`() = runTest {
+        val player = FakePcmPlayer().apply { autoStart = false }
+        val coordinator = SpeechCoordinator(FakeSynthesizer(), player, backgroundScope)
+        val events = recordEvents(coordinator)
+        coordinator.play(planOf(3), 0, tokenA)
+        settle()
+        assertEquals(listOf(0, 1, 2), player.enqueued)
+        assertTrue(events.none { it is SpeechPlaybackEvent.SegmentStarted })
+        player.start(1, player.beginGeneration - 1)
+        settle()
+        assertTrue(events.none { it is SpeechPlaybackEvent.SegmentStarted })
+        player.startNext()
+        settle()
+        assertEquals(listOf(0), events.filterIsInstance<SpeechPlaybackEvent.SegmentStarted>().map { it.index })
+        assertEquals(0, coordinator.currentSegmentIndex)
+        // 播放器确认第一句结束后，第二句仍不能因早已入队而自动高亮。
+        player.completeNext()
+        settle()
+        assertEquals(listOf(0), events.filterIsInstance<SpeechPlaybackEvent.SegmentStarted>().map { it.index })
+        player.startNext()
+        settle()
+        assertEquals(listOf(0, 1), events.filterIsInstance<SpeechPlaybackEvent.SegmentStarted>().map { it.index })
+        assertEquals(1, coordinator.currentSegmentIndex)
+    }
+
+    @Test
     fun `有界预合成最多领先当前句两句`() = runTest {
         val synth = FakeSynthesizer()
         val player = FakePcmPlayer()
