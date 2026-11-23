@@ -19,10 +19,26 @@
 
 ## 构建命令
 
+`app` 有两个 distribution flavor（2026-11-23 起）：
+
+| flavor | applicationId | 显示名 | 用途 |
+| --- | --- | --- | --- |
+| `production` | `com.yuezhou.reader` | 静读 | 正式包，包名与数据保持原样 |
+| `ttsTest` | `com.yuezhou.reader.tts.test` | 静读测试版 | 与正式包并存安装，用于 TTS 改造验证 |
+
 ```bash
-./gradlew assembleDebug
-./gradlew test
-./gradlew lintDebug
+# 正式版
+./gradlew :app:assembleProductionDebug
+./gradlew :app:lintProductionDebug
+
+# 测试版（可与正式版同时安装）
+./gradlew :app:assembleTtsTestDebug
+./gradlew :app:lintTtsTestDebug
 ```
 
- Gradle 由 Wrapper 管理，本机无需全局安装。`gradle/wrapper/gradle-wrapper.jar` 已入库。
+注意：
+
+- AGP 不允许 flavor 名以 `test` 开头（大小写不敏感），因此测试 flavor 命名为 `ttsTest`，任务后缀是 `TtsTest`，不能使用 `assembleTestingDebug`。
+- 本机 shell 无全局 `java`，需指定 Studio JBR：
+  `export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`。
+- Gradle 由 Wrapper 管理，本机无需全局安装。`gradle/wrapper/gradle-wrapper.jar` 已入库。

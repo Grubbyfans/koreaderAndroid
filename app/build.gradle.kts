@@ -23,6 +23,19 @@ android {
         }
     }
 
+    // 安装隔离：ttsTest 使用独立 applicationId，可与正式版并存；production 保持原包名不变。
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("production") {
+            dimension = "distribution"
+        }
+        create("ttsTest") {
+            dimension = "distribution"
+            applicationIdSuffix = ".tts.test"
+            versionNameSuffix = "-tts-test"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
