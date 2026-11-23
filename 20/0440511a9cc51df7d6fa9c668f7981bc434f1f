@@ -1,0 +1,28 @@
+speech/src/test/java/com/yuezhou/reader/speech/SpeechCoordinatorTest.kt
+  s_01ceea952b99e9::t_4f8720b9d47fe0 210-237
+  s_01ceea952b99e9::t_5dd7bcc77ffe9f 209
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/SherpaKokoroSynthesizer.kt
+  s_01ceea952b99e9::t_e44628f73c127d 5,32-35
+core/src/main/java/com/yuezhou/reader/core/speech/KokoroTextNormalizer.kt
+  s_01ceea952b99e9::t_3e8f2a164d43e1 1-40
+core/src/test/java/com/yuezhou/reader/core/speech/KokoroTextNormalizerTest.kt
+  s_01ceea952b99e9::t_8195a811d18756 1-37
+speech/src/main/java/com/yuezhou/reader/speech/SpeechCoordinator.kt
+  s_01ceea952b99e9::t_5687ee5315eb40 4,283-285,289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "200440511a9cc51df7d6fa9c668f7981bc434f1f",
+  "prompts": {},
+  "sessions": {
+    "s_01ceea952b99e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207f5-a95c-7ce0-8172-433da1801be7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
