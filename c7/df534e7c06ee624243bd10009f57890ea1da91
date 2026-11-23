@@ -1,0 +1,21 @@
+"docs/静读 Android：Kokoro 中文小说朗读调优技术方案.md"
+  s_01ceea952b99e9::t_54c8812d2432ce 1-229
+"docs/静读 Android：Kokoro 轻量情绪朗读技术方案.md"
+  s_01ceea952b99e9::t_354e65bc568117 1-455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7df534e7c06ee624243bd10009f57890ea1da91",
+  "prompts": {},
+  "sessions": {
+    "s_01ceea952b99e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207f5-a95c-7ce0-8172-433da1801be7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    }
+  }
+}
