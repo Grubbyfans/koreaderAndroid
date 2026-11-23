@@ -1,5 +1,6 @@
 package com.yuezhou.reader.speech
 
+import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechProgressSink
 import java.io.IOException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,11 +24,14 @@ class SpeechProgressWriterTest {
             chapterIndex: Int,
             segmentIndex: Int,
             charOffset: Int,
+            anchorNodeId: String,
+            plannerVersion: Int,
         ) {
             calls++
             if (calls <= failures) throw IOException("写入失败 $calls")
             saves += SpeechProgressWriter.Progress(
                 bookId, fileGeneration, chapterIndex, segmentIndex, charOffset,
+                anchorNodeId, plannerVersion,
             )
         }
     }
@@ -95,6 +99,22 @@ class SpeechProgressWriterTest {
         runCurrent()
         assertEquals(1, sink.saves.size)
         assertEquals(2, sink.saves.single().segmentIndex)
+    }
+
+    @Test
+    fun `锚点与分段版本随位置一起落库`() = runTest {
+        val sink = RecordingSink()
+        val writer = SpeechProgressWriter(backgroundScope, sink)
+
+        writer.onProgress(
+            "book", "gen", 1, 2, 3,
+            anchorNodeId = "n7", plannerVersion = SpeechPlan.PLANNER_VERSION,
+        )
+        writer.flush()
+
+        val saved = sink.saves.single()
+        assertEquals("n7", saved.anchorNodeId)
+        assertEquals(SpeechPlan.PLANNER_VERSION, saved.plannerVersion)
     }
 
     @Test

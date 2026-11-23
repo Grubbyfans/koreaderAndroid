@@ -27,4 +27,10 @@ object SpeechCommands {
 
     /** 停止并退出前台（服务自毁）。 */
     const val ACTION_STOP_FOREGROUND = "com.yuezhou.reader.speech.action.STOP_FOREGROUND"
+
+    /** 朗读中实时调速（Kokoro 重合成当前句；系统 TTS 应用到后续句）。 */
+    const val ACTION_SET_RATE = "com.yuezhou.reader.speech.action.SET_RATE"
+
+    /** [ACTION_SET_RATE] 携带的语速（float，1.0 为正常）。 */
+    const val EXTRA_RATE = "com.yuezhou.reader.speech.extra.RATE"
 }

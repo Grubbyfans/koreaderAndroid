@@ -55,16 +55,39 @@ data class SpeechSegment(
  * @param fileGeneration 文件代次；同名覆盖后失效，避免旧计划误用。
  * @param chapterIndex 章节序号（0-based）。
  * @param segments 按朗读顺序排列的片段。
+ * @param plannerVersion 分段算法版本；与位置记录不一致时缓存的 segmentIndex 作废。
  */
 data class SpeechPlan(
     val bookId: String,
     val fileGeneration: String,
     val chapterIndex: Int,
     val segments: List<SpeechSegment>,
+    val plannerVersion: Int = PLANNER_VERSION,
 ) {
     /** 片段总数。 */
     val segmentCount: Int get() = segments.size
 
     /** 取指定序号的片段；越界返回 null。 */
     fun segmentAt(index: Int): SpeechSegment? = segments.getOrNull(index)
+
+    /**
+     * 查找包含指定原文锚点的片段序号；找不到返回 -1。
+     *
+     * [offset] 是 [nodeId] 节点内的字符偏移。命中条件是片段内某字符映射到
+     * 同一节点且偏移不小于目标，即「从该锚点开始朗读」的首个片段。
+     */
+    fun findSegmentForAnchor(nodeId: String, offset: Int): Int {
+        if (nodeId.isEmpty()) return -1
+        for ((index, segment) in segments.withIndex()) {
+            for (anchor in segment.charToSource) {
+                if (anchor.nodeId == nodeId && anchor.offset >= offset) return index
+            }
+        }
+        return -1
+    }
+
+    companion object {
+        /** 当前分段算法版本。改动分句规则时应递增，使旧 position 的 segmentIndex 失效。 */
+        const val PLANNER_VERSION = 1
+    }
 }

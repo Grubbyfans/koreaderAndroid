@@ -15,6 +15,8 @@ class RoomSpeechProgressSink(context: Context) : SpeechProgressSink {
         chapterIndex: Int,
         segmentIndex: Int,
         charOffset: Int,
+        anchorNodeId: String,
+        plannerVersion: Int,
     ) {
         SpeechPositionStore.save(
             context = appContext,
@@ -23,6 +25,8 @@ class RoomSpeechProgressSink(context: Context) : SpeechProgressSink {
             chapterIndex = chapterIndex,
             segmentIndex = segmentIndex,
             charOffset = charOffset,
+            anchorNodeId = anchorNodeId,
+            plannerVersion = plannerVersion,
         )
     }
 }

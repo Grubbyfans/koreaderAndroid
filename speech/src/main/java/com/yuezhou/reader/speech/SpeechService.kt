@@ -97,6 +97,10 @@ class SpeechService : Service() {
     private var lastKokoroProgressAt = 0L
     private var lastKokoroPositionMs = -1L
 
+    /** 首声计时起点与是否已记录（诊断用）。 */
+    private var firstSoundStartedAt = 0L
+    private var firstSoundRecorded = false
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     private var mediaSession: MediaSession? = null
@@ -138,6 +142,8 @@ class SpeechService : Service() {
             SpeechCommands.ACTION_PREVIOUS -> handlePrevious()
             SpeechCommands.ACTION_STOP -> handleStop()
             SpeechCommands.ACTION_STOP_FOREGROUND -> handleStop()
+            SpeechCommands.ACTION_SET_RATE ->
+                handleSetRate(intent.getFloatExtra(SpeechCommands.EXTRA_RATE, 0f))
         }
         return START_NOT_STICKY
     }
@@ -176,6 +182,17 @@ class SpeechService : Service() {
         }
     }
 
+    /** 实时调速：Kokoro 重合成当前未完成句；系统 TTS 应用到后续入队句。 */
+    private fun handleSetRate(rate: Float) {
+        if (rate <= 0f) return
+        SpeechDiagnosticsState.update { it.copy(rate = rate) }
+        if (activeEngine == SpeechEngineType.KOKORO) {
+            scope.launch { runCatching { kokoroCoordinator?.setRate(rate) } }
+            return
+        }
+        tts?.applyConfig(rate, SpeechPlanStore.peekConfig().voiceName)
+    }
+
     private suspend fun beginProgressSession() {
         runCatching { progressWriter.flush() }
         progressWriter.reset()
@@ -200,7 +217,18 @@ class SpeechService : Service() {
         engine.listener = createProgressListener()
         acquireWakeLock()
         Log.d(TAG, "D_CHAPTER_START engine=SYSTEM book=${plan.bookId} chapter=${plan.chapterIndex} from=$startSegment")
-        progressWriter.onProgress(plan.bookId, plan.fileGeneration, plan.chapterIndex, startSegment, 0)
+        firstSoundStartedAt = SystemClock.elapsedRealtime()
+        firstSoundRecorded = false
+        SpeechDiagnosticsState.resetSession(
+            engine = "SYSTEM_TTS",
+            rate = SpeechPlanStore.peekConfig().rate,
+        )
+        val startAnchor = plan.segmentAt(startSegment)?.startAnchor
+        progressWriter.onProgress(
+            plan.bookId, plan.fileGeneration, plan.chapterIndex, startSegment, startAnchor?.offset ?: 0,
+            anchorNodeId = startAnchor?.nodeId ?: "",
+            plannerVersion = plan.plannerVersion,
+        )
         speakFrom(engine, startSegment)
         // 预取下一章：末句 onDone 到达时下一章已就绪，跨章切换不再被「拉取耗时 + 回调延迟」卡住
         prefetchNextChapter()
@@ -257,6 +285,7 @@ class SpeechService : Service() {
             "D_ENGINE engine=KOKORO model=$modelId speaker=${config.kokoroSpeakerId} " +
                 "rate=$kokoroSpeed start=$startSegment",
         )
+        val loadStartedAt = SystemClock.elapsedRealtime()
         val synthesizer = try {
             provider.createSynthesizer(modelId, config.kokoroSpeakerId)
         } catch (e: CancellationException) {
@@ -272,6 +301,13 @@ class SpeechService : Service() {
             runCatching { synthesizer.release() }
             return
         }
+        SpeechDiagnosticsState.resetSession(
+            engine = "KOKORO",
+            modelId = modelId,
+            speakerId = config.kokoroSpeakerId,
+            rate = kokoroSpeed,
+            modelLoadMs = SystemClock.elapsedRealtime() - loadStartedAt,
+        )
         val coordinator = SpeechCoordinator(
             synthesizer = synthesizer,
             player = AudioTrackPcmPlayer(),
@@ -297,11 +333,18 @@ class SpeechService : Service() {
         updatePlaybackState(
             if (paused) PlaybackState.STATE_PAUSED else PlaybackState.STATE_BUFFERING,
         )
+        firstSoundStartedAt = SystemClock.elapsedRealtime()
+        firstSoundRecorded = false
         coordinator.play(plan, fromIndex, token)
         lastKokoroEventAt = SystemClock.elapsedRealtime()
         lastKokoroProgressAt = lastKokoroEventAt
         lastKokoroPositionMs = -1L
-        progressWriter.onProgress(plan.bookId, plan.fileGeneration, plan.chapterIndex, fromIndex, 0)
+        val startAnchor = plan.segmentAt(fromIndex)?.startAnchor
+        progressWriter.onProgress(
+            plan.bookId, plan.fileGeneration, plan.chapterIndex, fromIndex, startAnchor?.offset ?: 0,
+            anchorNodeId = startAnchor?.nodeId ?: "",
+            plannerVersion = plan.plannerVersion,
+        )
         if (paused) {
             coordinator.pause()
             stateMachine.pause()
@@ -325,6 +368,10 @@ class SpeechService : Service() {
                     "D_SEG_START index=${event.index} chars=${plan.segmentAt(event.index)?.text?.length}",
                 )
                 stateMachine.onSegmentStarted(event.index)
+                recordFirstSound()
+                SpeechDiagnosticsState.update {
+                    it.copy(healthSummary = kokoroCoordinator?.lastHealthReport?.summary().orEmpty())
+                }
                 val segment = plan.segmentAt(event.index) ?: return
                 SpeechProgressTracker.onProgress(
                     bookId = plan.bookId,
@@ -335,7 +382,9 @@ class SpeechService : Service() {
                     endAnchor = segment.endAnchor,
                 )
                 progressWriter.onProgress(
-                    plan.bookId, plan.fileGeneration, plan.chapterIndex, event.index, 0,
+                    plan.bookId, plan.fileGeneration, plan.chapterIndex, event.index, segment.startAnchor.offset,
+                    anchorNodeId = segment.startAnchor.nodeId,
+                    plannerVersion = plan.plannerVersion,
                 )
                 if (stateMachine.state == SpeechStateMachine.State.PLAYING) {
                     updatePlaybackState(PlaybackState.STATE_PLAYING)
@@ -354,18 +403,26 @@ class SpeechService : Service() {
                     anchor = segment.endAnchor,
                     endAnchor = segment.endAnchor,
                 )
+                // 完成即把游标推进到下一句起点（含稳定锚点），恢复时从下一句继续，
+                // 不因写「已完成句末」而重读；本章末句则保留末句末位锚点。
+                val next = plan.segmentAt(event.index + 1)
                 progressWriter.onProgress(
                     plan.bookId, plan.fileGeneration, plan.chapterIndex,
-                    event.index, segment.text.length,
+                    if (next != null) event.index + 1 else event.index,
+                    if (next != null) next.startAnchor.offset else segment.endAnchor.offset,
+                    anchorNodeId = if (next != null) next.startAnchor.nodeId else segment.endAnchor.nodeId,
+                    plannerVersion = plan.plannerVersion,
                 )
             }
             is SpeechPlaybackEvent.Buffering -> {
+                SpeechDiagnosticsState.update { it.copy(bufferingCount = it.bufferingCount + 1) }
                 if (stateMachine.state == SpeechStateMachine.State.PLAYING) {
                     updatePlaybackState(PlaybackState.STATE_BUFFERING)
                 }
             }
             is SpeechPlaybackEvent.Failed -> {
                 Log.e(TAG, "D_FAILED ${event.reason}")
+                SpeechDiagnosticsState.update { it.copy(lastError = event.reason) }
                 handleStop(event.reason)
             }
         }
@@ -378,7 +435,9 @@ class SpeechService : Service() {
         finished.segmentAt(completedIndex)?.let { segment ->
             progressWriter.onProgress(
                 finished.bookId, finished.fileGeneration, finished.chapterIndex,
-                completedIndex, segment.text.length,
+                completedIndex, segment.endAnchor.offset,
+                anchorNodeId = segment.endAnchor.nodeId,
+                plannerVersion = finished.plannerVersion,
             )
         }
         Log.d(
@@ -649,6 +708,7 @@ class SpeechService : Service() {
     }
 
     private fun handleStop(error: String? = null) {
+        if (error != null) SpeechDiagnosticsState.update { it.copy(lastError = error) }
         if (activeEngine == SpeechEngineType.KOKORO) {
             handleKokoroStop(error)
             return
@@ -691,6 +751,14 @@ class SpeechService : Service() {
             updatePlaybackState(PlaybackState.STATE_ERROR, errorMessage = "TTS 引擎初始化失败")
             null
         }
+    }
+
+    /** 记录从播放指令到首句真正开始发声的延迟（诊断用，每次会话只记一次）。 */
+    private fun recordFirstSound() {
+        if (firstSoundRecorded || firstSoundStartedAt <= 0L) return
+        firstSoundRecorded = true
+        val elapsed = SystemClock.elapsedRealtime() - firstSoundStartedAt
+        SpeechDiagnosticsState.update { it.copy(firstSoundMs = elapsed) }
     }
 
     private fun utteranceIdFor(segmentIndex: Int) = "$sessionId:$segmentIndex"
@@ -751,6 +819,7 @@ class SpeechService : Service() {
         }
 
         private fun confirm(segment: Int, charOffset: Int) {
+            recordFirstSound()
             stateMachine.onProgress(segment, charOffset)
             val plan = stateMachine.plan ?: return
             val currentSegment = plan.segmentAt(segment)
@@ -767,7 +836,10 @@ class SpeechService : Service() {
                 fileGeneration = plan.fileGeneration,
                 chapterIndex = plan.chapterIndex,
                 segmentIndex = segment,
-                charOffset = charOffset,
+                // 有稳定锚点时写节点内偏移，供锚点重映射；否则保留片段内偏移。
+                charOffset = currentSegment?.anchorAt(charOffset)?.offset ?: charOffset,
+                anchorNodeId = currentSegment?.anchorAt(charOffset)?.nodeId ?: "",
+                plannerVersion = plan.plannerVersion,
             )
         }
     }

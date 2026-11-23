@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -50,6 +51,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -87,6 +89,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.yuezhou.reader.reader.EpubImporter
+import com.yuezhou.reader.reader.EpubFileGeneration
 import com.yuezhou.reader.reader.EpubSpeechChapterSource
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.LibraryStore
@@ -101,7 +104,10 @@ import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechTextUnit
 import com.yuezhou.reader.speech.KokoroModel
+import com.yuezhou.reader.speech.KokoroModelInfo
 import com.yuezhou.reader.speech.SpeechConfig
+import com.yuezhou.reader.speech.SpeechDiagnostics
+import com.yuezhou.reader.speech.SpeechDiagnosticsState
 import com.yuezhou.reader.speech.SpeechPlanStore
 import com.yuezhou.reader.speech.SpeechRuntime
 import com.yuezhou.reader.speech.SpeechProgressTracker
@@ -245,6 +251,25 @@ private fun ReaderScreen(
     var syncBusy by remember { mutableStateOf(false) }
     var undoPosition by remember(bookId) { mutableStateOf<Pair<String, Double?>?>(null) }
     var pendingJump by remember { mutableStateOf<Pair<String, kotlinx.coroutines.CompletableDeferred<Boolean>>?>(null) }
+
+    // Kokoro 模型管理（仅测试版装配了引擎提供者时可见/可用）
+    var modelManagerOpen by remember { mutableStateOf(false) }
+    var modelBusy by remember { mutableStateOf(false) }
+    var modelMessage by remember { mutableStateOf<String?>(null) }
+    var modelInfos by remember { mutableStateOf(SpeechRuntime.kokoro?.modelInfos().orEmpty()) }
+    val speechDiagnostics by SpeechDiagnosticsState.snapshot.collectAsStateWithLifecycle()
+    val modelImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            modelBusy = true
+            modelMessage = "正在导入模型…"
+            scope.launch {
+                val result = runCatching { SpeechRuntime.kokoro?.importModel(uri) }.getOrNull()
+                modelInfos = runCatching { SpeechRuntime.kokoro?.modelInfos() }.getOrNull().orEmpty()
+                modelBusy = false
+                modelMessage = result?.message ?: "导入失败：模型管理未装配"
+            }
+        }
+    }
 
     suspend fun flushProgress() {
         saveJob?.cancelAndJoin()
@@ -518,8 +543,13 @@ private fun ReaderScreen(
         }
     }
 
-    // 从章节文本节点构造朗读计划并启动前台朗读服务。
-    fun startSpeech(nodes: List<com.yuezhou.reader.reader.ChapterTextNode>, chapterIndex: Int) {
+    // 从整章文本节点构造朗读计划并启动前台朗读服务。
+    // [nodes] 是本章完整文本（索引稳定）；[startPosition] 定位当前阅读位置对应的首句。
+    fun startSpeech(
+        nodes: List<com.yuezhou.reader.reader.ChapterTextNode>,
+        chapterIndex: Int,
+        startPosition: com.yuezhou.reader.reader.ChapterTextStart?,
+    ) {
         val id = bookId ?: return
         val (fileName, source) = openedSource ?: return
         // 文本节点 → SpeechTextUnit：用 CFI 字符串作为 nodeId（跨章节唯一，映射回原文锚点）
@@ -531,13 +561,20 @@ private fun ReaderScreen(
             status = "本章无可朗读文本"
             return
         }
-        // fileGeneration 暂用空字符串（本地库无代次概念，见方案 §7.2 的 fileGeneration 语义）
+        // 文件代次：同名覆盖后变化，旧的朗读位置与缓存索引随之失效（方案 §7.2 / §10.3）。
+        val fileGeneration = EpubFileGeneration.of(context, fileName, source)
         val plan = SpeechPlan(
             bookId = id,
-            fileGeneration = "",
+            fileGeneration = fileGeneration,
             chapterIndex = chapterIndex,
             segments = segments,
         )
+        // 当前阅读位置 → 包含该字符的片段；无起点或反解失败则从章首开始。
+        val readingPositionSegment = startPosition?.let { start ->
+            nodes.getOrNull(start.nodeIndex ?: -1)?.let { node ->
+                plan.findSegmentForAnchor(node.cfi, start.charOffsetInNode)
+            }
+        } ?: -1
         try {
             // 注入朗读配置（引擎 + 语速 + 音色），服务在开始朗读时应用。
             // 用 latestPrefs（rememberUpdatedState）确保读到最新值，避免闭包捕获旧音色。
@@ -557,13 +594,35 @@ private fun ReaderScreen(
                     kokoroSpeakerId = latestPrefs.kokoroSpeaker,
                 )
             )
-            // 若本机有「本章」的朗读位置记录，从该片段续读（片段级别恢复）。
-            // load 为 suspend，须在协程中读取；读不到则从头开始。
+            // 恢复优先级：稳定原文锚点 → 同代次/同算法的 segmentIndex → 当前阅读位置。
             scope.launch {
                 val restored = runCatching { SpeechPositionStore.load(context, id) }.getOrNull()
-                val resumeFrom = if (restored != null && restored.chapterIndex == chapterIndex) {
-                    restored.segmentIndex.coerceIn(0, segments.lastIndex)
-                } else 0
+                var resumeFrom = -1
+                var message = "已开始朗读"
+                if (restored != null && restored.chapterIndex == chapterIndex) {
+                    val currentGeneration = restored.fileGeneration == fileGeneration
+                    val currentPlanner = restored.plannerVersion == plan.plannerVersion
+                    if (currentGeneration && currentPlanner) {
+                        val byAnchor = if (restored.anchorNodeId.isNotBlank()) {
+                            plan.findSegmentForAnchor(restored.anchorNodeId, restored.charOffset)
+                        } else {
+                            -1
+                        }
+                        resumeFrom = when {
+                            byAnchor >= 0 -> byAnchor
+                            restored.segmentIndex in segments.indices -> restored.segmentIndex
+                            else -> -1
+                        }
+                        if (resumeFrom >= 0) message = "已从上次位置继续朗读"
+                    } else {
+                        // 文件被同名覆盖或分段算法升级：旧游标失效，回到当前阅读位置。
+                        message = "文件已更新，旧朗读位置已失效"
+                    }
+                }
+                if (resumeFrom < 0) {
+                    resumeFrom = readingPositionSegment.coerceAtLeast(0)
+                    if (resumeFrom > 0) message = "已从当前位置开始朗读"
+                }
                 try {
                     SpeechPlanStore.startAndPlay(
                         context, plan,
@@ -571,7 +630,7 @@ private fun ReaderScreen(
                         startSegment = resumeFrom,
                     )
                     speakRequested = true
-                    status = if (resumeFrom > 0) "已从上次位置继续朗读" else "已开始朗读"
+                    status = message
                 } catch (e: Exception) {
                     status = "启动朗读失败：${e.message}"
                 }
@@ -650,7 +709,7 @@ private fun ReaderScreen(
                 if (event.items.isEmpty() || chapterIndex == null) {
                     status = "本章无可朗读文本"
                 } else {
-                    startSpeech(event.items, chapterIndex)
+                    startSpeech(event.items, chapterIndex, event.startPosition)
                 }
             }
             is ReaderEvent.Error -> {
@@ -866,7 +925,7 @@ private fun ReaderScreen(
                 enter = fadeIn(tween(200)),
                 exit = fadeOut(tween(180)),
             ) {
-                val kokoroModels = remember { SpeechRuntime.kokoro?.availableModels().orEmpty() }
+                val kokoroModels = remember(modelInfos) { SpeechRuntime.kokoro?.availableModels().orEmpty() }
                 ReaderPanel(
                     title = title,
                     fraction = currentFraction,
@@ -886,8 +945,13 @@ private fun ReaderScreen(
                             p.speechEngine != readerPrefs.speechEngine ||
                             p.kokoroModel != readerPrefs.kokoroModel ||
                             p.kokoroSpeaker != readerPrefs.kokoroSpeaker
+                        val rateChanged = p.speechRate != readerPrefs.speechRate
                         scope.launch {
                             ReaderSettings.save(context, p)
+                            // 语速实时生效（Kokoro 重合成当前句，系统 TTS 应用到后续句），不打断队列。
+                            if (rateChanged && speaking) {
+                                SpeechPlanStore.setRate(context, p.speechRate)
+                            }
                             // 引擎/音色变更且正在朗读：保存完成、等 DataStore flow 传播到 latestPrefs 后
                             // 再重启朗读，确保 startSpeech 读到新配置。
                             if (speechConfigChanged && speaking) {
@@ -900,6 +964,11 @@ private fun ReaderScreen(
                         }
                     },
                     onSync = { openSyncDialog() },
+                    onManageModels = {
+                        modelManagerOpen = true
+                        modelMessage = null
+                        modelInfos = SpeechRuntime.kokoro?.modelInfos().orEmpty()
+                    },
                     onSpeak = {
                         if (speaking) {
                             // 朗读中 → 停止
@@ -928,7 +997,133 @@ private fun ReaderScreen(
                 onDismiss = { syncDialogOpen = false },
             )
         }
+
+        // Kokoro 模型管理（方案 §8.2 / §11：导入、详情、试音、切换、删除）
+        if (modelManagerOpen) {
+            KokoroModelManagerDialog(
+                models = modelInfos,
+                diagnostics = speechDiagnostics,
+                busy = modelBusy,
+                message = modelMessage,
+                onImport = { modelImportLauncher.launch(arrayOf("*/*")) },
+                onAudition = { info ->
+                    modelBusy = true
+                    modelMessage = "正在试音 ${info.id}…"
+                    scope.launch {
+                        val error = runCatching {
+                            SpeechRuntime.kokoro?.auditionModel(
+                                info.id,
+                                latestPrefs.kokoroSpeaker,
+                                "你好，这是 ${info.id} 模型的试音。",
+                            )
+                        }.getOrNull()
+                        modelBusy = false
+                        modelMessage = error ?: "${info.id} 试音完成"
+                    }
+                },
+                onDelete = { info ->
+                    modelBusy = true
+                    modelMessage = "正在删除 ${info.id}…"
+                    scope.launch {
+                        val deleted = runCatching { SpeechRuntime.kokoro?.deleteModel(info.id) }.getOrNull() == true
+                        modelInfos = runCatching { SpeechRuntime.kokoro?.modelInfos() }.getOrNull().orEmpty()
+                        modelBusy = false
+                        modelMessage = if (deleted) "已删除 ${info.id}" else "删除失败：模型可能正在使用"
+                        if (deleted && readerPrefs.kokoroModel == info.id) {
+                            ReaderSettings.save(context, readerPrefs.copy(kokoroModel = ""))
+                        }
+                    }
+                },
+                onDismiss = {
+                    if (!modelBusy) {
+                        modelManagerOpen = false
+                        modelMessage = null
+                    }
+                },
+            )
+        }
     }
+}
+
+/** Kokoro 模型管理对话框：导入 ZIP/tar.bz2、查看版本/精度/体积/哈希、试音与删除。 */
+@Composable
+private fun KokoroModelManagerDialog(
+    models: List<KokoroModelInfo>,
+    diagnostics: SpeechDiagnostics,
+    busy: Boolean,
+    message: String?,
+    onImport: () -> Unit,
+    onAudition: (KokoroModelInfo) -> Unit,
+    onDelete: (KokoroModelInfo) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Kokoro 模型管理") },
+        text = {
+            Column {
+                if (models.isEmpty()) {
+                    Text("未部署可用模型。请导入 ZIP 或 tar.bz2 模型包。", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    models.forEach { info ->
+                        Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                            Text(info.label, style = MaterialTheme.typography.titleSmall)
+                            val meta = buildList {
+                                if (info.version.isNotBlank()) add(info.version)
+                                if (info.precision.isNotBlank()) add(info.precision)
+                                add(formatSize(info.sizeBytes))
+                                if (info.sha256.isNotBlank()) add("sha256 ${info.sha256.take(12)}…")
+                            }.joinToString(" · ")
+                            Text(meta, style = MaterialTheme.typography.bodySmall)
+                            Row {
+                                TextButton(onClick = { onAudition(info) }, enabled = !busy) { Text("试音") }
+                                TextButton(onClick = { onDelete(info) }, enabled = !busy) { Text("删除") }
+                            }
+                        }
+                    }
+                }
+                if (message != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(message, style = MaterialTheme.typography.bodySmall)
+                }
+                if (diagnostics.engine.isNotBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                    Text("朗读诊断", style = MaterialTheme.typography.titleSmall)
+                    val line = buildList {
+                        add(diagnostics.engine)
+                        if (diagnostics.modelId.isNotBlank()) add(diagnostics.modelId)
+                        add("sid=${diagnostics.speakerId}")
+                        add("rate=${diagnostics.rate}")
+                        if (diagnostics.modelLoadMs >= 0) add("加载=${diagnostics.modelLoadMs}ms")
+                        if (diagnostics.firstSoundMs >= 0) add("首声=${diagnostics.firstSoundMs}ms")
+                        add("缓冲=${diagnostics.bufferingCount}")
+                    }.joinToString(" · ")
+                    Text(line, style = MaterialTheme.typography.bodySmall)
+                    if (diagnostics.healthSummary.isNotBlank()) {
+                        Text("音频：${diagnostics.healthSummary}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (diagnostics.lastError.isNotBlank()) {
+                        Text("最近错误：${diagnostics.lastError}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onImport, enabled = !busy) { Text("导入模型") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
+        },
+    )
+}
+
+private fun formatSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> String.format("%.1f GiB", bytes / 1024.0 / 1024 / 1024)
+    bytes >= 1024L * 1024 -> String.format("%.0f MiB", bytes / 1024.0 / 1024)
+    bytes >= 1024L -> String.format("%.0f KiB", bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 /** 进度同步对话框：展示后端、本机/云端进度、设备与时间，提供上传/应用两步操作。 */
@@ -1049,6 +1244,7 @@ private fun ReaderPanel(
     onFractionSeek: (Float) -> Unit,
     onPrefsChange: (ReaderPreferences) -> Unit,
     onSync: () -> Unit,
+    onManageModels: () -> Unit,
     onSpeak: () -> Unit,
 ) {
     // 设置区折叠状态
@@ -1171,6 +1367,7 @@ private fun ReaderPanel(
                             voices = voices,
                             kokoroModels = kokoroModels,
                             onPrefsChange = onPrefsChange,
+                            onManageModels = onManageModels,
                         )
                     }
                 }
@@ -1191,6 +1388,7 @@ private fun SettingsControls(
     voices: List<TtsVoice>,
     kokoroModels: List<KokoroModel>,
     onPrefsChange: (ReaderPreferences) -> Unit,
+    onManageModels: () -> Unit,
 ) {
     // 拖动中的本地预览值；null 表示未拖动（跟随真实 prefs），松手才提交，避免连续写 DataStore + 重排全文
     var fontSizePreview by remember { mutableStateOf<Int?>(null) }
@@ -1372,6 +1570,11 @@ private fun SettingsControls(
                 }
                 KokoroSpeakerPreference(prefs.kokoroSpeaker) { id ->
                     onPrefsChange(prefs.copy(kokoroSpeaker = id))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("模型管理", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(12.dp))
+                    TextButton(onClick = onManageModels) { Text("导入 / 试音 / 删除") }
                 }
             }
         }

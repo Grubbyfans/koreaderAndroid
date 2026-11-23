@@ -85,6 +85,19 @@ object SpeechPlanStore {
         }
     }
 
+    /** 朗读中实时调速；服务不在运行时安静忽略。 */
+    fun setRate(context: Context, rate: Float) {
+        if (rate <= 0f) return
+        currentConfig = currentConfig.copy(rate = rate)
+        runCatching {
+            context.startService(
+                Intent(context, SpeechService::class.java)
+                    .setAction(SpeechCommands.ACTION_SET_RATE)
+                    .putExtra(SpeechCommands.EXTRA_RATE, rate)
+            )
+        }
+    }
+
     /** 停止朗读并退出前台。 */
     fun stop(context: Context) {
         clear()

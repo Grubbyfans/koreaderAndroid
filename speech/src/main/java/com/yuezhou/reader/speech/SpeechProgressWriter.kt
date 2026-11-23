@@ -30,6 +30,8 @@ class SpeechProgressWriter(
         val chapterIndex: Int,
         val segmentIndex: Int,
         val charOffset: Int,
+        val anchorNodeId: String = "",
+        val plannerVersion: Int = 0,
     )
 
     private val lock = Any()
@@ -43,8 +45,13 @@ class SpeechProgressWriter(
         chapterIndex: Int,
         segmentIndex: Int,
         charOffset: Int,
+        anchorNodeId: String = "",
+        plannerVersion: Int = 0,
     ) {
-        val progress = Progress(bookId, fileGeneration, chapterIndex, segmentIndex, charOffset)
+        val progress = Progress(
+            bookId, fileGeneration, chapterIndex, segmentIndex, charOffset,
+            anchorNodeId, plannerVersion,
+        )
         synchronized(lock) {
             pending = progress
             job?.cancel()
@@ -94,6 +101,8 @@ class SpeechProgressWriter(
                 chapterIndex = progress.chapterIndex,
                 segmentIndex = progress.segmentIndex,
                 charOffset = progress.charOffset,
+                anchorNodeId = progress.anchorNodeId,
+                plannerVersion = progress.plannerVersion,
             )
         } catch (e: CancellationException) {
             throw e

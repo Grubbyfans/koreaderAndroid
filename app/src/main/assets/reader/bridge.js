@@ -180,16 +180,15 @@ window.__reader = {
         currentBook = null
     },
 
-    // 提取当前章节正文文本：返回 [{ cfi, text }] 列表，供朗读（TTS）分句使用。
-    // 按文档序遍历文本节点，跳过 script/style/隐藏装饰与导航文本；
-    // 每个文本节点生成其起始位置的 CFI，作为朗读偏移 → 原文位置的锚点。
-    // startCfi 非空时，只返回「该位置及其之后」的文本（从该节点内偏移处截断），
-    // 使朗读从用户当前阅读位置开始，而非本章开头。
+    // 提取当前章节正文文本：返回整章 [{ cfi, text }] 列表 + startPosition，
+    // 供朗读（TTS）分句使用。整章文本保证片段索引跨次稳定；startPosition
+    // 记录当前阅读位置（起点 CFI、节点序号、节点内字符偏移），由 Kotlin 侧
+    // 经 charToSource 映射到「包含该字符的片段」，不从节点开头重读。
     getCurrentChapterText(startCfi) {
         try {
             const contents = view.renderer?.getContents?.()
             if (!Array.isArray(contents) || contents.length === 0) {
-                post('chapterText', { items: [] })
+                post('chapterText', { items: [], startPosition: null })
                 return false
             }
             const visibleIndex = view.lastLocation?.section?.current
@@ -212,37 +211,46 @@ window.__reader = {
             }
 
             const items = []
+            let startNodeIndex = -1
+            let startCharOffsetInNode = 0
             const walker = doc.createTreeWalker(doc.body || doc.documentElement, NodeFilter.SHOW_TEXT)
             let node
-            let started = !startNode // 无起点则从头开始
             while ((node = walker.nextNode())) {
                 const text = node.nodeValue
                 if (!text || !text.trim()) continue
                 const parent = node.parentElement
                 if (!parent || isNonReadable(parent)) continue
 
-                // 起点之前：跳过；起点所在节点：从 startOffset 处截断并标记 started
-                if (!started) {
-                    if (node === startNode) {
-                        started = true
-                        const tail = text.substring(startOffset)
-                        if (tail.trim()) {
-                            const cfi = getTextNodeCfi(index, node, doc, startOffset)
-                            if (cfi) items.push({ cfi, text: tail.replace(/\u00a0/g, ' ') })
-                        }
-                        continue
-                    }
-                    // 起点节点可能被 TreeWalker 略过（如起点在非文本节点），
-                    // 用位置比较判断是否已越过起点。
-                    if (isBeforeStart(node, startNode)) continue
-                    started = true
-                }
-
                 const cfi = getTextNodeCfi(index, node, doc)
                 if (!cfi) continue
+
+                // 定位起点所在的整章文本节点：优先同一文本节点，否则取其后首个可读节点。
+                if (startNode && startNodeIndex < 0) {
+                    if (node === startNode) {
+                        startNodeIndex = items.length
+                        startCharOffsetInNode = Math.min(startOffset, text.length)
+                    } else if (!isBeforeStart(node, startNode)) {
+                        startNodeIndex = items.length
+                        startCharOffsetInNode = 0
+                    }
+                }
+
                 items.push({ cfi, text: text.replace(/\u00a0/g, ' ') })
             }
-            post('chapterText', { items, index })
+
+            let startPosition = null
+            if (items.length > 0) {
+                if (!startCfi) {
+                    startPosition = { startCfi: null, nodeIndex: 0, charOffsetInNode: 0 }
+                } else if (startNodeIndex >= 0) {
+                    startPosition = {
+                        startCfi,
+                        nodeIndex: startNodeIndex,
+                        charOffsetInNode: startCharOffsetInNode,
+                    }
+                }
+            }
+            post('chapterText', { items, index, startPosition })
             return true
         } catch (e) {
             post('error', { message: String(e?.message ?? e) })

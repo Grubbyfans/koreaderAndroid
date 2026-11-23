@@ -17,8 +17,16 @@ sealed interface ReaderEvent {
     ) : ReaderEvent
     /** 目录（TOC）已就绪，携带目录树。 */
     data class TocLoaded(val items: List<TocItem>) : ReaderEvent
-    /** 当前章节正文文本已提取（朗读用），携带 { cfi, text } 列表。 */
-    data class ChapterText(val items: List<ChapterTextNode>, val index: Int?) : ReaderEvent
+    /**
+     * 当前章节正文文本已提取（朗读用）：整章 { cfi, text } 列表 + 阅读起点。
+     *
+     * [startPosition] 为空表示无法定位起点，朗读应从章首开始。
+     */
+    data class ChapterText(
+        val items: List<ChapterTextNode>,
+        val index: Int?,
+        val startPosition: ChapterTextStart? = null,
+    ) : ReaderEvent
     /** 错误。 */
     data class Error(val message: String) : ReaderEvent
 }
@@ -27,6 +35,19 @@ sealed interface ReaderEvent {
 data class ChapterTextNode(
     val cfi: String,
     val text: String,
+)
+
+/**
+ * 当前阅读位置在整章文本中的定位。
+ *
+ * @param startCfi 原始阅读位置 CFI（可为空：表示从章首开始）。
+ * @param nodeIndex 该位置所在文本节点在整章 items 中的序号；-1 表示未定位到。
+ * @param charOffsetInNode 节点内字符偏移。
+ */
+data class ChapterTextStart(
+    val startCfi: String?,
+    val nodeIndex: Int?,
+    val charOffsetInNode: Int,
 )
 
 /** 目录项（对应 foliate-js book.toc 的层级结构）。 */

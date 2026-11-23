@@ -451,7 +451,11 @@ class ReaderWebView(context: Context) : WebView(context) {
             }
             "chapterText" -> {
                 val obj = parseJson(data)
-                ReaderEvent.ChapterText(parseChapterText(obj["items"]), (obj["index"] as? Number)?.toInt())
+                ReaderEvent.ChapterText(
+                    parseChapterText(obj["items"]),
+                    (obj["index"] as? Number)?.toInt(),
+                    parseChapterStart(obj["startPosition"]),
+                )
             }
             "error" -> {
                 val obj = parseJson(data)
@@ -501,6 +505,18 @@ class ReaderWebView(context: Context) : WebView(context) {
         // 用 org.json 的 quote 正确处理引号、反斜杠、控制字符与 U+2028/U+2029，
         // 避免手写转义遗漏导致注入到 JS 字符串字面量时出错。
         org.json.JSONObject.quote(s)
+
+    /** 解析朗读起点 {startCfi, nodeIndex, charOffsetInNode}；缺失或非法返回 null。 */
+    private fun parseChapterStart(value: Any?): ChapterTextStart? {
+        val obj = value as? org.json.JSONObject ?: return null
+        val nodeIndex = (obj.opt("nodeIndex") as? Number)?.toInt()?.takeIf { it >= 0 }
+        if (nodeIndex == null) return null
+        return ChapterTextStart(
+            startCfi = obj.optString("startCfi").takeIf { it.isNotBlank() },
+            nodeIndex = nodeIndex,
+            charOffsetInNode = (obj.opt("charOffsetInNode") as? Number)?.toInt()?.coerceAtLeast(0) ?: 0,
+        )
+    }
 
     /** 解析章节文本节点列表 [{cfi, text}]。 */
     private fun parseChapterText(items: Any?): List<ChapterTextNode> {

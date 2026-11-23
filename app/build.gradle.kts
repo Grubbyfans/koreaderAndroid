@@ -64,6 +64,8 @@ dependencies {
 
     // 阶段 B 试音：仅测试版打包 sherpa-onnx 运行时，正式版不含该依赖
     add("ttsTestImplementation", files("${rootProject.projectDir}/speech/libs/sherpa-onnx-1.13.4.aar"))
+    // 阶段 E：测试版模型导入支持 ZIP / tar.bz2（正式版不含模型管理）
+    add("ttsTestImplementation", "org.apache.commons:commons-compress:1.27.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)

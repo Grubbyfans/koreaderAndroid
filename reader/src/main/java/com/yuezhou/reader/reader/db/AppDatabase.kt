@@ -24,7 +24,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SpeechPositionEntity::class,
         SyncLogEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -85,6 +85,14 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 阶段 E：朗读位置增加稳定锚点与分段算法版本（方案 §7.1 / §10.1）。 */
+        private val addSpeechAnchor = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE speech_position ADD COLUMN anchorNodeId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE speech_position ADD COLUMN plannerVersion INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -94,7 +102,8 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yuezhou_reader.db",
-                ).addMigrations(isolatePublications, addSpeechPosition, addSyncLog).build().also { instance = it }
+                ).addMigrations(isolatePublications, addSpeechPosition, addSyncLog, addSpeechAnchor)
+                    .build().also { instance = it }
             }
     }
 }

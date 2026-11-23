@@ -27,6 +27,8 @@ object SpeechPositionStore {
         chapterIndex: Int,
         segmentIndex: Int,
         charOffset: Int,
+        anchorNodeId: String = "",
+        plannerVersion: Int = 0,
     ) {
         dao(context).upsert(
             SpeechPositionEntity(
@@ -36,6 +38,8 @@ object SpeechPositionStore {
                 segmentIndex = segmentIndex,
                 charOffset = charOffset,
                 savedAt = System.currentTimeMillis(),
+                anchorNodeId = anchorNodeId,
+                plannerVersion = plannerVersion,
             )
         )
     }
