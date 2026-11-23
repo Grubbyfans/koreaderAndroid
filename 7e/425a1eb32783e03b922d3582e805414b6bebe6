@@ -1,0 +1,36 @@
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  s_01ceea952b99e9::t_faf63946a6bad8 54,1405,1636-1637
+core/src/main/java/com/yuezhou/reader/core/speech/KokoroMemoryPolicy.kt
+  s_01ceea952b99e9::t_f25d68a9d0fe44 13-14
+speech/src/main/java/com/yuezhou/reader/speech/SpeechRuntime.kt
+  s_01ceea952b99e9::t_f25d68a9d0fe44 4-5,89-102
+  s_01ceea952b99e9::t_2c81074935db41 103
+core/src/main/java/com/yuezhou/reader/core/speech/ModelImportSafety.kt
+  s_01ceea952b99e9::t_f25d68a9d0fe44 1-51
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/KokoroModelImporter.kt
+  s_01ceea952b99e9::t_faf63946a6bad8 3,6,8-12,14,18,22,24-26,31,34,36-37,41-43,45-85,87-88,97,104-105,109-130,132-145,150-152,154-158,160-161,163-164,169-171,173-177,179,182-183,190-193,195-196,199,201-204,206,209-243,245-263,270,272-275,278-279,281-285,287-292
+  s_01ceea952b99e9::t_fabcec890ae2ed 162,181,188
+app/src/main/java/com/yuezhou/reader/KokoroModelManagerDialog.kt
+  s_01ceea952b99e9::t_faf63946a6bad8 7-9,14,21,30,41-50,52-55
+  s_01ceea952b99e9::t_e505595243ffc3 51
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/SherpaKokoroProvider.kt
+  s_01ceea952b99e9::t_f25d68a9d0fe44 83-88,90-93
+core/src/test/java/com/yuezhou/reader/core/speech/ModelImportSafetyTest.kt
+  s_01ceea952b99e9::t_44e35c6c5dd434 1-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7e425a1eb32783e03b922d3582e805414b6bebe6",
+  "prompts": {},
+  "sessions": {
+    "s_01ceea952b99e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207f5-a95c-7ce0-8172-433da1801be7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
