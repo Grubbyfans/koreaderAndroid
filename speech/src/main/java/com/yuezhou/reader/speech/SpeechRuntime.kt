@@ -1,6 +1,8 @@
 package com.yuezhou.reader.speech
 
 import android.net.Uri
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.yuezhou.reader.core.speech.SpeechProgressSink
 import com.yuezhou.reader.core.speech.SpeechSynthesizer
 
@@ -83,4 +85,19 @@ interface KokoroEngineProvider {
     /** 试音；成功返回 null，失败返回错误说明。 */
     suspend fun auditionModel(modelId: String, speakerId: Int, text: String): String? =
         "当前版本不支持试音"
+}
+
+/** 导入进度在进程内共享；界面重建后仍能显示，百分比只针对当前可测量的阶段。 */
+data class KokoroImportProgress(
+    val stage: String,
+    val fraction: Float? = null,
+    val processedBytes: Long = 0,
+    val totalBytes: Long? = null,
+    val running: Boolean = true,
+)
+
+object KokoroImportState {
+    private val mutable = MutableStateFlow<KokoroImportProgress?>(null)
+    val progress = mutable.asStateFlow()
+    fun update(progress: KokoroImportProgress) { mutable.value = progress }
 }

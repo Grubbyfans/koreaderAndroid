@@ -10,6 +10,8 @@ class KokoroMemoryException(message: String) : IllegalStateException(message)
 class KokoroModelSlot {
     private val mutex = Mutex()
 
+    fun tryAcquire(): Lease? = if (mutex.tryLock()) Lease { mutex.unlock() } else null
+
     suspend fun acquire(timeoutMs: Long = 15_000): Lease {
         var acquired = false
         try {

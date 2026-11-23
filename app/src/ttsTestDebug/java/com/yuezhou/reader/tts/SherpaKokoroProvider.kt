@@ -80,14 +80,17 @@ internal class SherpaKokoroProvider(private val context: Context) : KokoroEngine
         }
     }
 
-    override suspend fun importModel(uri: Uri): KokoroImportResult =
-        KokoroModelImporter.import(context, uri)
+    override suspend fun importModel(uri: Uri): KokoroImportResult {
+        // 导入、试合成与替换目录共用模型租约，消除正在使用时覆盖文件的竞态。
+        val lease = modelSlot.tryAcquire()
+            ?: return KokoroImportResult(false, message = "请先停止朗读或试音，等待模型释放后再导入")
+        return try { KokoroModelImporter.import(context, uri) } finally { lease.release() }
+    }
 
-    override suspend fun deleteModel(modelId: String): Boolean = withContext(Dispatchers.IO) {
-        synchronized(activeModels) {
-            if ((activeModels[modelId] ?: 0) > 0) return@withContext false
-        }
-        KokoroModelImporter.delete(filesDir, modelId)
+    override suspend fun deleteModel(modelId: String): Boolean {
+        val lease = modelSlot.tryAcquire() ?: return false
+        return try { withContext(Dispatchers.IO) { KokoroModelImporter.delete(filesDir, modelId) } }
+        finally { lease.release() }
     }
 
     override suspend fun auditionModel(modelId: String, speakerId: Int, text: String): String? =

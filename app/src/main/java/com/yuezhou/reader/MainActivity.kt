@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import com.yuezhou.reader.reader.db.SyncLogEntity
 import com.yuezhou.reader.speech.SpeechDiagnosticsState
+import com.yuezhou.reader.speech.KokoroImportState
 import com.yuezhou.reader.speech.SpeechRuntime
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.DropdownMenu
@@ -1401,6 +1402,7 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
     var modelInfos by remember { mutableStateOf(SpeechRuntime.kokoro?.modelInfos().orEmpty()) }
     var modelManagerOpen by rememberSaveable { mutableStateOf(false) }
     val speechDiagnostics by SpeechDiagnosticsState.snapshot.collectAsStateWithLifecycle()
+    val importProgress by KokoroImportState.progress.collectAsStateWithLifecycle()
     val modelImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             modelBusy = true
@@ -1631,7 +1633,8 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             KokoroModelManagerDialog(
                 models = modelInfos,
                 diagnostics = speechDiagnostics,
-                busy = modelBusy,
+                busy = modelBusy || importProgress?.running == true,
+                progress = importProgress,
                 message = modelMessage,
                 onImport = { modelImportLauncher.launch(arrayOf("*/*")) },
                 onAudition = { info ->

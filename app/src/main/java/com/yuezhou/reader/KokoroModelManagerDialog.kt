@@ -4,16 +4,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.speech.KokoroModelInfo
+import com.yuezhou.reader.speech.KokoroImportProgress
 import com.yuezhou.reader.speech.SpeechDiagnostics
 
 /** Kokoro 模型管理对话框：导入 ZIP/tar.bz2、查看版本/精度/体积/哈希、试音与删除。 */
@@ -22,6 +27,7 @@ internal fun KokoroModelManagerDialog(
     models: List<KokoroModelInfo>,
     diagnostics: SpeechDiagnostics,
     busy: Boolean,
+    progress: KokoroImportProgress?,
     message: String?,
     onImport: () -> Unit,
     onAudition: (KokoroModelInfo) -> Unit,
@@ -32,7 +38,21 @@ internal fun KokoroModelManagerDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("Kokoro 模型管理") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (progress?.running == true) {
+                    Text(progress.stage, style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(8.dp))
+                    val fraction = progress.fraction
+                    if (fraction == null) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    else LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                    val detail = buildList {
+                        if (fraction != null) add("${(fraction * 100).toInt()}%")
+                        if (progress.processedBytes > 0) add("已处理 ${formatSize(progress.processedBytes)}")
+                        progress.totalBytes?.let { add("共 ${formatSize(it)}") }
+                    }.joinToString(" · ")
+                    if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(12.dp))
+                }
                 if (models.isEmpty()) {
                     Text("未部署可用模型。请导入 ZIP 或 tar.bz2 模型包。", style = MaterialTheme.typography.bodyMedium)
                 } else {
