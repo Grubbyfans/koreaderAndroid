@@ -500,9 +500,10 @@ private fun ReaderScreen(
             speaking = snap != null
             // 朗读停止时同步清空「朗读请求中」标记
             if (snap == null) speakRequested = false
+            if (snap == null || snap.bookId != bookId) webView?.clearSpeechHighlight()
             // 已确认朗读点 → 回写高亮到 WebView（起止锚点形成整句高亮）
             val anchor = snap?.sourceAnchor
-            if (snap != null && snap.bookId == bookId && anchor?.nodeId?.startsWith("epubcfi(") == true) {
+            if (snap != null && snap.bookId == bookId && anchor != null && (anchor.nodeId.startsWith("epubcfi(") || anchor.nodeId.matches(Regex("\\d+:\\d+")))) {
                 val end = snap.endAnchor
                 webView?.highlight(
                     anchor.nodeId,

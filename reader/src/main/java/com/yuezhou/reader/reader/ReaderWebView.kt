@@ -319,6 +319,10 @@ class ReaderWebView(context: Context) : WebView(context) {
         )
     }
 
+    fun clearSpeechHighlight() = whenReaderReady {
+        evaluateJavascript("window.__reader.clearSpeechHighlight();", null)
+    }
+
     /** 跳转到目录项（href 指向章节）。 */
     fun goToToc(href: String) = whenReaderReady {
         evaluateJavascript("window.__reader.goToToc(${jsonQuote(href)}).then(r => {});", null)

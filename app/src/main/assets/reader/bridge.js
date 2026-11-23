@@ -4,9 +4,16 @@
 
 import './view.js'
 import { Overlayer } from './overlayer.js'
+import { SpeechHighlight } from './speech-highlight.js'
 import * as XPointer from './xpointer.js'
 
 const view = document.getElementById('view')
+const speechHighlight = new SpeechHighlight(view, Overlayer.highlight)
+function redrawSpeechHighlight() {
+    requestAnimationFrame(() => {
+        try { speechHighlight.render(false) } catch (_) { /* Range unavailable while chapter loads. */ }
+    })
+}
 
 // 当前打开的书籍对象（实现 foliate-js 的 book 接口）
 let currentBook = null
@@ -28,6 +35,7 @@ window.__reader = {
     // 打开 EPUB：epubUrl 为 Android 侧提供的可访问 URL；restoreCfi 为可选的恢复位置
     async openBook(epubUrl, restoreCfi, settings) {
         try {
+            speechHighlight.clear()
             await view.open(epubUrl)
             currentBook = view.book
             Object.assign(currentSettings, settings)
@@ -118,52 +126,10 @@ window.__reader = {
     // startCfi/endCfi 为文本节点级 CFI，startOffset/endOffset 为各自节点内的字符偏移（0-based）。
     // 高亮块用固定 key（__tts_highlight__），下次调用自动覆盖旧块，实现「跟随朗读进度移动」。
     async highlightRange(startCfi, startOffset, endCfi, endOffset) {
-        try {
-            const contents = view.renderer?.getContents?.()
-            if (!Array.isArray(contents) || contents.length === 0) return false
-            const startResolved = view.resolveCFI?.(startCfi)
-            if (!startResolved) return false
-            const { index, anchor } = startResolved
-            const item = contents.find(c => c.index === index)
-            const { doc, overlayer } = item || {}
-            if (!doc || typeof anchor !== 'function') return false
-            const range = anchor(doc)
-            if (!range) return false
-            // 起点：startContainer 前进 startOffset 个字符
-            const startNode = range.startContainer
-            const startBase = range.startOffset || 0
-            if (startNode) {
-                const s = Math.min(startBase + (startOffset || 0), startNode.textContent?.length ?? startBase)
-                range.setStart(startNode, s)
-            }
-            // 终点：优先用 endCfi 反解到同一 doc 的文本节点 + endOffset；失败则退化为「起点后延到句尾」。
-            if (endCfi) {
-                const endResolved = view.resolveCFI?.(endCfi)
-                if (endResolved && endResolved.index === index && typeof endResolved.anchor === 'function') {
-                    const endRange = endResolved.anchor(doc)
-                    if (endRange && endRange.startContainer) {
-                        const endNode = endRange.startContainer
-                        const e = Math.min((endRange.startOffset || 0) + (endOffset || 0),
-                            endNode.textContent?.length ?? (endRange.startOffset || 0))
-                        try {
-                            range.setEnd(endNode, e)
-                        } catch (_) { /* 终点越界时保留原 range 终点 */ }
-                    }
-                }
-            }
-            // 用 overlayer 画高亮块（固定 key 覆盖旧块）；没有 overlayer 时退化为滚动到起点。
-            if (overlayer && typeof overlayer.add === 'function') {
-                overlayer.add('__tts_highlight__', range, Overlayer.highlight,
-                    { color: 'rgba(7, 193, 96, 0.28)' })
-            } else {
-                await view.renderer?.scrollToAnchor?.(range, true)
-            }
-            return true
-        } catch (e) {
-            post('error', { message: String(e?.message ?? e) })
-            return false
-        }
+        try { return await speechHighlight.set(startCfi, startOffset, endCfi, endOffset) }
+        catch (e) { post('error', { message: String(e?.message ?? e) }); return false }
     },
+    clearSpeechHighlight() { speechHighlight.clear() },
 
     async cfiToXPointer(requestId, cfi) {
         const value = await XPointer.cfiToXPointer(view, cfi)
@@ -177,6 +143,7 @@ window.__reader = {
 
     // 关闭当前书
     closeBook() {
+        speechHighlight.clear()
         currentBook = null
     },
 
@@ -462,6 +429,7 @@ function injectStyle(doc, css) {
 
 // Save the start of the visible page, independent of its trailing boundary.
 view.addEventListener('relocate', ({ detail }) => {
+    redrawSpeechHighlight()
     const { cfi, section, fraction, range, tocItem } = detail
     const index = section?.current ?? null
     let pageStart = cfi
@@ -484,7 +452,10 @@ view.addEventListener('relocate', ({ detail }) => {
 // Apply the same preferences before the first pagination of each chapter.
 view.addEventListener('load', ({ detail }) => {
     if (detail?.doc) injectStyle(detail.doc, textStyle())
+    redrawSpeechHighlight()
 })
+
+view.addEventListener('create-overlay', redrawSpeechHighlight)
 
 // 判断元素是否为不可朗读内容：脚本/样式/隐藏装饰/导航
 function isNonReadable(el) {
