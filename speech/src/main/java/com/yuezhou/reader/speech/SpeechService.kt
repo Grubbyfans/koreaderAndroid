@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.ComponentCallbacks2
 import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -22,6 +23,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.yuezhou.reader.core.speech.SessionToken
+import com.yuezhou.reader.core.speech.KokoroMemoryException
 import com.yuezhou.reader.core.speech.SpeechEngineConfig
 import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlaybackEvent
@@ -301,6 +303,12 @@ class SpeechService : Service() {
         } catch (e: CancellationException) {
             releaseWakeLock()
             throw e
+        } catch (oom: OutOfMemoryError) {
+            fallBackToSystem(plan, startSegment, generation, "Kokoro 加载内存不足")
+            return
+        } catch (memory: KokoroMemoryException) {
+            fallBackToSystem(plan, startSegment, generation, memory.message ?: "可用内存不足")
+            return
         } catch (t: Throwable) {
             Log.e(TAG, "Kokoro 模型加载失败 model=$modelId", t)
             handleStop("Kokoro 模型加载失败：${t.message}")
@@ -1034,6 +1042,51 @@ class SpeechService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             handlePause()
         }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // UI_HIDDEN 只是切后台，不能因此停止锁屏朗读。
+        if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL || level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
+            handleMemoryPressure()
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        handleMemoryPressure()
+    }
+
+    private fun handleMemoryPressure() {
+        if (activeEngine != SpeechEngineType.KOKORO) return
+        val current = request ?: return
+        val plan = stateMachine.plan?.takeIf { it.bookId == current.plan.bookId } ?: current.plan
+        val from = if (stateMachine.plan === plan) stateMachine.currentSegmentIndex else current.startSegment
+        if (stateMachine.state == SpeechStateMachine.State.PAUSED) {
+            handleStop("内存不足，已停止 Kokoro；再次朗读时可选择系统 TTS")
+            return
+        }
+        val generation = ++playGeneration
+        kokoroGeneration++
+        activeEngine = SpeechEngineType.SYSTEM_TTS
+        playJob?.cancel()
+        playJob = scope.launch { fallBackToSystem(plan, from, generation, "系统内存紧张") }
+    }
+
+    private suspend fun fallBackToSystem(plan: SpeechPlan, from: Int, generation: Long, reason: String) {
+        updatePlaybackState(PlaybackState.STATE_BUFFERING)
+        stopWatchdog()
+        clearChapterTransition()
+        stopCurrentEngine()
+        if (generation != playGeneration) return
+        activeEngine = SpeechEngineType.SYSTEM_TTS
+        val engine = ensureEngine() ?: return handleStop("$reason；系统 TTS 不可用")
+        if (generation != playGeneration) return
+        applyConfig(engine)
+        playChapter(engine, plan, from)
+        val message = "$reason，已释放 Kokoro 并从当前句切换到系统 TTS"
+        Log.w(TAG, message)
+        SpeechDiagnosticsState.update { it.copy(lastError = message) }
     }
 
     // ---- MediaSession ----

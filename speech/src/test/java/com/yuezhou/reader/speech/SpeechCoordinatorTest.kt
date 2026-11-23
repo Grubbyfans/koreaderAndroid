@@ -279,6 +279,17 @@ class SpeechCoordinatorTest {
     }
 
     @Test
+    fun `合成内存不足不重复分配并向服务报告降级原因`() = runTest {
+        val synth = FakeSynthesizer().apply { outOfMemory = true }
+        val coordinator = SpeechCoordinator(synth, FakePcmPlayer(), backgroundScope)
+        val events = recordEvents(coordinator)
+        coordinator.play(planOf(3), 0, tokenA)
+        settle()
+        assertEquals(1, synth.calls.size)
+        assertTrue(events.filterIsInstance<SpeechPlaybackEvent.Failed>().single().memoryPressure)
+    }
+
+    @Test
     fun `有界预合成最多领先当前句两句`() = runTest {
         val synth = FakeSynthesizer()
         val player = FakePcmPlayer()

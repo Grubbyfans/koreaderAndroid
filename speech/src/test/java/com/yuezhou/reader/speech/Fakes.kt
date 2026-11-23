@@ -32,6 +32,7 @@ internal class FakeSynthesizer : SpeechSynthesizer {
     var samplesPerSegment = 240
     var sampleRate = 24_000
     var throwing = false
+    var outOfMemory = false
     var released = false
     var gate: CompletableDeferred<Unit>? = null
 
@@ -45,6 +46,7 @@ internal class FakeSynthesizer : SpeechSynthesizer {
     ): SynthesizedAudio {
         calls += Call(segmentIndex, text, speed)
         gate?.await()
+        if (outOfMemory) throw OutOfMemoryError("simulated native allocation")
         if (throwing) throw IllegalStateException("synthesize boom")
         val attempt = attempts.merge(segmentIndex, 1, Int::plus)!!
         val bad = segmentIndex in alwaysBad ||

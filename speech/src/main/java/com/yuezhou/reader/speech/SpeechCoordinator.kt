@@ -308,6 +308,11 @@ class SpeechCoordinator(
                 synthesizer.synthesize(spokenText, index, speed, token)
             } catch (c: CancellationException) {
                 throw c
+            } catch (oom: OutOfMemoryError) {
+                if (isCurrent(token, generation)) {
+                    eventFlow.tryEmit(SpeechPlaybackEvent.Failed(token, "Kokoro 合成内存不足", memoryPressure = true))
+                }
+                return null
             } catch (t: Throwable) {
                 reason = "${t.javaClass.simpleName}: ${t.message}"
                 return@repeat

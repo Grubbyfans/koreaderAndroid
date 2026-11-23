@@ -102,6 +102,7 @@ sealed interface SpeechPlaybackEvent {
     data class Failed(
         override val token: SessionToken,
         val reason: String,
+        val memoryPressure: Boolean = false,
     ) : SpeechPlaybackEvent
 }
 
