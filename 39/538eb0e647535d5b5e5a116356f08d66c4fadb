@@ -1,0 +1,37 @@
+speech/src/test/java/com/yuezhou/reader/speech/Fakes.kt
+  s_01ceea952b99e9::t_da4f68777b0112 35,49
+speech/src/main/java/com/yuezhou/reader/speech/SpeechService.kt
+  s_01ceea952b99e9::t_13450ae58efae1 10,26,306-311,1047-1090
+  s_01ceea952b99e9::t_c08db5eeda78c5 1091
+speech/src/main/java/com/yuezhou/reader/speech/SpeechCoordinator.kt
+  s_01ceea952b99e9::t_13450ae58efae1 311-315
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/SherpaKokoroProvider.kt
+  s_01ceea952b99e9::t_13450ae58efae1 4,7-8,17,20-22,33,44-48,50-65,67-72,75-78,81
+  s_01ceea952b99e9::t_da4f68777b0112 95-97
+speech/src/test/java/com/yuezhou/reader/speech/SpeechCoordinatorTest.kt
+  s_01ceea952b99e9::t_da4f68777b0112 282-291
+  s_01ceea952b99e9::t_54e144c6860d3f 281
+core/src/test/java/com/yuezhou/reader/core/speech/KokoroMemoryPolicyTest.kt
+  s_01ceea952b99e9::t_da4f68777b0112 1-62
+core/src/main/java/com/yuezhou/reader/core/speech/SpeechPlaybackBackend.kt
+  s_01ceea952b99e9::t_13450ae58efae1 105
+core/src/main/java/com/yuezhou/reader/core/speech/KokoroMemoryPolicy.kt
+  s_01ceea952b99e9::t_13450ae58efae1 1-13,27-43
+  s_01ceea952b99e9::t_da4f68777b0112 14-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "39538eb0e647535d5b5e5a116356f08d66c4fadb",
+  "prompts": {},
+  "sessions": {
+    "s_01ceea952b99e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207f5-a95c-7ce0-8172-433da1801be7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
