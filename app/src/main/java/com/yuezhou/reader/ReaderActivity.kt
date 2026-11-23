@@ -616,6 +616,12 @@ private fun ReaderScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val startWithBackgroundGuide = rememberBackgroundSpeechStart {
+        speakRequested = true
+        status = "准备朗读…"
+        webView?.requestChapterText(currentCfi)
+    }
+
     // 事件监听
     val eventListener: (ReaderEvent) -> Unit = { event ->
         when (event) {
@@ -929,10 +935,7 @@ private fun ReaderScreen(
                             SpeechPlanStore.stop(context)
                             status = "已停止朗读"
                         } else {
-                            // 请求当前章节文本（从当前阅读位置开始），ChapterText 事件回传后启动朗读
-                            speakRequested = true
-                            status = "准备朗读…"
-                            webView?.requestChapterText(currentCfi)
+                            startWithBackgroundGuide()
                         }
                     },
                 )

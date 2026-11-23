@@ -1485,6 +1485,10 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             }
         }
 
+        SettingsCard("后台朗读") {
+            SpeechBackgroundSettings()
+        }
+
         SettingsCard("下载目录") {
             Text(downloadLabel, style = MaterialTheme.typography.bodyMedium)
             Text("新下载的书会直接从所选目录打开。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
