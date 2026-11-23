@@ -155,6 +155,14 @@ class AudioTrackPcmPlayer : PcmPlayer {
         monitorThread.interrupt()
     }
 
+    override fun positionMs(): Long {
+        synchronized(lock) {
+            val rate = sampleRate
+            if (track == null || rate <= 0) return -1L
+            return currentFramesLocked() * 1000L / rate
+        }
+    }
+
     private fun createTrackLocked(rate: Int): AudioTrack? {
         val minBytes = AudioTrack.getMinBufferSize(
             rate,

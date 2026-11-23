@@ -3,20 +3,27 @@ package com.yuezhou.reader.speech
 import android.content.Context
 import android.content.Intent
 import com.yuezhou.reader.core.speech.SpeechChapterSource
+import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlan
 
 /**
- * 朗读引擎运行期配置：语速 + 音色。
+ * 朗读引擎运行期配置：引擎、语速与音色。
  *
  * 由 app 层在启动朗读前注入，服务在每次开始朗读时应用（见 SpeechService.applyConfig）。
  * 与 [SpeechPlan] 解耦——配置是用户偏好，计划是章节文本，二者生命周期不同。
  *
- * @param rate 语速（TextToSpeech 范围约 0.5..2.0，1.0 为正常）；<=0 表示沿用引擎默认。
- * @param voiceName 音色名（TextToSpeech.Voice.name）；空白表示沿用引擎默认音色。
+ * @param rate 语速（系统 TTS 约 0.5..2.0；Kokoro 为合成层 speed）；<=0 表示沿用引擎默认。
+ * @param voiceName 系统 TTS 音色名；空白表示沿用引擎默认音色。
+ * @param engine 朗读引擎；Kokoro 未装配时服务回退系统 TTS。
+ * @param kokoroModelId Kokoro 模型 ID；空白表示用提供者的默认模型。
+ * @param kokoroSpeakerId Kokoro 中文音色 ID。
  */
 data class SpeechConfig(
     val rate: Float = 1.0f,
     val voiceName: String = "",
+    val engine: SpeechEngineType = SpeechEngineType.SYSTEM_TTS,
+    val kokoroModelId: String = "",
+    val kokoroSpeakerId: Int = 3,
 )
 
 /**

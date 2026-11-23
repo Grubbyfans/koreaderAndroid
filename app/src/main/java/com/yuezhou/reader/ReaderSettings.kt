@@ -29,6 +29,12 @@ data class ReaderPreferences(
     val speechRate: Float = 1.0f,
     /** 朗读音色名（TextToSpeech.setVoice 入参）；空串表示用引擎默认音色。 */
     val speechVoice: String = "",
+    /** 朗读引擎：system=系统 TTS，kokoro=内置 Kokoro（仅测试版可用）。 */
+    val speechEngine: String = "system",
+    /** Kokoro 模型 ID；空串表示用提供者的默认模型。 */
+    val kokoroModel: String = "",
+    /** Kokoro 中文音色 ID。 */
+    val kokoroSpeaker: Int = 3,
     val fontId: String = "book",
     val fontWeight: Int = 0,
     /** 是否开启自动进度同步：开启时进入书籍自动拉取云端进度覆盖本地，退出/切出时自动上传覆盖云端。 */
@@ -51,6 +57,9 @@ object ReaderSettings {
     private val KEY_PAGE_ANIMATION = stringPreferencesKey("page_animation")
     private val KEY_SPEECH_RATE = floatPreferencesKey("speech_rate")
     private val KEY_SPEECH_VOICE = stringPreferencesKey("speech_voice")
+    private val KEY_SPEECH_ENGINE = stringPreferencesKey("speech_engine")
+    private val KEY_KOKORO_MODEL = stringPreferencesKey("kokoro_model")
+    private val KEY_KOKORO_SPEAKER = intPreferencesKey("kokoro_speaker")
     private val KEY_AUTO_SYNC = booleanPreferencesKey("auto_sync")
     private val KEY_BRIGHTNESS = floatPreferencesKey("brightness")
 
@@ -68,6 +77,9 @@ object ReaderSettings {
                 pageAnimation = prefs[KEY_PAGE_ANIMATION] ?: "slide",
                 speechRate = prefs[KEY_SPEECH_RATE] ?: 1.0f,
                 speechVoice = prefs[KEY_SPEECH_VOICE] ?: "",
+                speechEngine = prefs[KEY_SPEECH_ENGINE] ?: "system",
+                kokoroModel = prefs[KEY_KOKORO_MODEL] ?: "",
+                kokoroSpeaker = prefs[KEY_KOKORO_SPEAKER] ?: 3,
                 autoSync = prefs[KEY_AUTO_SYNC] ?: false,
                 brightness = prefs[KEY_BRIGHTNESS] ?: -1f,
             )
@@ -99,6 +111,9 @@ object ReaderSettings {
             it[KEY_PAGE_ANIMATION] = prefs.pageAnimation
             it[KEY_SPEECH_RATE] = prefs.speechRate
             it[KEY_SPEECH_VOICE] = prefs.speechVoice
+            it[KEY_SPEECH_ENGINE] = prefs.speechEngine
+            it[KEY_KOKORO_MODEL] = prefs.kokoroModel
+            it[KEY_KOKORO_SPEAKER] = prefs.kokoroSpeaker
             it[KEY_AUTO_SYNC] = prefs.autoSync
             it[KEY_BRIGHTNESS] = prefs.brightness
         }

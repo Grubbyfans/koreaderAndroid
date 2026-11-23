@@ -14,9 +14,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.k2fsa.sherpa.onnx.OfflineTts
-import com.k2fsa.sherpa.onnx.OfflineTtsConfig
-import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
-import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.yuezhou.reader.core.speech.SessionToken
 import com.yuezhou.reader.core.speech.SourceAnchor
 import com.yuezhou.reader.core.speech.SpeechPlan
@@ -132,45 +129,9 @@ class KokoroTrialActivity : Activity() {
         }
     }
 
-    private fun modelDir(modelName: String): File {
-        val dirName = when (modelName) {
-            "int8" -> "kokoro-int8-multi-lang-v1_1"
-            else -> "kokoro-multi-lang-v1_1"
-        }
-        return File(filesDir, "tts-models/$dirName")
-    }
+    private fun modelDir(modelName: String): File = KokoroModels.dir(filesDir, modelName)
 
-    private fun createTts(dir: File): OfflineTts {
-        val modelFile = listOf("model.onnx", "model.int8.onnx")
-            .map { File(dir, it) }
-            .firstOrNull { it.isFile }
-            ?: error("缺少 model.onnx / model.int8.onnx")
-        return OfflineTts(
-            null,
-            OfflineTtsConfig(
-                model = OfflineTtsModelConfig(
-                    kokoro = OfflineTtsKokoroModelConfig(
-                        model = modelFile.absolutePath,
-                        voices = File(dir, "voices.bin").absolutePath,
-                        tokens = File(dir, "tokens.txt").absolutePath,
-                        dataDir = File(dir, "espeak-ng-data").absolutePath,
-                        lexicon = listOf("lexicon-us-en.txt", "lexicon-zh.txt")
-                            .joinToString(",") { File(dir, it).absolutePath },
-                        lang = "en",
-                        dictDir = File(dir, "dict").absolutePath,
-                        lengthScale = 1.0f,
-                    ),
-                    numThreads = 2,
-                    debug = false,
-                    provider = "cpu",
-                ),
-                ruleFsts = "",
-                ruleFars = "",
-                maxNumSentences = 1,
-                silenceScale = 0.2f,
-            ),
-        )
-    }
+    private fun createTts(dir: File): OfflineTts = KokoroModels.createTts(dir)
 
     private fun startContinuous(model: String, count: Int, sid: Int = 3) {
         executor.execute {

@@ -88,6 +88,9 @@ class SpeechCoordinator(
     var lastHealthReport: AudioHealthCheck.Report? = null
         private set
 
+    /** 当前播放头位置（毫秒）；无有效播放时为 -1。长句播放期间用它判断是否仍有进展。 */
+    fun playbackPositionMs(): Long = player.positionMs()
+
     init {
         player.setCompletionListener { index, generation -> onPlayerCompleted(index, generation) }
     }

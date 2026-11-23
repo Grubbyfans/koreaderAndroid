@@ -155,5 +155,12 @@ interface PcmPlayer {
     /** 停止并清空；之后不得再回调完成。 */
     fun stop()
 
+    /**
+     * 当前播放头位置（毫秒）；无有效播放时返回 -1。
+     *
+     * 供上层停滞检测使用：长句播放期间没有完成回调，但播放头会持续推进。
+     */
+    fun positionMs(): Long = -1L
+
     fun release()
 }

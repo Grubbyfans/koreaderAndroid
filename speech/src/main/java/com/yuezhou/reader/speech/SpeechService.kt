@@ -16,12 +16,16 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.SystemClock
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.ServiceCompat
+import com.yuezhou.reader.core.speech.SessionToken
+import com.yuezhou.reader.core.speech.SpeechEngineType
+import com.yuezhou.reader.core.speech.SpeechPlaybackEvent
 import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechStateMachine
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,8 +33,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /**
  * 前台朗读服务：持有 TTS 引擎与朗读状态机，暴露媒体控制，处理音频焦点与耳机断开。
@@ -43,10 +50,29 @@ import kotlinx.coroutines.launch
  *
  * 用法：app 层通过 [SpeechCommands] 的意图 action 控制本服务（startService + 附带动作），
  * 计划通过 [SpeechPlanStore]（进程内内存）传入——首版以内存承载，持久化留待 Room（§8.2 SpeechPlan 表）。
+ *
+ * 阶段 D：按 [SpeechConfig.engine] 选择系统 TTS 或内置 Kokoro；Kokoro 走 [SpeechCoordinator]
+ * 与单 AudioTrack 播放器，完成事件驱动跨章；朗读位置由服务通过 [SpeechRuntime.progressSink]
+ * 落库；朗读期间持有 PARTIAL_WAKE_LOCK，暂停/停止/错误释放。
  */
 class SpeechService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    /** 持久化专用作用域：服务停止/销毁时仍允许把最后一次位置写完。 */
+    private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Kokoro 流水线专用作用域：AudioTrack 阻塞写会长时间占用线程，
+     * 不能放在 Main 上，否则暂停后主线程被卡死，媒体键与看门狗均失效。
+     */
+    private val kokoroScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val progressWriter = SpeechProgressWriter(
+        scope = persistScope,
+        sink = SpeechRuntime.progressSink,
+        onError = { Log.w(TAG, "朗读进度写入失败", it) },
+    )
 
     private lateinit var audioManager: AudioManager
     private var tts: TtsEngine? = null
@@ -56,6 +82,22 @@ class SpeechService : Service() {
     private var chapterJob: Job? = null
     private var waitingChapter: SpeechPlan? = null
     private var chapterPaused = false
+
+    /** 当前会话引擎；Kokoro 未装配时始终为系统 TTS。 */
+    private var activeEngine = SpeechEngineType.SYSTEM_TTS
+
+    /** 每次 play/stop 递增；用于丢弃启动过程中被新请求取代的 Kokoro 初始化。 */
+    private var playGeneration = 0L
+
+    private var kokoroCoordinator: SpeechCoordinator? = null
+    private var kokoroEventJob: Job? = null
+    private var kokoroGeneration = 0L
+    private var kokoroSpeed = 1.0f
+    private var lastKokoroEventAt = 0L
+    private var lastKokoroProgressAt = 0L
+    private var lastKokoroPositionMs = -1L
+
+    private var wakeLock: PowerManager.WakeLock? = null
 
     private var mediaSession: MediaSession? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -113,18 +155,52 @@ class SpeechService : Service() {
         clearChapterTransition()
         request = nextRequest
         sessionId++
-        tts?.stop()
+        val generation = ++playGeneration
         playJob = scope.launch {
-            val engine = ensureEngine() ?: return@launch handleStop("TTS 引擎初始化失败")
-            applyConfig(engine)
-            playChapter(engine, nextRequest.plan, nextRequest.startSegment)
+            beginProgressSession()
+            stopCurrentEngine()
+            if (generation != playGeneration) return@launch
+            val config = SpeechPlanStore.peekConfig()
+            val useKokoro = config.engine == SpeechEngineType.KOKORO && SpeechRuntime.kokoroAvailable
+            if (config.engine == SpeechEngineType.KOKORO && !useKokoro) {
+                Log.w(TAG, "请求 Kokoro 但引擎未装配，回退系统 TTS")
+            }
+            activeEngine = if (useKokoro) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS
+            if (useKokoro) {
+                startKokoro(nextRequest.plan, nextRequest.startSegment, config, generation)
+            } else {
+                val engine = ensureEngine() ?: return@launch handleStop("TTS 引擎初始化失败")
+                applyConfig(engine)
+                playChapter(engine, nextRequest.plan, nextRequest.startSegment)
+            }
         }
+    }
+
+    private suspend fun beginProgressSession() {
+        runCatching { progressWriter.flush() }
+        progressWriter.reset()
+        if (SpeechRuntime.progressSink == null) {
+            Log.e(TAG, "进度写入端口未装配，朗读位置不会落库")
+        }
+    }
+
+    /** 停止当前引擎（保留系统 TTS 实例，释放 Kokoro native 引擎）。 */
+    private suspend fun stopCurrentEngine() {
+        tts?.stop()
+        kokoroEventJob?.cancel()
+        kokoroEventJob = null
+        val coordinator = kokoroCoordinator
+        kokoroCoordinator = null
+        if (coordinator != null) runCatching { coordinator.release() }
     }
 
     private fun playChapter(engine: TtsEngine, plan: SpeechPlan, startSegment: Int = 0) {
         stateMachine.load(plan)
         sessionId++
         engine.listener = createProgressListener()
+        acquireWakeLock()
+        Log.d(TAG, "D_CHAPTER_START engine=SYSTEM book=${plan.bookId} chapter=${plan.chapterIndex} from=$startSegment")
+        progressWriter.onProgress(plan.bookId, plan.fileGeneration, plan.chapterIndex, startSegment, 0)
         speakFrom(engine, startSegment)
         // 预取下一章：末句 onDone 到达时下一章已就绪，跨章切换不再被「拉取耗时 + 回调延迟」卡住
         prefetchNextChapter()
@@ -160,6 +236,259 @@ class SpeechService : Service() {
         startWatchdog()
     }
 
+    // ---- Kokoro 引擎路径 ----
+
+    private suspend fun startKokoro(
+        plan: SpeechPlan,
+        startSegment: Int,
+        config: SpeechConfig,
+        generation: Long,
+    ) {
+        val provider = SpeechRuntime.kokoro ?: run {
+            handleStop("Kokoro 引擎不可用")
+            return
+        }
+        val modelId = config.kokoroModelId.ifBlank { provider.defaultModelId }
+        kokoroSpeed = if (config.rate > 0f) config.rate else 1f
+        updatePlaybackState(PlaybackState.STATE_BUFFERING)
+        acquireWakeLock()
+        Log.d(
+            TAG,
+            "D_ENGINE engine=KOKORO model=$modelId speaker=${config.kokoroSpeakerId} " +
+                "rate=$kokoroSpeed start=$startSegment",
+        )
+        val synthesizer = try {
+            provider.createSynthesizer(modelId, config.kokoroSpeakerId)
+        } catch (e: CancellationException) {
+            releaseWakeLock()
+            throw e
+        } catch (t: Throwable) {
+            Log.e(TAG, "Kokoro 模型加载失败 model=$modelId", t)
+            handleStop("Kokoro 模型加载失败：${t.message}")
+            return
+        }
+        if (generation != playGeneration) {
+            Log.d(TAG, "Kokoro 初始化完成但会话已被取代，释放")
+            runCatching { synthesizer.release() }
+            return
+        }
+        val coordinator = SpeechCoordinator(
+            synthesizer = synthesizer,
+            player = AudioTrackPcmPlayer(),
+            scope = kokoroScope,
+            // 流水线在 IO 线程；服务状态机/落库等逻辑必须回到主线程串行执行。
+            onChapterCompleted = { finished ->
+                withContext(Dispatchers.Main) { onKokoroChapterCompleted(finished) }
+            },
+        )
+        kokoroCoordinator = coordinator
+        lastKokoroEventAt = SystemClock.elapsedRealtime()
+        lastKokoroProgressAt = lastKokoroEventAt
+        lastKokoroPositionMs = -1L
+        kokoroEventJob = scope.launch { coordinator.events.collect { onKokoroEvent(it) } }
+        playKokoroPlan(plan, startSegment)
+    }
+
+    private suspend fun playKokoroPlan(plan: SpeechPlan, fromIndex: Int, paused: Boolean = false) {
+        val coordinator = kokoroCoordinator ?: return
+        if (stateMachine.plan !== plan) stateMachine.load(plan)
+        stateMachine.play(fromIndex)
+        val token = SessionToken(sessionId = sessionId, generation = ++kokoroGeneration)
+        updatePlaybackState(
+            if (paused) PlaybackState.STATE_PAUSED else PlaybackState.STATE_BUFFERING,
+        )
+        coordinator.play(plan, fromIndex, token)
+        lastKokoroEventAt = SystemClock.elapsedRealtime()
+        lastKokoroProgressAt = lastKokoroEventAt
+        lastKokoroPositionMs = -1L
+        progressWriter.onProgress(plan.bookId, plan.fileGeneration, plan.chapterIndex, fromIndex, 0)
+        if (paused) {
+            coordinator.pause()
+            stateMachine.pause()
+            releaseWakeLock()
+            updatePlaybackState(PlaybackState.STATE_PAUSED)
+        } else {
+            acquireWakeLock()
+            startWatchdog()
+            Log.d(TAG, "D_CHAPTER_START book=${plan.bookId} chapter=${plan.chapterIndex} from=$fromIndex")
+        }
+    }
+
+    private fun onKokoroEvent(event: SpeechPlaybackEvent) {
+        if (event.token.generation != kokoroGeneration) return
+        lastKokoroEventAt = SystemClock.elapsedRealtime()
+        when (event) {
+            is SpeechPlaybackEvent.SegmentStarted -> {
+                val plan = stateMachine.plan ?: return
+                Log.d(
+                    TAG,
+                    "D_SEG_START index=${event.index} chars=${plan.segmentAt(event.index)?.text?.length}",
+                )
+                stateMachine.onSegmentStarted(event.index)
+                val segment = plan.segmentAt(event.index) ?: return
+                SpeechProgressTracker.onProgress(
+                    bookId = plan.bookId,
+                    chapterIndex = plan.chapterIndex,
+                    segmentIndex = event.index,
+                    charOffset = 0,
+                    anchor = segment.startAnchor,
+                    endAnchor = segment.endAnchor,
+                )
+                progressWriter.onProgress(
+                    plan.bookId, plan.fileGeneration, plan.chapterIndex, event.index, 0,
+                )
+                if (stateMachine.state == SpeechStateMachine.State.PLAYING) {
+                    updatePlaybackState(PlaybackState.STATE_PLAYING)
+                }
+            }
+            is SpeechPlaybackEvent.SegmentCompleted -> {
+                val plan = stateMachine.plan ?: return
+                Log.d(TAG, "D_SEG_DONE index=${event.index}")
+                stateMachine.onSegmentCompleted(event.index)
+                val segment = plan.segmentAt(event.index) ?: return
+                SpeechProgressTracker.onProgress(
+                    bookId = plan.bookId,
+                    chapterIndex = plan.chapterIndex,
+                    segmentIndex = event.index,
+                    charOffset = segment.text.length,
+                    anchor = segment.endAnchor,
+                    endAnchor = segment.endAnchor,
+                )
+                progressWriter.onProgress(
+                    plan.bookId, plan.fileGeneration, plan.chapterIndex,
+                    event.index, segment.text.length,
+                )
+            }
+            is SpeechPlaybackEvent.Buffering -> {
+                if (stateMachine.state == SpeechStateMachine.State.PLAYING) {
+                    updatePlaybackState(PlaybackState.STATE_BUFFERING)
+                }
+            }
+            is SpeechPlaybackEvent.Failed -> {
+                Log.e(TAG, "D_FAILED ${event.reason}")
+                handleStop(event.reason)
+            }
+        }
+    }
+
+    private suspend fun onKokoroChapterCompleted(finished: SpeechPlan) {
+        if (activeEngine != SpeechEngineType.KOKORO) return
+        // 协调器的完成序号是权威值：服务事件收集器可能尚未处理末句 SegmentCompleted。
+        val completedIndex = kokoroCoordinator?.lastCompletedSegmentIndex ?: -1
+        finished.segmentAt(completedIndex)?.let { segment ->
+            progressWriter.onProgress(
+                finished.bookId, finished.fileGeneration, finished.chapterIndex,
+                completedIndex, segment.text.length,
+            )
+        }
+        Log.d(
+            TAG,
+            "D_CHAPTER_DONE book=${finished.bookId} chapter=${finished.chapterIndex} " +
+                "completed=$completedIndex",
+        )
+        progressWriter.flush()
+        Log.d(TAG, "D_PROGRESS chapter=${finished.chapterIndex} segment=$completedIndex")
+        advanceKokoroChapter(finished)
+    }
+
+    private suspend fun advanceKokoroChapter(previous: SpeechPlan) {
+        val active = request ?: return
+        val next = try {
+            active.chapters.next(previous)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            Log.w(TAG, "无法准备下一章", t)
+            handleStop("无法继续朗读下一章")
+            return
+        }
+        if (next == null) {
+            Log.d(TAG, "D_BOOK_END book=${previous.bookId}")
+            handleStop()
+            return
+        }
+        if (stateMachine.state == SpeechStateMachine.State.PAUSED) {
+            waitingChapter = next
+            chapterPaused = true
+            Log.d(TAG, "D_CHAPTER_WAIT chapter=${next.chapterIndex}")
+        } else {
+            playKokoroPlan(next, 0)
+        }
+    }
+
+    private fun handleKokoroPause() {
+        if (waitingChapter != null) chapterPaused = true
+        scope.launch {
+            kokoroCoordinator?.pause()
+            stateMachine.pause()
+            updatePlaybackState(PlaybackState.STATE_PAUSED)
+            releaseWakeLock()
+            runCatching { progressWriter.flush() }
+        }
+    }
+
+    private fun handleKokoroResume() {
+        val next = waitingChapter
+        if (next != null) {
+            waitingChapter = null
+            chapterPaused = false
+            scope.launch { playKokoroPlan(next, 0) }
+            return
+        }
+        scope.launch {
+            val coordinator = kokoroCoordinator ?: return@launch
+            coordinator.resume()
+            stateMachine.resume()
+            lastKokoroEventAt = SystemClock.elapsedRealtime()
+            lastKokoroProgressAt = lastKokoroEventAt
+            lastKokoroPositionMs = -1L
+            acquireWakeLock()
+            updatePlaybackState(PlaybackState.STATE_PLAYING)
+        }
+    }
+
+    private fun handleKokoroNext() {
+        val plan = stateMachine.plan ?: return
+        val paused = stateMachine.state == SpeechStateMachine.State.PAUSED
+        if (stateMachine.currentSegmentIndex >= plan.segments.lastIndex) {
+            scope.launch { advanceKokoroChapter(plan) }
+            return
+        }
+        val target = (stateMachine.currentSegmentIndex + 1).coerceAtMost(plan.segments.lastIndex)
+        scope.launch { playKokoroPlan(plan, target, paused) }
+    }
+
+    private fun handleKokoroPrevious() {
+        val plan = stateMachine.plan ?: return
+        val target = (stateMachine.currentSegmentIndex - 1).coerceAtLeast(0)
+        scope.launch {
+            playKokoroPlan(plan, target, stateMachine.state == SpeechStateMachine.State.PAUSED)
+        }
+    }
+
+    private fun handleKokoroStop(error: String?) {
+        playGeneration++
+        stopWatchdog()
+        clearChapterTransition()
+        kokoroEventJob?.cancel()
+        kokoroEventJob = null
+        scope.launch { runCatching { kokoroCoordinator?.stop() } }
+        stateMachine.stop()
+        activeEngine = SpeechEngineType.SYSTEM_TTS
+        request?.let { SpeechPlanStore.clear(it) }
+        request = null
+        SpeechProgressTracker.clear()
+        releaseAudioFocus()
+        releaseWakeLock()
+        persistScope.launch { runCatching { progressWriter.flush() } }
+        updatePlaybackState(
+            if (error == null) PlaybackState.STATE_STOPPED else PlaybackState.STATE_ERROR,
+            errorMessage = error,
+        )
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     // ---- 看门狗：检测引擎后台静默并自动续播 ----
 
     /**
@@ -176,6 +505,23 @@ class SpeechService : Service() {
         watchdogJob = scope.launch {
             while (isActive) {
                 delay(WATCHDOG_INTERVAL_MS)
+                if (activeEngine == SpeechEngineType.KOKORO) {
+                    if (stateMachine.state != SpeechStateMachine.State.PLAYING) continue
+                    val now = SystemClock.elapsedRealtime()
+                    // 长句播放期间只有 Started/Completed 事件，单句音频可超过 60 s；
+                    // 用播放头推进作为进展信号，避免把长句误判为停滞。
+                    val position = kokoroCoordinator?.playbackPositionMs() ?: -1L
+                    if (position >= 0 && position != lastKokoroPositionMs) {
+                        lastKokoroPositionMs = position
+                        lastKokoroProgressAt = now
+                    }
+                    val lastProgress = maxOf(lastKokoroEventAt, lastKokoroProgressAt)
+                    if (now - lastProgress > KOKORO_STALL_TIMEOUT_MS) {
+                        Log.w(TAG, "Kokoro 看门狗：${KOKORO_STALL_TIMEOUT_MS}ms 无播放进展，停止朗读")
+                        handleStop("朗读停滞")
+                    }
+                    continue
+                }
                 if (mySession != sessionId) return@launch
                 if (stateMachine.state != SpeechStateMachine.State.PLAYING) continue
                 val engine = tts ?: continue
@@ -223,17 +569,27 @@ class SpeechService : Service() {
     }
 
     private fun handlePause() {
+        if (activeEngine == SpeechEngineType.KOKORO) {
+            handleKokoroPause()
+            return
+        }
         Log.d(TAG, "handlePause() 进入, state=${stateMachine.state}, segment=${stateMachine.position.segmentIndex}, chapterJob=${chapterJob != null}, waitingChapter=${waitingChapter != null}")
         if (chapterJob != null || waitingChapter != null) chapterPaused = true
         sessionId++
         stopWatchdog()
         tts?.stop()
         stateMachine.pause()
+        releaseWakeLock()
+        persistScope.launch { runCatching { progressWriter.flush() } }
         updatePlaybackState(PlaybackState.STATE_PAUSED)
         Log.d(TAG, "handlePause() 完成, state=${stateMachine.state}")
     }
 
     private fun handleResume() {
+        if (activeEngine == SpeechEngineType.KOKORO) {
+            handleKokoroResume()
+            return
+        }
         Log.d(TAG, "handleResume() 进入, state=${stateMachine.state}, segment=${stateMachine.position.segmentIndex}")
         val engine = tts ?: return
         chapterPaused = false
@@ -252,10 +608,15 @@ class SpeechService : Service() {
         stateMachine.resume().getOrNull() ?: return
         sessionId++
         engine.listener = createProgressListener()
+        acquireWakeLock()
         speakFrom(engine, fromSegment)
     }
 
     private fun handleNext() {
+        if (activeEngine == SpeechEngineType.KOKORO) {
+            handleKokoroNext()
+            return
+        }
         if (chapterJob != null || waitingChapter != null) return
         val engine = tts ?: return
         val plan = stateMachine.plan ?: return
@@ -274,6 +635,10 @@ class SpeechService : Service() {
     }
 
     private fun handlePrevious() {
+        if (activeEngine == SpeechEngineType.KOKORO) {
+            handleKokoroPrevious()
+            return
+        }
         if (chapterJob != null || waitingChapter != null) return
         val engine = tts ?: return
         stateMachine.previous().getOrNull() ?: return
@@ -284,6 +649,10 @@ class SpeechService : Service() {
     }
 
     private fun handleStop(error: String? = null) {
+        if (activeEngine == SpeechEngineType.KOKORO) {
+            handleKokoroStop(error)
+            return
+        }
         sessionId++
         playJob?.cancel()
         stopWatchdog()
@@ -294,6 +663,8 @@ class SpeechService : Service() {
         stateMachine.stop()
         SpeechProgressTracker.clear()
         releaseAudioFocus()
+        releaseWakeLock()
+        persistScope.launch { runCatching { progressWriter.flush() } }
         updatePlaybackState(
             if (error == null) PlaybackState.STATE_STOPPED else PlaybackState.STATE_ERROR,
             errorMessage = error,
@@ -391,11 +762,21 @@ class SpeechService : Service() {
                 anchor = currentSegment?.anchorAt(charOffset),
                 endAnchor = currentSegment?.endAnchor,
             )
+            progressWriter.onProgress(
+                bookId = plan.bookId,
+                fileGeneration = plan.fileGeneration,
+                chapterIndex = plan.chapterIndex,
+                segmentIndex = segment,
+                charOffset = charOffset,
+            )
         }
     }
 
     private fun onSegmentDone() {
         Log.d(TAG, "onSegmentDone() 进入, state=${stateMachine.state}, 当前segment=${stateMachine.position.segmentIndex}")
+        stateMachine.plan?.let {
+            Log.d(TAG, "D_CHAPTER_DONE engine=SYSTEM book=${it.bookId} chapter=${it.chapterIndex}")
+        }
         val engine = tts ?: run {
             Log.w(TAG, "onSegmentDone() engine 为空, 中断续播!")
             return
@@ -465,6 +846,29 @@ class SpeechService : Service() {
             } else {
                 playChapter(engine, next)
             }
+        }
+    }
+
+    // ---- 唤醒锁 ----
+
+    /** 朗读会话期间持有；覆盖句间合成空档。暂停/停止/错误立即释放。 */
+    private fun acquireWakeLock() {
+        val lock = wakeLock ?: (getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "yuezhou:SpeechService")
+            .apply { setReferenceCounted(false) }
+            .also { wakeLock = it }
+        if (!lock.isHeld) {
+            lock.acquire(WAKE_LOCK_TIMEOUT_MS)
+            Log.d(TAG, "D_WAKELOCK acquire")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        val lock = wakeLock ?: return
+        wakeLock = null
+        if (lock.isHeld) {
+            runCatching { lock.release() }
+            Log.d(TAG, "D_WAKELOCK release")
         }
     }
 
@@ -594,6 +998,8 @@ class SpeechService : Service() {
 
     private fun startForegroundInternal() {
         requestAudioFocus()
+        // 标记会话为活跃媒体：锁屏后系统/厂商冻结策略据此保留后台播放进程。
+        mediaSession?.isActive = true
         val notification = buildNotification()
         ServiceCompat.startForeground(
             this,
@@ -657,12 +1063,23 @@ class SpeechService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         sessionId++
+        stopWatchdog()
+        releaseWakeLock()
+        runBlocking { runCatching { progressWriter.flush() } }
         scope.cancel()
         request?.let { SpeechPlanStore.clear(it) }
         SpeechProgressTracker.clear()
         releaseAudioFocus()
         tts?.shutdown()
         tts = null
+        kokoroEventJob?.cancel()
+        kokoroEventJob = null
+        val coordinator = kokoroCoordinator
+        kokoroCoordinator = null
+        if (coordinator != null) {
+            runBlocking { runCatching { coordinator.release() } }
+        }
+        kokoroScope.cancel()
         SpeechVoices.clear()
         mediaSession?.release()
         mediaSession = null
@@ -678,5 +1095,14 @@ class SpeechService : Service() {
 
         /** 连续静默多少次才触发续播（约 2s × 3 = 6s 容忍，避免误判正常句间停顿）。 */
         private const val WATCHDOG_THRESHOLD = 3
+
+        /** 唤醒锁超时（防泄漏）；正常朗读由会话内的暂停/停止释放。 */
+        private const val WAKE_LOCK_TIMEOUT_MS = 2 * 60 * 60 * 1000L
+
+        /**
+         * Kokoro 无播放进展的停滞阈值：播放头不动且无事件超过该值即停止。
+         * 需大于 256 字片段的合成与播放时间，避免长句被误判。
+         */
+        private const val KOKORO_STALL_TIMEOUT_MS = 120_000L
     }
 }

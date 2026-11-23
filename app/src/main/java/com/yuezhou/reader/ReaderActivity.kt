@@ -97,10 +97,13 @@ import com.yuezhou.reader.reader.SyncLogStore
 import com.yuezhou.reader.reader.TocItem
 import com.yuezhou.reader.core.speech.SentencePlanner
 import com.yuezhou.reader.core.speech.SourceAnchor
+import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechTextUnit
+import com.yuezhou.reader.speech.KokoroModel
 import com.yuezhou.reader.speech.SpeechConfig
 import com.yuezhou.reader.speech.SpeechPlanStore
+import com.yuezhou.reader.speech.SpeechRuntime
 import com.yuezhou.reader.speech.SpeechProgressTracker
 import com.yuezhou.reader.speech.SpeechVoices
 import com.yuezhou.reader.speech.TtsEngine
@@ -485,8 +488,8 @@ private fun ReaderScreen(
         }
     }
 
-    // 朗读进度收集：服务写入 SpeechProgressTracker，这里反映到 UI（朗读中状态 + 高亮回写 + 位置持久化）
-    var speechSaveJob by remember { mutableStateOf<Job?>(null) }
+    // 朗读进度收集：服务写入 SpeechProgressTracker，这里只反映 UI（朗读中状态 + 高亮回写）。
+    // 位置落库已移到服务侧（SpeechProgressSink），Activity 销毁后仍持续保存。
     LaunchedEffect(Unit) {
         SpeechProgressTracker.current.collect { snap ->
             speaking = snap != null
@@ -502,21 +505,6 @@ private fun ReaderScreen(
                     end?.nodeId,
                     end?.offset ?: 0,
                 )
-            }
-            // 去抖持久化朗读位置（片段级别，供跨进程恢复）
-            if (snap != null && snap.bookId == bookId) {
-                speechSaveJob?.cancel()
-                speechSaveJob = scope.launch {
-                    delay(800)
-                    SpeechPositionStore.save(
-                        context = context,
-                        bookId = snap.bookId,
-                        fileGeneration = "",
-                        chapterIndex = snap.chapterIndex,
-                        segmentIndex = snap.segmentIndex,
-                        charOffset = snap.charOffset,
-                    )
-                }
             }
         }
     }
@@ -551,10 +539,23 @@ private fun ReaderScreen(
             segments = segments,
         )
         try {
-            // 注入朗读配置（语速 + 音色），服务在开始朗读时应用。
+            // 注入朗读配置（引擎 + 语速 + 音色），服务在开始朗读时应用。
             // 用 latestPrefs（rememberUpdatedState）确保读到最新值，避免闭包捕获旧音色。
+            val engine = if (
+                latestPrefs.speechEngine == "kokoro" && SpeechRuntime.kokoroAvailable
+            ) {
+                SpeechEngineType.KOKORO
+            } else {
+                SpeechEngineType.SYSTEM_TTS
+            }
             SpeechPlanStore.putConfig(
-                SpeechConfig(rate = latestPrefs.speechRate, voiceName = latestPrefs.speechVoice)
+                SpeechConfig(
+                    rate = latestPrefs.speechRate,
+                    voiceName = latestPrefs.speechVoice,
+                    engine = engine,
+                    kokoroModelId = latestPrefs.kokoroModel,
+                    kokoroSpeakerId = latestPrefs.kokoroSpeaker,
+                )
             )
             // 若本机有「本章」的朗读位置记录，从该片段续读（片段级别恢复）。
             // load 为 suspend，须在协程中读取；读不到则从头开始。
@@ -865,6 +866,7 @@ private fun ReaderScreen(
                 enter = fadeIn(tween(200)),
                 exit = fadeOut(tween(180)),
             ) {
+                val kokoroModels = remember { SpeechRuntime.kokoro?.availableModels().orEmpty() }
                 ReaderPanel(
                     title = title,
                     fraction = currentFraction,
@@ -872,6 +874,7 @@ private fun ReaderScreen(
                     totalSections = totalSections,
                     prefs = readerPrefs,
                     voices = availableVoices,
+                    kokoroModels = kokoroModels,
                     speaking = speaking || speakRequested,
                     onBack = { leaveReader() },
                     onDismiss = { panelVisible = false },
@@ -879,15 +882,18 @@ private fun ReaderScreen(
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
                     onPrefsChange = { p ->
-                        val voiceChanged = p.speechVoice != readerPrefs.speechVoice
+                        val speechConfigChanged = p.speechVoice != readerPrefs.speechVoice ||
+                            p.speechEngine != readerPrefs.speechEngine ||
+                            p.kokoroModel != readerPrefs.kokoroModel ||
+                            p.kokoroSpeaker != readerPrefs.kokoroSpeaker
                         scope.launch {
                             ReaderSettings.save(context, p)
-                            // 音色变更且正在朗读：保存完成、等 DataStore flow 传播到 latestPrefs 后
-                            // 再重启朗读，确保 startSpeech 读到新音色。
-                            if (voiceChanged && speaking) {
+                            // 引擎/音色变更且正在朗读：保存完成、等 DataStore flow 传播到 latestPrefs 后
+                            // 再重启朗读，确保 startSpeech 读到新配置。
+                            if (speechConfigChanged && speaking) {
                                 delay(120)
                                 SpeechPlanStore.stop(context)
-                                status = "已切换音色，重新朗读…"
+                                status = "已切换朗读配置，重新朗读…"
                                 speakRequested = true
                                 webView?.requestChapterText(currentCfi)
                             }
@@ -1034,6 +1040,7 @@ private fun ReaderPanel(
     totalSections: Int,
     prefs: ReaderPreferences,
     voices: List<TtsVoice>,
+    kokoroModels: List<KokoroModel>,
     speaking: Boolean,
     onBack: () -> Unit,
     onDismiss: () -> Unit,
@@ -1159,7 +1166,12 @@ private fun ReaderPanel(
                         enter = expandVertically(tween(240)) + fadeIn(tween(240)),
                         exit = shrinkVertically(tween(220)) + fadeOut(tween(180)),
                     ) {
-                        SettingsControls(prefs = prefs, voices = voices, onPrefsChange = onPrefsChange)
+                        SettingsControls(
+                            prefs = prefs,
+                            voices = voices,
+                            kokoroModels = kokoroModels,
+                            onPrefsChange = onPrefsChange,
+                        )
                     }
                 }
             }
@@ -1177,6 +1189,7 @@ private fun PanelAction(label: String, onClick: () -> Unit) {
 private fun SettingsControls(
     prefs: ReaderPreferences,
     voices: List<TtsVoice>,
+    kokoroModels: List<KokoroModel>,
     onPrefsChange: (ReaderPreferences) -> Unit,
 ) {
     // 拖动中的本地预览值；null 表示未拖动（跟随真实 prefs），松手才提交，避免连续写 DataStore + 重排全文
@@ -1320,9 +1333,92 @@ private fun SettingsControls(
                 modifier = Modifier.weight(1f),
             )
         }
-        SpeechVoicePreference(voices, prefs.speechVoice) { name ->
-            onPrefsChange(prefs.copy(speechVoice = name))
+        // 朗读引擎：测试版装配 Kokoro 后才显示切换；正式版固定系统 TTS。
+        if (kokoroModels.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("引擎", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.width(12.dp))
+                TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "system")) }) {
+                    Text(
+                        "系统 TTS",
+                        color = if (prefs.speechEngine != "kokoro") MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (prefs.speechEngine != "kokoro") FontWeight.Bold else FontWeight.Normal,
+                    )
+                }
+                TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "kokoro")) }) {
+                    Text(
+                        "Kokoro",
+                        color = if (prefs.speechEngine == "kokoro") MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (prefs.speechEngine == "kokoro") FontWeight.Bold else FontWeight.Normal,
+                    )
+                }
+            }
+            if (prefs.speechEngine == "kokoro") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("模型", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(12.dp))
+                    kokoroModels.forEach { model ->
+                        TextButton(onClick = { onPrefsChange(prefs.copy(kokoroModel = model.id)) }) {
+                            Text(
+                                model.label,
+                                color = if (prefs.kokoroModel == model.id) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = if (prefs.kokoroModel == model.id) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+                KokoroSpeakerPreference(prefs.kokoroSpeaker) { id ->
+                    onPrefsChange(prefs.copy(kokoroSpeaker = id))
+                }
+            }
         }
+        if (prefs.speechEngine != "kokoro") {
+            SpeechVoicePreference(voices, prefs.speechVoice) { name ->
+                onPrefsChange(prefs.copy(speechVoice = name))
+            }
+        }
+    }
+}
+
+@Composable
+private fun KokoroSpeakerPreference(selectedId: Int, onSelect: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val presets = remember {
+        listOf(
+            3 to "女声 1（sid 3）",
+            4 to "女声 2（sid 4）",
+            5 to "女声 3（sid 5）",
+            58 to "男声 1（sid 58）",
+            59 to "男声 2（sid 59）",
+            60 to "男声 3（sid 60）",
+        )
+    }
+    val selectedLabel = presets.firstOrNull { it.first == selectedId }?.second ?: "sid $selectedId"
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Kokoro 音色", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = { open = true }) { Text(selectedLabel) }
+    }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text("Kokoro 中文音色") },
+            text = {
+                Column {
+                    presets.forEach { (id, label) ->
+                        TextButton(onClick = {
+                            onSelect(id)
+                            open = false
+                        }) { Text(label) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { open = false }) { Text("取消") }
+            },
+        )
     }
 }
 

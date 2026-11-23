@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <application>
+    <application
+        android:name=".tts.ReaderTtsApplication"
+        tools:replace="android:name">
         <!-- 阶段 B 试音入口：仅存在于 ttsTestDebug 变体 -->
         <activity
             android:name=".tts.KokoroTrialActivity"
@@ -13,6 +16,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 阶段 D 服务验收：启动后销毁 Activity，由前台服务继续跨章朗读 -->
+        <activity
+            android:name=".tts.StageDActivity"
+            android:exported="true"
+            android:theme="@style/Theme.YuezhouReader" />
     </application>
 
 </manifest>
