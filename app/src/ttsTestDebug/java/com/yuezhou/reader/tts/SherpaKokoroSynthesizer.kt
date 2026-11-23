@@ -2,6 +2,7 @@ package com.yuezhou.reader.tts
 
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.yuezhou.reader.core.speech.SessionToken
+import com.yuezhou.reader.core.speech.KokoroTextNormalizer
 import com.yuezhou.reader.core.speech.SpeechSynthesizer
 import com.yuezhou.reader.core.speech.SynthesizedAudio
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +29,10 @@ class SherpaKokoroSynthesizer(
         token: SessionToken,
     ): SynthesizedAudio = withContext(Dispatchers.Default) {
         check(!released) { "引擎已释放" }
-        val audio = tts.generate(text, speakerId, speed)
+        // 试音直接使用合成器，也执行同样的输入规范化。
+        val spokenText = KokoroTextNormalizer.normalize(text)
+        if (spokenText.isEmpty()) return@withContext KokoroTextNormalizer.punctuationPause()
+        val audio = tts.generate(spokenText, speakerId, speed)
         SynthesizedAudio(audio.samples, audio.sampleRate)
     }
 

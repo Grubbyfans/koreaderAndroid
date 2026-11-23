@@ -1,6 +1,7 @@
 package com.yuezhou.reader.speech
 
 import com.yuezhou.reader.core.speech.AudioHealthCheck
+import com.yuezhou.reader.core.speech.KokoroTextNormalizer
 import com.yuezhou.reader.core.speech.PcmPlayer
 import com.yuezhou.reader.core.speech.PrepareResult
 import com.yuezhou.reader.core.speech.SessionToken
@@ -279,10 +280,13 @@ class SpeechCoordinator(
         token: SessionToken,
         generation: Long,
     ): SynthesizedAudio? {
+        val spokenText = KokoroTextNormalizer.normalize(segment.text)
+        // 保留原片段的播放完成事件与锚点；纯标点只占短暂停顿，不触发 native 或空音频重试。
+        if (spokenText.isEmpty()) return KokoroTextNormalizer.punctuationPause()
         var reason = "unknown"
         repeat(2) {
             val audio = try {
-                synthesizer.synthesize(segment.text, index, speed, token)
+                synthesizer.synthesize(spokenText, index, speed, token)
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {

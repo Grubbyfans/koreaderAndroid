@@ -207,6 +207,35 @@ class SpeechCoordinatorTest {
     }
 
     @Test
+    fun `对白去引号且纯标点通过短暂停顿完成而不提前推进`() = runTest {
+        val synth = FakeSynthesizer()
+        val player = FakePcmPlayer()
+        val coordinator = SpeechCoordinator(synth, player, backgroundScope)
+        val events = recordEvents(coordinator)
+        val original = planOf(3)
+        val texts = listOf("“你好！”", "……”,", "接着读。")
+        val plan = original.copy(segments = original.segments.mapIndexed { i, segment ->
+            segment.copy(text = texts[i])
+        })
+        coordinator.play(plan, 0, tokenA)
+        settle()
+        assertEquals(listOf(0, 2), synth.calls.map { it.index })
+        assertEquals(listOf("你好!", "接着读."), synth.calls.map { it.text })
+        assertEquals(listOf(0, 1, 2), player.enqueued)
+        assertEquals(-1, coordinator.lastCompletedSegmentIndex)
+        assertTrue(events.none { it is SpeechPlaybackEvent.Failed })
+        for (index in 0..2) {
+            assertTrue(player.completeNext())
+            settle()
+            assertEquals(index, coordinator.lastCompletedSegmentIndex)
+        }
+        assertEquals(listOf(0, 1, 2), events.filterIsInstance<SpeechPlaybackEvent.SegmentCompleted>().map { it.index })
+        // 输入规范化不改变计划中的原文、句子索引和锚点。
+        assertEquals(texts, plan.segments.map { it.text })
+        assertEquals(original.segments.map { it.startAnchor }, plan.segments.map { it.startAnchor })
+    }
+
+    @Test
     fun `有界预合成最多领先当前句两句`() = runTest {
         val synth = FakeSynthesizer()
         val player = FakePcmPlayer()
