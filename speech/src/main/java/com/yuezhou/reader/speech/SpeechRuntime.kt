@@ -82,6 +82,10 @@ interface KokoroEngineProvider {
     /** 删除模型目录；正在合成时拒绝。 */
     suspend fun deleteModel(modelId: String): Boolean = false
 
+    /** 固定自编文本的对照试听，不读取或导出用户书籍。 */
+    suspend fun auditionNovelText(modelId: String, speakerId: Int, rate: Float, optimized: Boolean): String? =
+        "当前版本不支持小说解析试听"
+
     /** 试音；成功返回 null，失败返回错误说明。 */
     suspend fun auditionModel(modelId: String, speakerId: Int, text: String): String? =
         "当前版本不支持试音"

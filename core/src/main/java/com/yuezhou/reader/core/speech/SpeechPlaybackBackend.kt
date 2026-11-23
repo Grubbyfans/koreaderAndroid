@@ -84,6 +84,8 @@ sealed interface SpeechPlaybackEvent {
     data class SegmentStarted(
         override val token: SessionToken,
         val index: Int,
+        val delivery: SegmentDelivery? = null,
+        val audioMetrics: DeliveryAudioMetrics? = null,
     ) : SpeechPlaybackEvent
 
     /** 第 [index] 句 PCM 实际播完；每次播放恰好一次。 */

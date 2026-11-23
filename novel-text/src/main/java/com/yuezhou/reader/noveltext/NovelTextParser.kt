@@ -19,6 +19,8 @@ data class NovelChunk(
     val dialogue: Boolean,
     val splitReason: SplitReason,
     val parserVersion: Int = NovelTextParser.VERSION,
+    val quoteCloserAtStart: Char? = null,
+    val nestedQuotes: Boolean = false,
 )
 
 class NovelTextParser(private val maxChars: Int = 120, private val minChars: Int = 12) {
@@ -45,12 +47,16 @@ class NovelTextParser(private val maxChars: Int = 120, private val minChars: Int
         if (text.isBlank()) return emptyList()
         val natural = mutableListOf<Int>()
         val quoted = BooleanArray(text.length)
+        val quoteClosers = CharArray(text.length)
+        val nested = BooleanArray(text.length)
         val quotes = ArrayDeque<Char>()
         val brackets = ArrayDeque<Char>()
         var terminalPending = false
         for (i in text.indices) {
             val ch = text[i]
             val wasQuoted = quotes.isNotEmpty()
+            quoteClosers[i] = quotes.lastOrNull() ?: '\u0000'
+            nested[i] = quotes.size > 1
             val apostrophe = ch in "'’" && text.getOrNull(i - 1)?.isLetterOrDigit() == true && text.getOrNull(i + 1)?.isLetterOrDigit() == true
             if (!apostrophe) {
                 when {
@@ -61,6 +67,7 @@ class NovelTextParser(private val maxChars: Int = 120, private val minChars: Int
                 }
             }
             quoted[i] = wasQuoted || quotes.isNotEmpty()
+            nested[i] = nested[i] || quotes.size > 1
             val sentenceEnd = isEnd(text, i)
             if (sentenceEnd) terminalPending = true
             else if (!ch.isWhitespace() && ch !in CLOSERS) terminalPending = false
@@ -99,7 +106,9 @@ class NovelTextParser(private val maxChars: Int = 120, private val minChars: Int
             }
             out += NovelChunk(raw, raw.replace(INVISIBLE, "").replace(SPACES, " ").trim(),
                 charPoints + TextPoint(last.nodeId, last.offset + 1), spans, paragraph, end == text.length,
-                (start until end).any { quoted[it] }, reason)
+                (start until end).any { quoted[it] }, reason,
+                quoteCloserAtStart = quoteClosers[start].takeIf { it != '\u0000' },
+                nestedQuotes = (start until end).any { nested[it] })
             start = end
         }
         return out

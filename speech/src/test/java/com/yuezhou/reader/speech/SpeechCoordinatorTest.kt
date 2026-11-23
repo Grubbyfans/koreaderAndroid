@@ -290,6 +290,32 @@ class SpeechCoordinatorTest {
     }
 
     @Test
+    fun `小说语气只在开关开启时叠加有限语速且切速重新应用用户值`() = runTest {
+        val units = listOf(com.yuezhou.reader.core.speech.speechUnit("他低声说道：“请大家保持安静，我们马上离开这里。”", "n1"))
+        suspend fun run(enabled: Boolean): Pair<FakeSynthesizer, SpeechCoordinator> {
+            val result = com.yuezhou.reader.core.speech.SpeechTextPlanning.plan(units,
+                com.yuezhou.reader.core.speech.SpeechEngineType.KOKORO, enabled)
+            val plan = com.yuezhou.reader.core.speech.SpeechPlan("book", "g", 0, result.segments, result.version, enabled, units)
+            val synth = FakeSynthesizer()
+            val coordinator = SpeechCoordinator(synth, FakePcmPlayer(), backgroundScope)
+            coordinator.prepare(com.yuezhou.reader.core.speech.SpeechEngineConfig(
+                com.yuezhou.reader.core.speech.SpeechEngineType.KOKORO, rate = 1.5f))
+            coordinator.play(plan, 0, tokenA)
+            settle()
+            return synth to coordinator
+        }
+        val (legacy, legacyCoordinator) = run(false)
+        assertTrue(legacy.calls.all { it.speed == 1.5f })
+        legacyCoordinator.release()
+        val (optimized, coordinator) = run(true)
+        assertEquals(1.5f * 0.98f, optimized.calls.first().speed)
+        coordinator.setRate(2f)
+        settle()
+        assertEquals(2f * 0.98f, optimized.calls.last().speed)
+        coordinator.release()
+    }
+
+    @Test
     fun `有界预合成最多领先当前句两句`() = runTest {
         val synth = FakeSynthesizer()
         val player = FakePcmPlayer()

@@ -5,7 +5,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.yuezhou.reader.core.speech.SentencePlanner
+import com.yuezhou.reader.core.speech.SpeechTextPlanning
+import com.yuezhou.reader.core.speech.SpeechTextUnit
 import com.yuezhou.reader.core.speech.SpeechChapterSource
 import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlan
@@ -38,11 +39,16 @@ class StageDActivity : Activity() {
         val model = intent.getStringExtra("model") ?: "int8"
         val sid = intent.getIntExtra("sid", 3)
         val rate = intent.getFloatExtra("rate", 1.0f).coerceIn(0.5f, 2.0f)
+        val novelParsing = intent.getBooleanExtra("novelParsing", false)
+        val toggleAfterMs = intent.getIntExtra("toggleAfterMs", 0)
+        if (toggleAfterMs > 0) Handler(Looper.getMainLooper()).postDelayed({
+            SpeechPlanStore.setNovelParsing(applicationContext, !novelParsing)
+        }, toggleAfterMs.toLong())
         val bookId = intent.getStringExtra("book")
         val finishDelayMs = intent.getLongExtra("finishDelayMs", 1000L)
         executor.execute {
             try {
-                startTrial(engine, model, sid, bookId, finishDelayMs, rate)
+                startTrial(engine, model, sid, bookId, finishDelayMs, rate, novelParsing)
             } catch (t: Throwable) {
                 Log.e(TAG, "D_HARNESS_FAIL", t)
                 finishAndRemoveTask()
@@ -57,6 +63,7 @@ class StageDActivity : Activity() {
         requestedBookId: String?,
         finishDelayMs: Long,
         rate: Float,
+        novelParsing: Boolean,
     ) {
         val books = runBlocking { LibraryStore(applicationContext).snapshot() }.books
         val entry = books.firstOrNull { requestedBookId == null || it.bookId == requestedBookId }
@@ -64,12 +71,18 @@ class StageDActivity : Activity() {
         val epub = File(EpubImporter.epubDir(this), entry.fileName)
         check(epub.isFile) { "EPUB 不存在：${epub.absolutePath}" }
 
-        val planner = SentencePlanner()
+        val engine = if (engineRaw == "system") SpeechEngineType.SYSTEM_TTS else SpeechEngineType.KOKORO
+        var sourceUnits: List<SpeechTextUnit> = emptyList()
+        var plannerVersion = SpeechPlan.PLANNER_VERSION
         var chapterIndex = 0
         var segments: List<SpeechSegment> = emptyList()
         for (index in 0 until 20) {
-            val planned = planner.plan(EpubChapterTextSource(epub, index).extract())
+            val units = EpubChapterTextSource(epub, index).extract()
+            val result = SpeechTextPlanning.plan(units, engine, novelParsing)
+            val planned = result.segments
             if (planned.size >= 3) {
+                sourceUnits = units
+                plannerVersion = result.version
                 chapterIndex = index
                 segments = planned.take(3)
                 break
@@ -77,16 +90,17 @@ class StageDActivity : Activity() {
         }
         check(segments.isNotEmpty()) { "未找到可朗读章节" }
 
-        val engine = if (engineRaw == "system") SpeechEngineType.SYSTEM_TTS else SpeechEngineType.KOKORO
         SpeechPlanStore.putConfig(
             SpeechConfig(
                 rate = rate,
                 engine = engine,
                 kokoroModelId = model,
                 kokoroSpeakerId = sid,
+                novelParsing = novelParsing,
             )
         )
-        val plan = SpeechPlan(entry.bookId, "", chapterIndex, segments)
+        val plan = SpeechPlan(entry.bookId, "", chapterIndex, segments, plannerVersion,
+            novelParsing && engine == SpeechEngineType.KOKORO, sourceUnits)
         val chapters = TrimmedChapterSource(
             EpubSpeechChapterSource(this, entry.fileName, null),
             maxSegments = 3,

@@ -15,7 +15,7 @@ object SpeechTextPlanning {
                 require(chunk.sourcePoints.size == chunk.originalText.length + 1)
                 val anchors = chunk.sourcePoints.map { SourceAnchor(it.nodeId, it.offset) }
                 SpeechSegment(chunk.originalText, anchors.first(), anchors.last(), anchors, chunk.spokenText,
-                    NovelSegmentInfo(chunk.dialogue, chunk.paragraphId, chunk.paragraphBoundaryAfter, chunk.splitReason.name))
+                    NovelSegmentInfo(chunk.dialogue, chunk.paragraphId, chunk.paragraphBoundaryAfter, chunk.splitReason.name, chunk.quoteCloserAtStart, chunk.nestedQuotes))
             }
             Result(segments, NovelTextParser.VERSION)
         } catch (e: Exception) {

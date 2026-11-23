@@ -94,7 +94,19 @@ class KokoroTrialActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(root) })
 
         if (intent.getBooleanExtra("autorun", false)) {
-            if (intent.getStringExtra("mode") == "continuous") {
+            if (intent.getStringExtra("mode") == "novel-preview") {
+                val optimized = intent.getBooleanExtra("optimized", false)
+                executor.execute {
+                    try {
+                        val error = runBlocking {
+                            com.yuezhou.reader.speech.SpeechRuntime.kokoro?.auditionNovelText(
+                                intent.getStringExtra("model") ?: "fp32", intent.getIntExtra("sid", 3),
+                                intent.getFloatExtra("rate", 1f), optimized)
+                        }
+                        log("NOVEL_PREVIEW_DONE optimized=$optimized error=$error")
+                    } catch (t: Throwable) { log("NOVEL_PREVIEW_FAIL ${t.javaClass.simpleName}: ${t.message}") }
+                }
+            } else if (intent.getStringExtra("mode") == "continuous") {
                 val model = intent.getStringExtra("model") ?: "fp32"
                 val count = intent.getIntExtra("count", 12)
                 val sid = intent.getIntExtra("sid", 3)

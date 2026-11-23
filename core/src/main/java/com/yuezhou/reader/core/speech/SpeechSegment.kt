@@ -102,4 +102,6 @@ data class NovelSegmentInfo(
     val paragraphId: Int,
     val paragraphBoundaryAfter: Boolean,
     val splitReason: String,
+    val quoteCloserAtStart: Char? = null,
+    val nestedQuotes: Boolean = false,
 )

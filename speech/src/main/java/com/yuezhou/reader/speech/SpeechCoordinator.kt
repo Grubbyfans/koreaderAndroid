@@ -2,6 +2,11 @@ package com.yuezhou.reader.speech
 
 import com.yuezhou.reader.core.speech.AudioHealthCheck
 import com.yuezhou.reader.core.speech.KokoroTextNormalizer
+import com.yuezhou.reader.core.speech.NovelSpeechDelivery
+import com.yuezhou.reader.core.speech.SegmentDelivery
+import com.yuezhou.reader.core.speech.DeliveryAudioMetrics
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.yuezhou.reader.core.speech.PcmPlayer
 import com.yuezhou.reader.core.speech.PrepareResult
 import com.yuezhou.reader.core.speech.SessionToken
@@ -76,6 +81,8 @@ class SpeechCoordinator(
     private val inFlightSegments = java.util.concurrent.atomic.AtomicInteger(0)
     private val playerSignals = Channel<PlayerSignal>(Channel.UNLIMITED)
     private var startedIndex = -1
+    private var deliveryPlans: List<SegmentDelivery> = emptyList()
+    private val deliveryAudio = java.util.concurrent.ConcurrentHashMap<Int, DeliveryAudioMetrics>()
 
     /** 当前句序号（Started/seek 设置，不代表完成）。 */
     val currentSegmentIndex: Int get() = currentIndex
@@ -196,6 +203,13 @@ class SpeechCoordinator(
         player.stop()
         inFlightSegments.set(0)
         activePlan = plan
+        deliveryPlans = try {
+            if (plan.novelParsing) withContext(Dispatchers.Default) { NovelSpeechDelivery.plan(plan) } else emptyList()
+        } catch (_: OutOfMemoryError) {
+            eventFlow.tryEmit(SpeechPlaybackEvent.Failed(token, "小说语气分析内存不足", memoryPressure = true))
+            return
+        }
+        deliveryAudio.clear()
         activeToken = token
         chapterTriggered = false
         stateMachine.load(plan)
@@ -229,6 +243,7 @@ class SpeechCoordinator(
         job.cancel()
         player.stop()
         job.join()
+        deliveryAudio.clear()
         synchronized(byteLock) {
             pendingBytes.clear()
             pcmPendingBytes = 0
@@ -302,10 +317,12 @@ class SpeechCoordinator(
         val spokenText = KokoroTextNormalizer.normalize(segment.spokenText ?: segment.text)
         // 保留原片段的播放完成事件与锚点；纯标点只占短暂停顿，不触发 native 或空音频重试。
         if (spokenText.isEmpty()) return KokoroTextNormalizer.punctuationPause()
+        val delivery = deliveryPlans.getOrNull(index)
+        val generationSpeed = if (delivery == null) speed else (speed * delivery.speedMultiplier).coerceIn(0.5f, 2f)
         var reason = "unknown"
         repeat(2) {
             val audio = try {
-                synthesizer.synthesize(spokenText, index, speed, token)
+                synthesizer.synthesize(spokenText, index, generationSpeed, token)
             } catch (c: CancellationException) {
                 throw c
             } catch (oom: OutOfMemoryError) {
@@ -320,7 +337,17 @@ class SpeechCoordinator(
             if (!isCurrent(token, generation)) return null
             val report = healthCheck.check(audio.samples, audio.sampleRate)
             lastHealthReport = report
-            if (report.ok) return audio
+            if (report.ok) {
+                if (delivery == null) return audio
+                try {
+                    val (prepared, metrics) = NovelSpeechDelivery.compensate(audio, delivery)
+                    deliveryAudio[index] = metrics
+                    return prepared
+                } catch (_: OutOfMemoryError) {
+                    if (isCurrent(token, generation)) eventFlow.tryEmit(SpeechPlaybackEvent.Failed(token, "语气音频处理内存不足", memoryPressure = true))
+                    return null
+                } catch (_: Exception) { return audio }
+            }
             reason = report.summary()
         }
         if (isCurrent(token, generation)) {
@@ -368,7 +395,7 @@ class SpeechCoordinator(
         startedIndex = index
         stateMachine.onSegmentStarted(index)
         currentIndex = index
-        eventFlow.tryEmit(SpeechPlaybackEvent.SegmentStarted(token, index))
+        eventFlow.tryEmit(SpeechPlaybackEvent.SegmentStarted(token, index, deliveryPlans.getOrNull(index), deliveryAudio[index]))
     }
 
     private suspend fun handleCompleted(index: Int, generation: Long): SpeechPlan? {
@@ -385,6 +412,7 @@ class SpeechCoordinator(
         }
         inFlightSegments.updateAndGet { if (it > 0) it - 1 else 0 }
         eventFlow.tryEmit(SpeechPlaybackEvent.SegmentCompleted(token, index))
+        deliveryAudio.remove(index)
         progress.trySend(Unit)
         if (index == plan.segments.lastIndex && !chapterTriggered) {
             chapterTriggered = true

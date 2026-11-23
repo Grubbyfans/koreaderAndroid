@@ -1416,6 +1416,8 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
     val credentialStore = remember(context) { CloudCredentialStore(context) }
 
     var modelBusy by remember { mutableStateOf(false) }
+    var novelPreviewBusy by remember { mutableStateOf(false) }
+    var novelPreviewMessage by remember { mutableStateOf<String?>(null) }
     var modelMessage by remember { mutableStateOf<String?>(null) }
     var modelInfos by remember { mutableStateOf(SpeechRuntime.kokoro?.modelInfos().orEmpty()) }
     var modelManagerOpen by rememberSaveable { mutableStateOf(false) }
@@ -1496,6 +1498,27 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
                         }
                     })
                 }
+                Text("基于规则轻微调整语速与停顿，不保证真实情绪声线。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+                Row {
+                    listOf(false to "试听当前方式", true to "试听解析方式").forEach { (optimized, label) ->
+                        TextButton(enabled = !novelPreviewBusy && !modelBusy && importProgress?.running != true && modelInfos.isNotEmpty(), onClick = {
+                            novelPreviewBusy = true
+                            novelPreviewMessage = "正在$label…"
+                            scope.launch {
+                                try {
+                                    val provider = SpeechRuntime.kokoro
+                                    val model = prefs.kokoroModel.ifBlank { provider?.defaultModelId.orEmpty() }
+                                    val error = provider?.auditionNovelText(model, prefs.kokoroSpeaker, prefs.speechRate, optimized)
+                                    novelPreviewMessage = error ?: "$label 已完成"
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (e: Exception) { novelPreviewMessage = "试听失败：${e.message}" }
+                                finally { novelPreviewBusy = false }
+                            }
+                        }) { Text(label) }
+                    }
+                }
+                if (novelPreviewBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                novelPreviewMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 Spacer(Modifier.height(8.dp))
                 val selectedModel = modelInfos.firstOrNull { it.id == prefs.kokoroModel }
                 Text(

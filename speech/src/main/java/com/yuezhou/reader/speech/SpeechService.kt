@@ -419,9 +419,21 @@ class SpeechService : Service() {
                     "D_SEG_START index=${event.index} chars=${plan.segmentAt(event.index)?.text?.length}",
                 )
                 stateMachine.onSegmentStarted(event.index)
+                event.delivery?.let { Log.d(TAG, "D_DELIVERY index=${event.index} hint=${it.delivery} confidence=${it.confidence} multiplier=${it.speedMultiplier} rule=${it.ruleVersion} fallback=${it.fallbackReason}") }
                 recordFirstSound()
                 SpeechDiagnosticsState.update {
-                    it.copy(healthSummary = kokoroCoordinator?.lastHealthReport?.summary().orEmpty())
+                    val delivery = event.delivery
+                    it.copy(healthSummary = kokoroCoordinator?.lastHealthReport?.summary().orEmpty(),
+                        textParserEnabled = plan.novelParsing,
+                        plannerVersion = plan.plannerVersion,
+                        deliveryHint = delivery?.delivery.orEmpty(),
+                        emotionHint = delivery?.emotion.orEmpty(),
+                        deliveryConfidence = delivery?.confidence ?: 0f,
+                        deliveryRuleVersion = delivery?.ruleVersion.orEmpty(),
+                        deliveryRuleIds = delivery?.ruleIds?.joinToString().orEmpty(),
+                        speedMultiplier = delivery?.speedMultiplier ?: 1f,
+                        addedPauseMs = event.audioMetrics?.addedPauseMs ?: 0,
+                        deliveryFallback = delivery?.fallbackReason.orEmpty())
                 }
                 val segment = plan.segmentAt(event.index) ?: return
                 SpeechProgressTracker.onProgress(

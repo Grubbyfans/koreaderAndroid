@@ -92,6 +92,15 @@ internal fun KokoroModelManagerDialog(
                         add("缓冲=${diagnostics.bufferingCount}")
                     }.joinToString(" · ")
                     Text(line, style = MaterialTheme.typography.bodySmall)
+                    Text(if (diagnostics.textParserEnabled) "小说解析：开启 · v${diagnostics.plannerVersion}" else "小说解析：关闭（原路径）",
+                        style = MaterialTheme.typography.bodySmall)
+                    if (diagnostics.deliveryHint.isNotBlank()) {
+                        Text("语气：${diagnostics.deliveryHint} · 置信度 ${"%.2f".format(diagnostics.deliveryConfidence)} · 系数 ${diagnostics.speedMultiplier}",
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("规则：${diagnostics.deliveryRuleVersion} · ${diagnostics.deliveryRuleIds} · 补停顿 ${diagnostics.addedPauseMs}ms",
+                            style = MaterialTheme.typography.bodySmall)
+                        if (diagnostics.deliveryFallback.isNotBlank()) Text("中性回退：${diagnostics.deliveryFallback}", style = MaterialTheme.typography.bodySmall)
+                    }
                     if (diagnostics.healthSummary.isNotBlank()) {
                         Text("音频：${diagnostics.healthSummary}", style = MaterialTheme.typography.bodySmall)
                     }

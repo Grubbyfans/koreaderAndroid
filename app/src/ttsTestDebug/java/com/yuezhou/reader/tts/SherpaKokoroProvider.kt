@@ -9,6 +9,18 @@ import com.yuezhou.reader.core.speech.KokoroModelSlot
 import com.yuezhou.reader.core.speech.SpeechSynthesizer
 import com.yuezhou.reader.core.speech.SynthesizedAudio
 import com.yuezhou.reader.speech.AudioTrackPcmPlayer
+import com.yuezhou.reader.speech.SpeechCoordinator
+import com.yuezhou.reader.core.speech.SpeechTextPlanning
+import com.yuezhou.reader.core.speech.SpeechEngineType
+import com.yuezhou.reader.core.speech.SpeechEngineConfig
+import com.yuezhou.reader.core.speech.SpeechPlan
+import com.yuezhou.reader.core.speech.speechUnit
+import com.yuezhou.reader.core.speech.SpeechPlaybackEvent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import com.yuezhou.reader.speech.KokoroEngineProvider
 import com.yuezhou.reader.speech.KokoroImportResult
 import com.yuezhou.reader.speech.KokoroModel
@@ -111,6 +123,44 @@ internal class SherpaKokoroProvider(private val context: Context) : KokoroEngine
                 "试音失败：${e.message}"
             } finally {
                 runCatching { synthesizer.release() }
+            }
+        }
+
+    override suspend fun auditionNovelText(modelId: String, speakerId: Int, rate: Float, optimized: Boolean): String? =
+        withContext(Dispatchers.IO) {
+            synchronized(activeModels) {
+                if (activeModels.isNotEmpty()) return@withContext "请先停止朗读，等待模型释放后再试听"
+            }
+            val text = listOf(
+                speechUnit("他看了看窗外，轻声说道：“今天，恐怕回不去了。”", "preview:0"),
+                speechUnit("“你真的要走？”她低声问道。屋外的雨越下越大。", "preview:1"),
+            )
+            val planned = SpeechTextPlanning.plan(text, SpeechEngineType.KOKORO, optimized)
+            val plan = SpeechPlan("novel-preview", "", 0, planned.segments, planned.version, optimized, text)
+            val synth = createSynthesizer(modelId, speakerId)
+            val previewScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val finished = CompletableDeferred<Unit>()
+            var failure: String? = null
+            val coordinator = SpeechCoordinator(synth, AudioTrackPcmPlayer(), previewScope,
+                onChapterCompleted = { finished.complete(Unit) })
+            try {
+                previewScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    coordinator.events.collect { event ->
+                        when (event) {
+                            is SpeechPlaybackEvent.Failed -> { failure = event.reason; finished.complete(Unit) }
+                            is SpeechPlaybackEvent.SegmentStarted -> android.util.Log.d("NovelPreview",
+                                "optimized=$optimized index=${event.index} delivery=${event.delivery?.delivery} multiplier=${event.delivery?.speedMultiplier}")
+                            else -> Unit
+                        }
+                    }
+                }
+                coordinator.prepare(SpeechEngineConfig(SpeechEngineType.KOKORO, rate = rate))
+                coordinator.play(plan, 0, SessionToken(0, 1))
+                if (withTimeoutOrNull(90_000) { finished.await(); true } == null) "试听超时" else failure
+            } finally {
+                withContext(NonCancellable) {
+                    try { coordinator.release() } finally { previewScope.cancel() }
+                }
             }
         }
 

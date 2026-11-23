@@ -19,6 +19,16 @@ data class SpeechDiagnostics(
     val bufferingCount: Int = 0,
     val healthSummary: String = "",
     val lastError: String = "",
+    val textParserEnabled: Boolean = false,
+    val plannerVersion: Int = 0,
+    val deliveryHint: String = "",
+    val emotionHint: String = "",
+    val deliveryConfidence: Float = 0f,
+    val deliveryRuleVersion: String = "",
+    val deliveryRuleIds: String = "",
+    val speedMultiplier: Float = 1f,
+    val addedPauseMs: Int = 0,
+    val deliveryFallback: String = "",
     val updatedAt: Long = 0L,
 )
 
