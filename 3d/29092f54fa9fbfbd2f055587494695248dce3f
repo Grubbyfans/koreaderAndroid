@@ -1,0 +1,20 @@
+app/build.gradle.kts
+  h_7f20b2a03eb3b6 65-67
+app/src/ttsTestDebug/AndroidManifest.xml
+  h_7f20b2a03eb3b6 1-13
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/KokoroTrialActivity.kt
+  h_7f20b2a03eb3b6 1-317
+docs/BUILD.md
+  h_7f20b2a03eb3b6 39-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3d29092f54fa9fbfbd2f055587494695248dce3f",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
