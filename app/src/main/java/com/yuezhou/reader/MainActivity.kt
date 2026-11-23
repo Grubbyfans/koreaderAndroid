@@ -50,6 +50,9 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import com.yuezhou.reader.reader.db.SyncLogEntity
+import com.yuezhou.reader.speech.SpeechDiagnosticsState
+import com.yuezhou.reader.speech.SpeechRuntime
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
@@ -1393,6 +1396,24 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
     var showReading by rememberSaveable { mutableStateOf(false) }
     val credentialStore = remember(context) { CloudCredentialStore(context) }
 
+    var modelBusy by remember { mutableStateOf(false) }
+    var modelMessage by remember { mutableStateOf<String?>(null) }
+    var modelInfos by remember { mutableStateOf(SpeechRuntime.kokoro?.modelInfos().orEmpty()) }
+    var modelManagerOpen by rememberSaveable { mutableStateOf(false) }
+    val speechDiagnostics by SpeechDiagnosticsState.snapshot.collectAsStateWithLifecycle()
+    val modelImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            modelBusy = true
+            modelMessage = "正在导入模型…"
+            scope.launch {
+                val result = runCatching { SpeechRuntime.kokoro?.importModel(uri) }.getOrNull()
+                modelInfos = runCatching { SpeechRuntime.kokoro?.modelInfos() }.getOrNull().orEmpty()
+                modelBusy = false
+                modelMessage = result?.message ?: "导入失败：模型管理未装配"
+            }
+        }
+    }
+
     // 是否进入「同步记录」二级页面
     var showSyncLogPage by rememberSaveable { mutableStateOf(false) }
 
@@ -1438,6 +1459,30 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
 
         SettingsCard("云端账号") {
             CloudConfigSection(store = credentialStore)
+        }
+
+        if (SpeechRuntime.kokoro != null) {
+            SettingsCard("Kokoro 朗读模型") {
+                val selectedModel = modelInfos.firstOrNull { it.id == prefs.kokoroModel }
+                Text(
+                    selectedModel?.label ?: "未选择模型",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    if (modelInfos.isEmpty()) "暂无可用模型，请导入 ZIP 或 tar.bz2 模型包。" else "在此管理模型、试音和诊断信息。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YuezhouColors.TextSecondary,
+                )
+                Row {
+                    TextButton(onClick = {
+                        modelInfos = SpeechRuntime.kokoro?.modelInfos().orEmpty()
+                        modelMessage = null
+                        modelManagerOpen = true
+                    }) {
+                        Text("管理模型")
+                    }
+                }
+            }
         }
 
         SettingsCard("下载目录") {
@@ -1575,6 +1620,50 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
                     }
                 },
                 valueRange = 0f..48f,
+            )
+        }
+
+        if (modelManagerOpen) {
+            KokoroModelManagerDialog(
+                models = modelInfos,
+                diagnostics = speechDiagnostics,
+                busy = modelBusy,
+                message = modelMessage,
+                onImport = { modelImportLauncher.launch(arrayOf("*/*")) },
+                onAudition = { info ->
+                    modelBusy = true
+                    modelMessage = "正在试音 ${info.id}…"
+                    scope.launch {
+                        val error = runCatching {
+                            SpeechRuntime.kokoro?.auditionModel(
+                                info.id,
+                                prefs.kokoroSpeaker,
+                                "你好，这是 ${info.id} 模型的试音。",
+                            )
+                        }.getOrNull()
+                        modelBusy = false
+                        modelMessage = error ?: "${info.id} 试音完成"
+                    }
+                },
+                onDelete = { info ->
+                    modelBusy = true
+                    modelMessage = "正在删除 ${info.id}…"
+                    scope.launch {
+                        val deleted = runCatching { SpeechRuntime.kokoro?.deleteModel(info.id) }.getOrNull() == true
+                        modelInfos = runCatching { SpeechRuntime.kokoro?.modelInfos() }.getOrNull().orEmpty()
+                        modelBusy = false
+                        modelMessage = if (deleted) "已删除 ${info.id}" else "删除失败：模型可能正在使用"
+                        if (deleted && prefs.kokoroModel == info.id) {
+                            ReaderSettings.save(context, prefs.copy(kokoroModel = ""))
+                        }
+                    }
+                },
+                onDismiss = {
+                    if (!modelBusy) {
+                        modelManagerOpen = false
+                        modelMessage = null
+                    }
+                },
             )
         }
 

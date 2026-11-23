@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -104,10 +103,7 @@ import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechTextUnit
 import com.yuezhou.reader.speech.KokoroModel
-import com.yuezhou.reader.speech.KokoroModelInfo
 import com.yuezhou.reader.speech.SpeechConfig
-import com.yuezhou.reader.speech.SpeechDiagnostics
-import com.yuezhou.reader.speech.SpeechDiagnosticsState
 import com.yuezhou.reader.speech.SpeechPlanStore
 import com.yuezhou.reader.speech.SpeechRuntime
 import com.yuezhou.reader.speech.SpeechProgressTracker
@@ -251,25 +247,6 @@ private fun ReaderScreen(
     var syncBusy by remember { mutableStateOf(false) }
     var undoPosition by remember(bookId) { mutableStateOf<Pair<String, Double?>?>(null) }
     var pendingJump by remember { mutableStateOf<Pair<String, kotlinx.coroutines.CompletableDeferred<Boolean>>?>(null) }
-
-    // Kokoro 模型管理（仅测试版装配了引擎提供者时可见/可用）
-    var modelManagerOpen by remember { mutableStateOf(false) }
-    var modelBusy by remember { mutableStateOf(false) }
-    var modelMessage by remember { mutableStateOf<String?>(null) }
-    var modelInfos by remember { mutableStateOf(SpeechRuntime.kokoro?.modelInfos().orEmpty()) }
-    val speechDiagnostics by SpeechDiagnosticsState.snapshot.collectAsStateWithLifecycle()
-    val modelImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            modelBusy = true
-            modelMessage = "正在导入模型…"
-            scope.launch {
-                val result = runCatching { SpeechRuntime.kokoro?.importModel(uri) }.getOrNull()
-                modelInfos = runCatching { SpeechRuntime.kokoro?.modelInfos() }.getOrNull().orEmpty()
-                modelBusy = false
-                modelMessage = result?.message ?: "导入失败：模型管理未装配"
-            }
-        }
-    }
 
     suspend fun flushProgress() {
         saveJob?.cancelAndJoin()
@@ -925,7 +902,7 @@ private fun ReaderScreen(
                 enter = fadeIn(tween(200)),
                 exit = fadeOut(tween(180)),
             ) {
-                val kokoroModels = remember(modelInfos) { SpeechRuntime.kokoro?.availableModels().orEmpty() }
+                val kokoroModels = SpeechRuntime.kokoro?.availableModels().orEmpty()
                 ReaderPanel(
                     title = title,
                     fraction = currentFraction,
@@ -964,11 +941,6 @@ private fun ReaderScreen(
                         }
                     },
                     onSync = { openSyncDialog() },
-                    onManageModels = {
-                        modelManagerOpen = true
-                        modelMessage = null
-                        modelInfos = SpeechRuntime.kokoro?.modelInfos().orEmpty()
-                    },
                     onSpeak = {
                         if (speaking) {
                             // 朗读中 → 停止
@@ -998,132 +970,7 @@ private fun ReaderScreen(
             )
         }
 
-        // Kokoro 模型管理（方案 §8.2 / §11：导入、详情、试音、切换、删除）
-        if (modelManagerOpen) {
-            KokoroModelManagerDialog(
-                models = modelInfos,
-                diagnostics = speechDiagnostics,
-                busy = modelBusy,
-                message = modelMessage,
-                onImport = { modelImportLauncher.launch(arrayOf("*/*")) },
-                onAudition = { info ->
-                    modelBusy = true
-                    modelMessage = "正在试音 ${info.id}…"
-                    scope.launch {
-                        val error = runCatching {
-                            SpeechRuntime.kokoro?.auditionModel(
-                                info.id,
-                                latestPrefs.kokoroSpeaker,
-                                "你好，这是 ${info.id} 模型的试音。",
-                            )
-                        }.getOrNull()
-                        modelBusy = false
-                        modelMessage = error ?: "${info.id} 试音完成"
-                    }
-                },
-                onDelete = { info ->
-                    modelBusy = true
-                    modelMessage = "正在删除 ${info.id}…"
-                    scope.launch {
-                        val deleted = runCatching { SpeechRuntime.kokoro?.deleteModel(info.id) }.getOrNull() == true
-                        modelInfos = runCatching { SpeechRuntime.kokoro?.modelInfos() }.getOrNull().orEmpty()
-                        modelBusy = false
-                        modelMessage = if (deleted) "已删除 ${info.id}" else "删除失败：模型可能正在使用"
-                        if (deleted && readerPrefs.kokoroModel == info.id) {
-                            ReaderSettings.save(context, readerPrefs.copy(kokoroModel = ""))
-                        }
-                    }
-                },
-                onDismiss = {
-                    if (!modelBusy) {
-                        modelManagerOpen = false
-                        modelMessage = null
-                    }
-                },
-            )
-        }
     }
-}
-
-/** Kokoro 模型管理对话框：导入 ZIP/tar.bz2、查看版本/精度/体积/哈希、试音与删除。 */
-@Composable
-private fun KokoroModelManagerDialog(
-    models: List<KokoroModelInfo>,
-    diagnostics: SpeechDiagnostics,
-    busy: Boolean,
-    message: String?,
-    onImport: () -> Unit,
-    onAudition: (KokoroModelInfo) -> Unit,
-    onDelete: (KokoroModelInfo) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("Kokoro 模型管理") },
-        text = {
-            Column {
-                if (models.isEmpty()) {
-                    Text("未部署可用模型。请导入 ZIP 或 tar.bz2 模型包。", style = MaterialTheme.typography.bodyMedium)
-                } else {
-                    models.forEach { info ->
-                        Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                            Text(info.label, style = MaterialTheme.typography.titleSmall)
-                            val meta = buildList {
-                                if (info.version.isNotBlank()) add(info.version)
-                                if (info.precision.isNotBlank()) add(info.precision)
-                                add(formatSize(info.sizeBytes))
-                                if (info.sha256.isNotBlank()) add("sha256 ${info.sha256.take(12)}…")
-                            }.joinToString(" · ")
-                            Text(meta, style = MaterialTheme.typography.bodySmall)
-                            Row {
-                                TextButton(onClick = { onAudition(info) }, enabled = !busy) { Text("试音") }
-                                TextButton(onClick = { onDelete(info) }, enabled = !busy) { Text("删除") }
-                            }
-                        }
-                    }
-                }
-                if (message != null) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(message, style = MaterialTheme.typography.bodySmall)
-                }
-                if (diagnostics.engine.isNotBlank()) {
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(8.dp))
-                    Text("朗读诊断", style = MaterialTheme.typography.titleSmall)
-                    val line = buildList {
-                        add(diagnostics.engine)
-                        if (diagnostics.modelId.isNotBlank()) add(diagnostics.modelId)
-                        add("sid=${diagnostics.speakerId}")
-                        add("rate=${diagnostics.rate}")
-                        if (diagnostics.modelLoadMs >= 0) add("加载=${diagnostics.modelLoadMs}ms")
-                        if (diagnostics.firstSoundMs >= 0) add("首声=${diagnostics.firstSoundMs}ms")
-                        add("缓冲=${diagnostics.bufferingCount}")
-                    }.joinToString(" · ")
-                    Text(line, style = MaterialTheme.typography.bodySmall)
-                    if (diagnostics.healthSummary.isNotBlank()) {
-                        Text("音频：${diagnostics.healthSummary}", style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (diagnostics.lastError.isNotBlank()) {
-                        Text("最近错误：${diagnostics.lastError}", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onImport, enabled = !busy) { Text("导入模型") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
-        },
-    )
-}
-
-private fun formatSize(bytes: Long): String = when {
-    bytes >= 1024L * 1024 * 1024 -> String.format("%.1f GiB", bytes / 1024.0 / 1024 / 1024)
-    bytes >= 1024L * 1024 -> String.format("%.0f MiB", bytes / 1024.0 / 1024)
-    bytes >= 1024L -> String.format("%.0f KiB", bytes / 1024.0)
-    else -> "$bytes B"
 }
 
 /** 进度同步对话框：展示后端、本机/云端进度、设备与时间，提供上传/应用两步操作。 */
@@ -1244,7 +1091,6 @@ private fun ReaderPanel(
     onFractionSeek: (Float) -> Unit,
     onPrefsChange: (ReaderPreferences) -> Unit,
     onSync: () -> Unit,
-    onManageModels: () -> Unit,
     onSpeak: () -> Unit,
 ) {
     // 设置区折叠状态
@@ -1367,7 +1213,6 @@ private fun ReaderPanel(
                             voices = voices,
                             kokoroModels = kokoroModels,
                             onPrefsChange = onPrefsChange,
-                            onManageModels = onManageModels,
                         )
                     }
                 }
@@ -1388,7 +1233,6 @@ private fun SettingsControls(
     voices: List<TtsVoice>,
     kokoroModels: List<KokoroModel>,
     onPrefsChange: (ReaderPreferences) -> Unit,
-    onManageModels: () -> Unit,
 ) {
     // 拖动中的本地预览值；null 表示未拖动（跟随真实 prefs），松手才提交，避免连续写 DataStore + 重排全文
     var fontSizePreview by remember { mutableStateOf<Int?>(null) }
@@ -1570,11 +1414,6 @@ private fun SettingsControls(
                 }
                 KokoroSpeakerPreference(prefs.kokoroSpeaker) { id ->
                     onPrefsChange(prefs.copy(kokoroSpeaker = id))
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("模型管理", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.width(12.dp))
-                    TextButton(onClick = onManageModels) { Text("导入 / 试音 / 删除") }
                 }
             }
         }
