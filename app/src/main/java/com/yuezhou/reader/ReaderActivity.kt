@@ -18,8 +18,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -1071,7 +1074,8 @@ private fun ReaderPanel(
     var settingsExpanded by remember { mutableStateOf(false) }
     // 进度滑块拖动中的本地预览值；null 表示未在拖动（跟随真实 fraction）
     var fractionPreview by remember { mutableStateOf<Float?>(null) }
-    Box(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val panelMaxHeight = maxHeight / 2
         // 全屏透明点击层：拦截对正文/翻页区的点击，直接隐藏面板
         Box(
             modifier = Modifier
@@ -1131,7 +1135,7 @@ private fun ReaderPanel(
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 3.dp,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().heightIn(max = panelMaxHeight),
             ) {
                 Column(
                     modifier = Modifier
@@ -1176,18 +1180,21 @@ private fun ReaderPanel(
                             onClick = { settingsExpanded = !settingsExpanded },
                         )
                     }
-                    // 设置区（默认收起，点击「设置」展开），垂直平滑展开/收起
+                    // 底部面板最多占半屏；操作栏固定，设置内容超出剩余高度时滚动。
                     AnimatedVisibility(
                         visible = settingsExpanded,
                         enter = expandVertically(tween(240)) + fadeIn(tween(240)),
                         exit = shrinkVertically(tween(220)) + fadeOut(tween(180)),
+                        modifier = Modifier.weight(1f, fill = false),
                     ) {
-                        SettingsControls(
-                            prefs = prefs,
-                            voices = voices,
-                            kokoroModels = kokoroModels,
-                            onPrefsChange = onPrefsChange,
-                        )
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            SettingsControls(
+                                prefs = prefs,
+                                voices = voices,
+                                kokoroModels = kokoroModels,
+                                onPrefsChange = onPrefsChange,
+                            )
+                        }
                     }
                 }
             }
