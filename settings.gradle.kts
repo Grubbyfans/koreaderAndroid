@@ -29,3 +29,5 @@ include(":app")
 include(":core")
 include(":reader")
 include(":speech")
+
+include(":novel-text")
