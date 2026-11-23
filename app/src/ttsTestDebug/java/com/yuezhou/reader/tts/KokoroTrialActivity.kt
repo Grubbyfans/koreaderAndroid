@@ -17,12 +17,26 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
+import com.yuezhou.reader.core.speech.SessionToken
+import com.yuezhou.reader.core.speech.SourceAnchor
+import com.yuezhou.reader.core.speech.SpeechPlan
+import com.yuezhou.reader.core.speech.SpeechPlaybackEvent
+import com.yuezhou.reader.core.speech.SpeechSegment
+import com.yuezhou.reader.speech.AudioTrackPcmPlayer
+import com.yuezhou.reader.speech.SpeechCoordinator
 import java.io.File
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * 阶段 B 最小试音入口，仅存在于 ttsTestDebug 变体。
@@ -41,6 +55,14 @@ class KokoroTrialActivity : Activity() {
     private lateinit var status: TextView
     private var engine: OfflineTts? = null
 
+    private var cScope: CoroutineScope? = null
+    private var cCoordinator: SpeechCoordinator? = null
+    private var cGeneration = 0L
+    private var cCount = 0
+    private var cCompleted = 0
+    private var cStartAt = 0L
+    private var cFirstStartedAt = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -56,6 +78,15 @@ class KokoroTrialActivity : Activity() {
         root.addView(status)
         root.addView(button("运行 int8") { runTrial("int8") })
         root.addView(button("运行 fp32") { runTrial("fp32") })
+        root.addView(button("C 连续 12 句 fp32") { startContinuous("fp32", 12) })
+        root.addView(button("C 暂停") { cScope?.launch { cCoordinator?.pause() } })
+        root.addView(button("C 继续") { cScope?.launch { cCoordinator?.resume() } })
+        root.addView(button("C 停止并释放") {
+            executor.execute {
+                releaseContinuous()
+                log("C_RELEASED")
+            }
+        })
         root.addView(button("释放引擎") {
             executor.execute {
                 runCatching { engine?.release() }
@@ -66,8 +97,15 @@ class KokoroTrialActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(root) })
 
         if (intent.getBooleanExtra("autorun", false)) {
-            val model = intent.getStringExtra("model") ?: "int8"
-            root.post { runTrial(model) }
+            if (intent.getStringExtra("mode") == "continuous") {
+                val model = intent.getStringExtra("model") ?: "fp32"
+                val count = intent.getIntExtra("count", 12)
+                val sid = intent.getIntExtra("sid", 3)
+                root.post { startContinuous(model, count, sid) }
+            } else {
+                val model = intent.getStringExtra("model") ?: "int8"
+                root.post { runTrial(model) }
+            }
         }
     }
 
@@ -94,31 +132,20 @@ class KokoroTrialActivity : Activity() {
         }
     }
 
-    private fun trial(modelName: String, speeds: List<Float>, text: String, sid: Int) {
+    private fun modelDir(modelName: String): File {
         val dirName = when (modelName) {
             "int8" -> "kokoro-int8-multi-lang-v1_1"
             else -> "kokoro-multi-lang-v1_1"
         }
-        val dir = File(filesDir, "tts-models/$dirName")
-        log("MODEL $modelName dir=${dir.absolutePath}")
-        log(
-            "DIR exists=${dir.exists()} isDir=${dir.isDirectory} canRead=${dir.canRead()} " +
-                "parentExists=${dir.parentFile?.exists()} list=${dir.list()?.take(5)}",
-        )
-        check(dir.isDirectory) { "模型目录不存在，请先 adb push" }
+        return File(filesDir, "tts-models/$dirName")
+    }
+
+    private fun createTts(dir: File): OfflineTts {
         val modelFile = listOf("model.onnx", "model.int8.onnx")
             .map { File(dir, it) }
             .firstOrNull { it.isFile }
             ?: error("缺少 model.onnx / model.int8.onnx")
-        for (name in listOf("voices.bin", "tokens.txt", "lexicon-us-en.txt", "lexicon-zh.txt")) {
-            check(File(dir, name).isFile) { "缺少 $name" }
-        }
-        check(File(dir, "espeak-ng-data").isDirectory) { "缺少 espeak-ng-data/" }
-
-        val pssBefore = pssKb()
-        val initStart = SystemClock.elapsedRealtime()
-        log("INIT_BEGIN pss=${pssBefore}KB")
-        val tts = OfflineTts(
+        return OfflineTts(
             null,
             OfflineTtsConfig(
                 model = OfflineTtsModelConfig(
@@ -143,6 +170,106 @@ class KokoroTrialActivity : Activity() {
                 silenceScale = 0.2f,
             ),
         )
+    }
+
+    private fun startContinuous(model: String, count: Int, sid: Int = 3) {
+        executor.execute {
+            try {
+                releaseContinuous()
+                val dir = modelDir(model)
+                check(dir.isDirectory) { "模型目录不存在，请先 adb push" }
+                val tts = createTts(dir)
+                val synth = SherpaKokoroSynthesizer(tts, sid)
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+                val coordinator = SpeechCoordinator(synth, AudioTrackPcmPlayer(), scope)
+                cScope = scope
+                cCoordinator = coordinator
+                cCount = count
+                cCompleted = 0
+                cFirstStartedAt = 0L
+                cGeneration++
+                val generation = cGeneration
+                scope.launch {
+                    coordinator.events.collect { event -> onContinuousEvent(event) }
+                }
+                cStartAt = SystemClock.elapsedRealtime()
+                log("C_PLAY model=$model count=$count sampleRate=${tts.sampleRate()} sid=$sid gen=$generation")
+                scope.launch {
+                    coordinator.play(planOf(count), 0, SessionToken(sessionId = 1, generation = generation))
+                }
+            } catch (t: Throwable) {
+                log("C_START_FAIL ${t.javaClass.simpleName}: ${t.message}")
+                Log.e(tag, "continuous start failed", t)
+            }
+        }
+    }
+
+    private fun onContinuousEvent(event: SpeechPlaybackEvent) {
+        when (event) {
+            is SpeechPlaybackEvent.SegmentStarted -> {
+                if (cFirstStartedAt == 0L) {
+                    cFirstStartedAt = SystemClock.elapsedRealtime()
+                    log("C_FIRST_START latencyMs=${cFirstStartedAt - cStartAt}")
+                }
+                log("C_STARTED index=${event.index}")
+            }
+            is SpeechPlaybackEvent.SegmentCompleted -> {
+                cCompleted++
+                log("C_COMPLETED index=${event.index} completed=$cCompleted/$cCount pss=${pssKb()}KB")
+                if (event.index == cCount - 1) {
+                    log(
+                        "C_SUMMARY count=$cCount totalMs=${SystemClock.elapsedRealtime() - cStartAt} " +
+                            "firstStartMs=${cFirstStartedAt - cStartAt} completed=$cCompleted " +
+                            "health=${cCoordinator?.lastHealthReport?.summary()}",
+                    )
+                }
+            }
+            is SpeechPlaybackEvent.Buffering -> log("C_BUFFERING index=${event.index}")
+            is SpeechPlaybackEvent.Failed -> log("C_FAILED reason=${event.reason}")
+        }
+    }
+
+    private fun planOf(count: Int): SpeechPlan {
+        val segments = (0 until count).map { i ->
+            val text = "第 ${i + 1} 句，静读连续朗读测试。"
+            SpeechSegment(
+                text = text,
+                startAnchor = SourceAnchor("n$i", 0),
+                endAnchor = SourceAnchor("n$i", text.length),
+                charToSource = (0..text.length).map { SourceAnchor("n$i", it) },
+            )
+        }
+        return SpeechPlan("trial", "0", 0, segments)
+    }
+
+    private fun releaseContinuous() {
+        val coordinator = cCoordinator
+        val scope = cScope
+        cCoordinator = null
+        cScope = null
+        if (coordinator != null) {
+            runBlocking { runCatching { coordinator.release() } }
+        }
+        scope?.cancel()
+    }
+
+    private fun trial(modelName: String, speeds: List<Float>, text: String, sid: Int) {
+        val dir = modelDir(modelName)
+        log("MODEL $modelName dir=${dir.absolutePath}")
+        log(
+            "DIR exists=${dir.exists()} isDir=${dir.isDirectory} canRead=${dir.canRead()} " +
+                "parentExists=${dir.parentFile?.exists()} list=${dir.list()?.take(5)}",
+        )
+        check(dir.isDirectory) { "模型目录不存在，请先 adb push" }
+        for (name in listOf("voices.bin", "tokens.txt", "lexicon-us-en.txt", "lexicon-zh.txt")) {
+            check(File(dir, name).isFile) { "缺少 $name" }
+        }
+        check(File(dir, "espeak-ng-data").isDirectory) { "缺少 espeak-ng-data/" }
+
+        val pssBefore = pssKb()
+        val initStart = SystemClock.elapsedRealtime()
+        log("INIT_BEGIN pss=${pssBefore}KB")
+        val tts = createTts(dir)
         val initMs = SystemClock.elapsedRealtime() - initStart
         runCatching { engine?.release() }
         engine = tts
@@ -311,7 +438,10 @@ class KokoroTrialActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        executor.execute { runCatching { engine?.release() } }
+        executor.execute {
+            releaseContinuous()
+            runCatching { engine?.release() }
+        }
         executor.shutdown()
     }
 }

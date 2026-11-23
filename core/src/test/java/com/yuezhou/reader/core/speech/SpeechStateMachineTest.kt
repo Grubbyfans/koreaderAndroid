@@ -110,4 +110,63 @@ class SpeechStateMachineTest {
         val sm = SpeechStateMachine()
         assertTrue(sm.play().isFailure)
     }
+
+    @Test
+    fun `开始事件只更新当前句不标记完成`() {
+        val sm = SpeechStateMachine()
+        sm.load(planOf("第一句。", "第二句。"))
+        sm.play()
+        sm.onSegmentStarted(1)
+        assertEquals(1, sm.currentSegmentIndex)
+        assertEquals(-1, sm.lastCompletedSegmentIndex)
+        assertNull(sm.advanceToNext())
+    }
+
+    @Test
+    fun `完成事件后才允许前进到下一句`() {
+        val sm = SpeechStateMachine()
+        sm.load(planOf("第一句。", "第二句。", "第三句。"))
+        sm.play()
+        sm.onSegmentCompleted(0)
+        assertEquals(0, sm.lastCompletedSegmentIndex)
+        val next = sm.advanceToNext()
+        assertEquals("第二句。", next?.text)
+        assertEquals(1, sm.currentSegmentIndex)
+        assertEquals(0, sm.lastCompletedSegmentIndex)
+    }
+
+    @Test
+    fun `跳句不推进也不回退已完成进度`() {
+        val sm = SpeechStateMachine()
+        sm.load(planOf("第一句。", "第二句。", "第三句。"))
+        sm.play()
+        sm.onSegmentCompleted(0)
+        sm.next()
+        assertEquals(1, sm.currentSegmentIndex)
+        assertEquals(0, sm.lastCompletedSegmentIndex)
+        sm.previous()
+        assertEquals(0, sm.currentSegmentIndex)
+        assertEquals(0, sm.lastCompletedSegmentIndex)
+    }
+
+    @Test
+    fun `重建计划重置已完成进度`() {
+        val sm = SpeechStateMachine()
+        sm.load(planOf("第一句。", "第二句。"))
+        sm.play()
+        sm.onSegmentCompleted(0)
+        sm.load(planOf("新一句。"))
+        assertEquals(0, sm.currentSegmentIndex)
+        assertEquals(-1, sm.lastCompletedSegmentIndex)
+    }
+
+    @Test
+    fun `作废计划重置已完成进度`() {
+        val sm = SpeechStateMachine()
+        sm.load(planOf("第一句。", "第二句。"))
+        sm.play()
+        sm.onSegmentCompleted(0)
+        sm.invalidate()
+        assertEquals(-1, sm.lastCompletedSegmentIndex)
+    }
 }

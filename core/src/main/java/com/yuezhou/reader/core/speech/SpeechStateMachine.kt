@@ -39,13 +39,27 @@ class SpeechStateMachine {
     var position: Position = Position(0, 0)
         private set
 
-    /** 当前「已确认播出的」片段序号（即 [position.segmentIndex]，供同步使用）。 */
-    val confirmedSegmentIndex: Int get() = position.segmentIndex
+    /**
+     * 当前句序号：由 SegmentStarted（或 seek）设置，仅代表「正在读哪一句」，
+     * 不代表已读完。旧名 [confirmedSegmentIndex] 保留兼容，语义等同本值。
+     */
+    val currentSegmentIndex: Int get() = position.segmentIndex
+
+    /**
+     * 最后实际播完的句子序号（技术方案 §5.2）；未完成任何句子时为 -1。
+     * 跨章判断、云端进度只能使用本值，不能使用 [currentSegmentIndex]。
+     */
+    var lastCompletedSegmentIndex: Int = -1
+        private set
+
+    /** 旧名兼容：代表「当前句」，不是完成进度。 */
+    val confirmedSegmentIndex: Int get() = currentSegmentIndex
 
     /** 加载新计划并复位到起始。 */
     fun load(plan: SpeechPlan) {
         this.plan = plan
         this.position = Position(0, 0)
+        this.lastCompletedSegmentIndex = -1
         this.state = State.IDLE
     }
 
@@ -53,6 +67,7 @@ class SpeechStateMachine {
     fun invalidate() {
         this.plan = null
         this.position = Position(0, 0)
+        this.lastCompletedSegmentIndex = -1
         this.state = State.STOPPED
     }
 
@@ -85,8 +100,10 @@ class SpeechStateMachine {
     }
 
     /**
-     * TTS 引擎回调：确认某片段已播到指定字符偏移。
-     * 更新已确认位置，供云端同步读取「已实际确认的当前朗读点」。
+     * TTS 引擎回调：确认某片段已播到指定字符偏移（系统 TTS 的 onRangeStart/onDone）。
+     *
+     * 只更新当前句位置，不改变 [lastCompletedSegmentIndex]——完成进度必须走
+     * [onSegmentCompleted]，避免把「已开始播放」误当成「已读完」。
      */
     fun onProgress(segmentIndex: Int, charOffset: Int) {
         if (segmentIndex >= 0) {
@@ -94,16 +111,47 @@ class SpeechStateMachine {
         }
     }
 
-    /** 当前片段播完，前进到下一片段。返回下一片段（无则 null）。 */
+    /**
+     * Kokoro 事件 SegmentStarted：只更新当前句，标记「开始读第 N 句」。
+     * 不标记完成。
+     */
+    fun onSegmentStarted(segmentIndex: Int) {
+        val p = plan ?: return
+        if (segmentIndex !in p.segments.indices) return
+        position = Position(segmentIndex, 0)
+    }
+
+    /**
+     * Kokoro 事件 SegmentCompleted：第 N 句 PCM 已实际播完。
+     * 这是唯一允许推进完成进度的入口；Kokoro 无字级偏移，charOffset 恒为 0。
+     */
+    fun onSegmentCompleted(segmentIndex: Int) {
+        val p = plan ?: return
+        if (segmentIndex !in p.segments.indices) return
+        position = Position(segmentIndex, 0)
+        lastCompletedSegmentIndex = segmentIndex
+    }
+
+    /**
+     * 当前片段播完，前进到下一片段。返回下一片段（无则 null）。
+     *
+     * 技术方案 §5.2：只允许在「当前句已由 SegmentCompleted 确认完成」后调用；
+     * 未完成时返回 null，防止仅凭 Started 提前推进。
+     */
     fun advanceToNext(): SpeechSegment? {
         val p = plan ?: return null
-        val next = position.segmentIndex + 1
+        if (lastCompletedSegmentIndex != currentSegmentIndex) return null
+        val next = currentSegmentIndex + 1
         if (next >= p.segments.size) return null
         position = Position(next, 0)
         return p.segments[next]
     }
 
-    /** 跳到上一句（允许重播当前句，避免跳过未读内容）。 */
+    /**
+     * 跳到上一句（允许重播当前句，避免跳过未读内容）。
+     *
+     * seek 只改当前句，不改变 [lastCompletedSegmentIndex]：跳句既不代表读完，也不回退已完成进度。
+     */
     fun previous(): Result<SpeechSegment> {
         val p = plan ?: return Result.failure(IllegalStateException("无朗读计划"))
         if (p.segments.isEmpty()) return Result.failure(IllegalStateException("朗读计划为空"))
@@ -112,7 +160,7 @@ class SpeechStateMachine {
         return Result.success(p.segments[idx])
     }
 
-    /** 跳到下一句。 */
+    /** 跳到下一句。语义同 [previous]：只改当前句，不标记完成。 */
     fun next(): Result<SpeechSegment> {
         val p = plan ?: return Result.failure(IllegalStateException("无朗读计划"))
         if (p.segments.isEmpty()) return Result.failure(IllegalStateException("朗读计划为空"))
