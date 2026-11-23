@@ -3,6 +3,11 @@ package com.yuezhou.reader.reader
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -14,6 +19,7 @@ import java.io.File
  * 保证同一本书重复导入时覆盖旧文件（配合文件代次 fileGeneration 语义）。
  */
 object EpubImporter {
+    private val importMutex = Mutex()
 
     /** 私有 EPUB 根目录：files/epub/。 */
     fun epubDir(context: Context): File = File(context.filesDir, "epub").apply { mkdirs() }
@@ -28,53 +34,49 @@ object EpubImporter {
      * - 通过 [LibraryStore] 登记 library.json、提取并保存封面。
      */
     suspend fun import(context: Context, uri: Uri): Result<File> = withContext(Dispatchers.IO) {
-        try {
+        importMutex.withLock {
             val dir = epubDir(context)
-            val name = displayName(context, uri) ?: "book-${System.currentTimeMillis()}.epub"
-            val safeName = sanitizeFileName(name)
-            val target = File(dir, safeName)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
-            } ?: return@withContext Result.failure(IllegalStateException("无法打开 EPUB: $uri"))
-
-            // 提取封面 + 书名并登记书库（失败不阻断正文导入，仅忽略）
+            val staging = File.createTempFile(".epub-import-", ".tmp", dir)
             try {
-                val cover = CoverExtractor.extract(target)
-                val title = CoverExtractor.extractTitle(target)
-                LibraryStore(context).registerBook(safeName, cover, title)
+                val name = displayName(context, uri) ?: "book-${System.currentTimeMillis()}.epub"
+                val safeName = EpubImportFiles.fileName(name)
+                val target = File(dir, safeName)
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    staging.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            output.write(buffer, 0, n)
+                        }
+                    }
+                } ?: throw IllegalStateException("无法读取 EPUB，请从文件管理器重新选择")
+                EpubImportFiles.validate(staging)
+                val cover = CoverExtractor.extract(staging)
+                val title = CoverExtractor.extractTitle(staging)
+                currentCoroutineContext().ensureActive()
+                EpubImportFiles.install(staging, target)
+                LibraryStore(context).registerBook(safeName, cover, title).getOrThrow()
+                Result.success(target)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: OutOfMemoryError) {
+                Result.failure(IllegalStateException("内存不足，请关闭其他应用后重试导入"))
             } catch (e: Exception) {
-                // 书库登记失败不影响已落盘的正文，静默忽略（上层仍可用文件直接阅读）
-            }
-
-            Result.success(target)
-        } catch (e: Exception) {
-            Result.failure(e)
+                Result.failure(e)
+            } finally { staging.delete() }
         }
     }
 
-    /** 取 URI 的显示名（文件名）。 */
     private fun displayName(context: Context, uri: Uri): String? {
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0) return cursor.getString(idx)
+        if (uri.scheme == "file") return uri.path?.let { File(it).name }
+        val name = runCatching {
+            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (cursor.moveToFirst() && index >= 0) cursor.getString(index) else null
             }
-        }
-        return uri.lastPathSegment
-    }
-
-    /**
-     * 清理文件名中的路径分隔符与非法字符，避免目录穿越。
-     *
-     * 关键：去扩展名后的「书名」部分必须 trim 首尾空白。否则书名末尾带空格（如「全编 .epub」）
-     * 时，localId 虽能通过（local_id 不校验首尾空白），但 LibraryCatalog.encode 的严格校验
-     * （复用 cloud_id，拒绝首尾空白）会在写库时抛异常，导致书库登记失败、书架显示为空。
-     */
-    private fun sanitizeFileName(name: String): String {
-        val cleaned = name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim()
-        if (cleaned.isBlank()) return "book.epub"
-        // 拆分扩展名，仅对「书名」部分 trim 首尾空白，保留合法的 .epub 扩展名
-        val base = cleaned.removeSuffix(".epub").removeSuffix(".EPUB").trim()
-        return if (base.isBlank()) "book.epub" else "$base.epub"
+        }.getOrNull()
+        return name ?: uri.lastPathSegment
     }
 }

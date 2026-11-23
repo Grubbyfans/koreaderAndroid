@@ -142,7 +142,24 @@ class MainActivity : ComponentActivity() {
                 BookshelfScreen()
             }
         }
+        forwardExternalEpub(intent)
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        forwardExternalEpub(intent)
+    }
+
+    private fun forwardExternalEpub(incoming: Intent) {
+        // 外部入口结束后，Android 可能把相同 VIEW 请求交给已有任务的书架根页。
+        // 从当前任务显式转发，不携带 NEW_TASK，保证重复点击同一本书也会进入导入入口。
+        if (incoming.action == Intent.ACTION_VIEW && incoming.data != null) {
+            startActivity(Intent(incoming).setClass(this, OpenEpubActivity::class.java)
+                .setFlags(incoming.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)))
+        }
+    }
+
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
