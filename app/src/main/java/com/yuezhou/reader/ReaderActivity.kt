@@ -552,7 +552,7 @@ private fun ReaderScreen(
                     EpubFileGeneration.of(context, fileName, source)
                 }
                 val plan = SpeechPlan(id, generation, chapterIndex, planning.segments, planning.version,
-                    prefs.novelTextParsing && engine == SpeechEngineType.KOKORO, units)
+                    prefs.novelTextParsing && engine == SpeechEngineType.KOKORO, units, engine)
                 val from = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     startPosition?.let { start -> nodes.getOrNull(start.nodeIndex ?: -1)?.let {
                         plan.findSegmentForAnchor(it.cfi, start.charOffsetInNode)

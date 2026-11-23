@@ -67,6 +67,7 @@ data class SpeechPlan(
     val plannerVersion: Int = PLANNER_VERSION,
     val novelParsing: Boolean = false,
     val sourceUnits: List<SpeechTextUnit>? = null,
+    val engine: SpeechEngineType = SpeechEngineType.SYSTEM_TTS,
 ) {
     /** 片段总数。 */
     val segmentCount: Int get() = segments.size

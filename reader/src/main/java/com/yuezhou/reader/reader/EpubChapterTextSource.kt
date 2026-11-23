@@ -52,7 +52,7 @@ class EpubChapterTextSource(
                     checkActive()
                     val units = extractChapter(zip, spine[index], index)
                     val result = SpeechTextPlanning.plan(units,
-                        if (after.novelParsing) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS, after.novelParsing)
+                        if (after.novelParsing) SpeechEngineType.KOKORO else after.engine, after.novelParsing)
                     if (result.segments.isNotEmpty()) {
                         return after.copy(chapterIndex = index, segments = result.segments,
                             plannerVersion = result.version, sourceUnits = units)

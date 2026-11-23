@@ -6,11 +6,22 @@ import org.junit.jupiter.api.Test
 class SpeechTextPlanningTest {
     private val units = listOf(speechUnit("“你真的要走？”她低声问道。2026年，他花了39.8元。", "n1"))
     @Test fun `默认关闭与当前分句和输入逐字段相同`() {
-        val old = SentencePlanner().plan(units)
+        val old = SentencePlanner(preserveNumericDots = true).plan(units)
         val result = SpeechTextPlanning.plan(units, SpeechEngineType.KOKORO, false)
         assertEquals(old, result.segments)
         assertEquals(SpeechPlan.PLANNER_VERSION, result.version)
         assertTrue(result.segments.all { it.spokenText == null && it.novel == null })
+    }
+    @Test fun `Kokoro关闭解析仍保留跨行内节点的小数日期并保持原文锚点`() {
+        val source = listOf(SpeechTextUnit("价格39.", SourceAnchor("a", 0), false),
+            SpeechTextUnit("8元，日期2026.11.23。结束。", SourceAnchor("b", 0)))
+        val chunks = SpeechTextPlanning.plan(source, SpeechEngineType.KOKORO, false).segments
+        assertEquals("价格39.8元，日期2026.11.23。", chunks.first().text)
+        assertEquals(SourceAnchor("b", 0), chunks.first().charToSource[5])
+        assertTrue(chunks.all { it.novel == null })
+        assertEquals("结束。", chunks.last().text)
+        val ended = SpeechTextPlanning.plan(listOf(speechUnit("123. 下一句。", "n")), SpeechEngineType.KOKORO, false)
+        assertEquals("123.", ended.segments.first().text)
     }
     @Test fun `系统TTS即使开关开启也不经过新模块`() {
         assertEquals(SentencePlanner().plan(units), SpeechTextPlanning.plan(units, SpeechEngineType.SYSTEM_TTS, true).segments)
@@ -33,7 +44,7 @@ class SpeechTextPlanningTest {
         val original = SpeechPlan("book", "generation", 0, result.segments, result.version, true, units)
         val anchor = result.segments.last().startAnchor
         val (legacy, from) = SpeechTextPlanning.rebuild(original, SpeechEngineType.KOKORO, false, anchor)
-        assertEquals(SentencePlanner().plan(units), legacy.segments)
+        assertEquals(SentencePlanner(preserveNumericDots = true).plan(units), legacy.segments)
         assertFalse(legacy.novelParsing)
         assertTrue(legacy.segments[from].charToSource.any { it.nodeId == anchor.nodeId && it.offset >= anchor.offset })
     }

@@ -107,7 +107,7 @@ internal object KokoroModels {
         runCatching { target.deleteRecursively() }
     }
 
-    fun createTts(dir: File): OfflineTts {
+    fun createTts(dir: File, debug: Boolean = false): OfflineTts {
         val modelFile = modelFile(dir)
             ?: error("缺少 model.onnx / model.int8.onnx")
         return OfflineTts(
@@ -126,10 +126,13 @@ internal object KokoroModels {
                         lengthScale = 1.0f,
                     ),
                     numThreads = 2,
-                    debug = false,
+                    debug = debug,
                     provider = "cpu",
                 ),
-                ruleFsts = "",
+                // Specific rules precede general numbers; all Kokoro entry points share this config.
+                ruleFsts = listOf("phone-zh.fst", "date-zh.fst", "number-zh.fst")
+                    .map { File(dir, it) }.filter { it.isFile }
+                    .joinToString(",") { it.absolutePath },
                 ruleFars = "",
                 maxNumSentences = 1,
                 silenceScale = 0.2f,

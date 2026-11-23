@@ -16,6 +16,8 @@ class SentencePlanner(
     private val maxSegmentChars: Int = 256,
     /** 是否把换行也视作句边界（段落边界通常对应语义停顿）。 */
     private val breakOnNewline: Boolean = true,
+    /** Kokoro 中文数字规则必须收到完整小数/点分日期；系统 TTS 保持原策略。 */
+    private val preserveNumericDots: Boolean = false,
 ) {
     /**
      * 把一章文本单元切分为朗读片段。
@@ -29,6 +31,7 @@ class SentencePlanner(
         val buf = StringBuilder()
         val anchors = ArrayList<SourceAnchor>()
         var sentenceEnded = false
+        var numericDot = false
 
         fun flush() {
             if (buf.isEmpty()) return
@@ -37,13 +40,16 @@ class SentencePlanner(
             buf.setLength(0)
             anchors.clear()
             sentenceEnded = false
+            numericDot = false
         }
 
         for (unit in units) {
             if (unit.text.isEmpty()) continue
             for ((i, ch) in unit.text.withIndex()) {
                 // 延后切分，让连续句末标点及右引号留在前句，避免独立的 1 字片段。
+                if (sentenceEnded && numericDot && ch in '0'..'9') sentenceEnded = false
                 if (sentenceEnded && !isSentenceBoundary(ch) && ch !in SENTENCE_CLOSERS) flush()
+                numericDot = preserveNumericDots && ch == '.' && buf.lastOrNull()?.let { it in '0'..'9' } == true
                 // 片段起始处跳过前导空白（句末标点后的空格等），避免片段以空格开头。
                 if (buf.isEmpty() && ch.isWhitespace()) continue
                 buf.append(ch)

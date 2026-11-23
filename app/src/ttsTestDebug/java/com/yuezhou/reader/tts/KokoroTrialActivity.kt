@@ -143,7 +143,7 @@ class KokoroTrialActivity : Activity() {
 
     private fun modelDir(modelName: String): File = KokoroModels.dir(filesDir, modelName)
 
-    private fun createTts(dir: File): OfflineTts = KokoroModels.createTts(dir)
+    private fun createTts(dir: File): OfflineTts = KokoroModels.createTts(dir, debug = intent.getBooleanExtra("debugFrontend", false))
 
     private fun startContinuous(model: String, count: Int, sid: Int = 3) {
         executor.execute {

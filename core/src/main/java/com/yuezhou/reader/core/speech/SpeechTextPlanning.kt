@@ -8,7 +8,7 @@ object SpeechTextPlanning {
     data class Result(val segments: List<SpeechSegment>, val version: Int, val fallbackReason: String? = null)
 
     fun plan(units: List<SpeechTextUnit>, engine: SpeechEngineType, enabled: Boolean): Result {
-        if (engine != SpeechEngineType.KOKORO || !enabled) return legacy(units)
+        if (engine != SpeechEngineType.KOKORO || !enabled) return legacy(units, engine)
         return try {
             val chunks = NovelTextParser().parse(units.map { TextSource(it.text, it.anchor.nodeId, it.anchor.offset, it.paragraphEnd) })
             val segments = chunks.map { chunk ->
@@ -19,18 +19,19 @@ object SpeechTextPlanning {
             }
             Result(segments, NovelTextParser.VERSION)
         } catch (e: Exception) {
-            legacy(units).copy(fallbackReason = e.javaClass.simpleName)
+            legacy(units, engine).copy(fallbackReason = e.javaClass.simpleName)
         }
     }
 
-    private fun legacy(units: List<SpeechTextUnit>) = Result(SentencePlanner().plan(units), SpeechPlan.PLANNER_VERSION)
+    private fun legacy(units: List<SpeechTextUnit>, engine: SpeechEngineType) = Result(
+        SentencePlanner(preserveNumericDots = engine == SpeechEngineType.KOKORO).plan(units), SpeechPlan.PLANNER_VERSION)
 
     /** 开关切换及内存降级都通过原文锚点重新定位，不能沿用不同策略的 segmentIndex。 */
     fun rebuild(plan: SpeechPlan, engine: SpeechEngineType, enabled: Boolean, anchor: SourceAnchor?): Pair<SpeechPlan, Int> {
         val units = plan.sourceUnits ?: return plan to plan.segments.indexOfFirst { it.startAnchor == anchor }.coerceAtLeast(0)
         val result = plan(units, engine, enabled)
         val rebuilt = plan.copy(segments = result.segments, plannerVersion = result.version,
-            novelParsing = enabled && engine == SpeechEngineType.KOKORO)
+            novelParsing = enabled && engine == SpeechEngineType.KOKORO, engine = engine)
         return rebuilt to (anchor?.let { rebuilt.findSegmentForAnchor(it.nodeId, it.offset) } ?: 0).coerceAtLeast(0)
     }
 }
