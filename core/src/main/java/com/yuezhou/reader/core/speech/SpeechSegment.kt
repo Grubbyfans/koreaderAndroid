@@ -36,6 +36,8 @@ data class SpeechSegment(
     val startAnchor: SourceAnchor,
     val endAnchor: SourceAnchor,
     val charToSource: List<SourceAnchor>,
+    val spokenText: String? = null,
+    val novel: NovelSegmentInfo? = null,
 ) {
     /** 朗读文本是否为空（空片段不可送入 TTS）。 */
     val isBlank: Boolean get() = text.isBlank()
@@ -63,6 +65,8 @@ data class SpeechPlan(
     val chapterIndex: Int,
     val segments: List<SpeechSegment>,
     val plannerVersion: Int = PLANNER_VERSION,
+    val novelParsing: Boolean = false,
+    val sourceUnits: List<SpeechTextUnit>? = null,
 ) {
     /** 片段总数。 */
     val segmentCount: Int get() = segments.size
@@ -79,7 +83,8 @@ data class SpeechPlan(
     fun findSegmentForAnchor(nodeId: String, offset: Int): Int {
         if (nodeId.isEmpty()) return -1
         for ((index, segment) in segments.withIndex()) {
-            for (anchor in segment.charToSource) {
+            for ((pointIndex, anchor) in segment.charToSource.withIndex()) {
+                if (segment.novel != null && pointIndex == segment.charToSource.lastIndex) continue
                 if (anchor.nodeId == nodeId && anchor.offset >= offset) return index
             }
         }
@@ -91,3 +96,10 @@ data class SpeechPlan(
         const val PLANNER_VERSION = 2
     }
 }
+
+data class NovelSegmentInfo(
+    val dialogue: Boolean,
+    val paragraphId: Int,
+    val paragraphBoundaryAfter: Boolean,
+    val splitReason: String,
+)

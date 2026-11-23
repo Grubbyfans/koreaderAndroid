@@ -63,6 +63,20 @@ class EpubChapterTextSourceTest {
     }
 
     @Test
+    fun `后台跨章沿用开启的小说解析策略并保留原文`() {
+        val epub = buildEpub()
+        val first = SpeechPlan("book", "g", 0, emptyList(), novelParsing = true)
+        val next = EpubChapterTextSource.nextPlan(epub, first)!!
+        assertTrue(next.novelParsing)
+        assertEquals(1001, next.plannerVersion)
+        assertTrue(next.segments.all { it.novel != null })
+        assertNotNull(next.sourceUnits)
+        val legacy = EpubChapterTextSource.nextPlan(epub, first.copy(novelParsing = false))!!
+        assertEquals(SpeechPlan.PLANNER_VERSION, legacy.plannerVersion)
+        assertTrue(legacy.segments.all { it.novel == null && it.spokenText == null })
+    }
+
+    @Test
     fun `按 spine 顺序提取指定章节文本`() {
         val epub = buildEpub()
         val source = EpubChapterTextSource(epub, chapterIndex = 0)

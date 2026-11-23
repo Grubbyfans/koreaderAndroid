@@ -1,7 +1,9 @@
 package com.yuezhou.reader.noveltext
 
 /** 独立解析模块：没有 Android、EPUB、TTS 或播放器依赖。所有偏移均为 UTF-16。 */
-data class TextSource(val text: String, val nodeId: String, val offset: Int = 0, val paragraphEnd: Boolean = true)
+data class TextSource(val text: String, val nodeId: String, val offset: Int = 0, val paragraphEnd: Boolean = true) {
+    init { require(offset >= 0) }
+}
 data class TextPoint(val nodeId: String, val offset: Int)
 data class SourceSpan(val nodeId: String, val start: Int, val endExclusive: Int)
 enum class SplitReason { SENTENCE, PARAGRAPH, SEMICOLON, COLON, COMMA, WHITESPACE, LENGTH_LIMIT }

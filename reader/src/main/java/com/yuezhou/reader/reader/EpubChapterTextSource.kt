@@ -1,7 +1,8 @@
 package com.yuezhou.reader.reader
 
 import com.yuezhou.reader.core.speech.ChapterTextSource
-import com.yuezhou.reader.core.speech.SentencePlanner
+import com.yuezhou.reader.core.speech.SpeechTextPlanning
+import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlan
 import com.yuezhou.reader.core.speech.SpeechTextUnit
 import com.yuezhou.reader.core.speech.SourceAnchor
@@ -47,12 +48,14 @@ class EpubChapterTextSource(
         fun nextPlan(epubFile: File, after: SpeechPlan, checkActive: () -> Unit = {}): SpeechPlan? {
             ZipFile(epubFile).use { zip ->
                 val spine = checkNotNull(locateSpine(zip)) { "无法读取 EPUB 章节顺序" }
-                val planner = SentencePlanner()
                 for (index in (after.chapterIndex + 1) until spine.size) {
                     checkActive()
-                    val segments = planner.plan(extractChapter(zip, spine[index], index))
-                    if (segments.isNotEmpty()) {
-                        return after.copy(chapterIndex = index, segments = segments)
+                    val units = extractChapter(zip, spine[index], index)
+                    val result = SpeechTextPlanning.plan(units,
+                        if (after.novelParsing) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS, after.novelParsing)
+                    if (result.segments.isNotEmpty()) {
+                        return after.copy(chapterIndex = index, segments = result.segments,
+                            plannerVersion = result.version, sourceUnits = units)
                     }
                 }
                 return null

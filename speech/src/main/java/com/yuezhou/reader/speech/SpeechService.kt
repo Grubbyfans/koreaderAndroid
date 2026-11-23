@@ -25,6 +25,7 @@ import androidx.core.app.ServiceCompat
 import com.yuezhou.reader.core.speech.SessionToken
 import com.yuezhou.reader.core.speech.KokoroMemoryException
 import com.yuezhou.reader.core.speech.SpeechEngineConfig
+import com.yuezhou.reader.core.speech.SpeechTextPlanning
 import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlaybackEvent
 import com.yuezhou.reader.core.speech.SpeechPlan
@@ -145,6 +146,7 @@ class SpeechService : Service() {
             SpeechCommands.ACTION_PREVIOUS -> handlePrevious()
             SpeechCommands.ACTION_STOP -> handleStop()
             SpeechCommands.ACTION_STOP_FOREGROUND -> handleStop()
+            SpeechCommands.ACTION_SET_NOVEL_PARSING -> handleSetNovelParsing(intent.getBooleanExtra(SpeechCommands.EXTRA_ENABLED, false))
             SpeechCommands.ACTION_SET_RATE ->
                 handleSetRate(intent.getFloatExtra(SpeechCommands.EXTRA_RATE, 0f))
         }
@@ -182,6 +184,29 @@ class SpeechService : Service() {
                 applyConfig(engine)
                 playChapter(engine, nextRequest.plan, nextRequest.startSegment)
             }
+        }
+    }
+
+    private fun handleSetNovelParsing(enabled: Boolean) {
+        if (activeEngine != SpeechEngineType.KOKORO) return
+        val expected = request ?: return
+        val currentPlan = stateMachine.plan?.takeIf { it.bookId == expected.plan.bookId } ?: expected.plan
+        if (currentPlan.novelParsing == enabled || currentPlan.sourceUnits == null) return
+        val anchor = currentPlan.segmentAt(stateMachine.currentSegmentIndex)?.startAnchor
+        val paused = stateMachine.state == SpeechStateMachine.State.PAUSED
+        val generation = ++playGeneration
+        kokoroGeneration++
+        clearChapterTransition()
+        playJob?.cancel()
+        playJob = scope.launch {
+            kokoroCoordinator?.pause()
+            val (rebuilt, from) = withContext(Dispatchers.Default) {
+                SpeechTextPlanning.rebuild(currentPlan, SpeechEngineType.KOKORO, enabled, anchor)
+            }
+            if (generation != playGeneration) return@launch
+            request = SpeechPlanStore.replacePlan(expected, rebuilt, from) ?: return@launch
+            if (kokoroCoordinator == null) handlePlay()
+            else playKokoroPlan(rebuilt, from, paused || stateMachine.state == SpeechStateMachine.State.PAUSED)
         }
     }
 
@@ -354,6 +379,7 @@ class SpeechService : Service() {
         val coordinator = kokoroCoordinator ?: return
         if (stateMachine.plan !== plan) stateMachine.load(plan)
         stateMachine.play(fromIndex)
+        Log.d(TAG, "D_TEXT_PLAN enabled=${plan.novelParsing} version=${plan.plannerVersion} count=${plan.segments.size}")
         val token = SessionToken(sessionId = sessionId, generation = ++kokoroGeneration)
         updatePlaybackState(
             if (paused) PlaybackState.STATE_PAUSED else PlaybackState.STATE_BUFFERING,
@@ -1083,7 +1109,12 @@ class SpeechService : Service() {
         val engine = ensureEngine() ?: return handleStop("$reason；系统 TTS 不可用")
         if (generation != playGeneration) return
         applyConfig(engine)
-        playChapter(engine, plan, from)
+        val anchor = plan.segmentAt(from)?.startAnchor
+        val (legacy, legacyFrom) = withContext(Dispatchers.Default) {
+            SpeechTextPlanning.rebuild(plan, SpeechEngineType.SYSTEM_TTS, false, anchor)
+        }
+        if (generation != playGeneration) return
+        playChapter(engine, legacy, legacyFrom)
         val message = "$reason，已释放 Kokoro 并从当前句切换到系统 TTS"
         Log.w(TAG, message)
         SpeechDiagnosticsState.update { it.copy(lastError = message) }

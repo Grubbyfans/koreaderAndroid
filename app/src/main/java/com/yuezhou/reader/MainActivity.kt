@@ -53,6 +53,7 @@ import com.yuezhou.reader.reader.db.SyncLogEntity
 import com.yuezhou.reader.speech.SpeechDiagnosticsState
 import com.yuezhou.reader.speech.KokoroImportState
 import com.yuezhou.reader.speech.SpeechRuntime
+import com.yuezhou.reader.speech.SpeechPlanStore
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -1482,6 +1483,20 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
 
         if (SpeechRuntime.kokoro != null) {
             SettingsCard("Kokoro 朗读模型") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("小说文字解析（实验）", style = MaterialTheme.typography.bodyMedium)
+                        Text("仅 Kokoro 生效；优化断句与对白上下文。关闭后使用当前朗读方式。",
+                            style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+                    }
+                    Switch(checked = prefs.novelTextParsing, onCheckedChange = { enabled ->
+                        scope.launch {
+                            ReaderSettings.setNovelTextParsing(context, enabled)
+                            SpeechPlanStore.setNovelParsing(context, enabled)
+                        }
+                    })
+                }
+                Spacer(Modifier.height(8.dp))
                 val selectedModel = modelInfos.firstOrNull { it.id == prefs.kokoroModel }
                 Text(
                     selectedModel?.label ?: "未选择模型",

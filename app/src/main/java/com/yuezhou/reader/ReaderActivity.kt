@@ -99,7 +99,7 @@ import com.yuezhou.reader.reader.ReaderEvent
 import com.yuezhou.reader.reader.ReaderWebView
 import com.yuezhou.reader.reader.SyncLogStore
 import com.yuezhou.reader.reader.TocItem
-import com.yuezhou.reader.core.speech.SentencePlanner
+import com.yuezhou.reader.core.speech.SpeechTextPlanning
 import com.yuezhou.reader.core.speech.SourceAnchor
 import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlan
@@ -224,6 +224,7 @@ private fun ReaderScreen(
     var speaking by remember { mutableStateOf(false) }
     // 朗读中，用于「朗读」按钮切换为「停止」
     var speakRequested by remember { mutableStateOf(false) }
+    var speechPreparationJob by remember { mutableStateOf<Job?>(null) }
     // 目录抽屉
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
@@ -531,71 +532,39 @@ private fun ReaderScreen(
     ) {
         val id = bookId ?: return
         val (fileName, source) = openedSource ?: return
-        // 文本节点 → SpeechTextUnit：用 CFI 字符串作为 nodeId（跨章节唯一，映射回原文锚点）
-        val units = nodes.mapIndexed { index, node ->
-            SpeechTextUnit(
-                text = node.text,
-                anchor = SourceAnchor(nodeId = node.cfi, offset = 0),
-                paragraphEnd = node.paragraphId == null ||
-                    node.paragraphId != nodes.getOrNull(index + 1)?.paragraphId,
-            )
-        }
-        val segments = SentencePlanner().plan(units)
-        if (segments.isEmpty()) {
-            status = "本章无可朗读文本"
-            return
-        }
-        // 文件代次：同名覆盖后变化，旧的朗读位置与缓存索引随之失效（方案 §7.2 / §10.3）。
-        val fileGeneration = EpubFileGeneration.of(context, fileName, source)
-        val plan = SpeechPlan(
-            bookId = id,
-            fileGeneration = fileGeneration,
-            chapterIndex = chapterIndex,
-            segments = segments,
-        )
-        // 当前阅读位置 → 包含该字符的片段；无起点或反解失败则从章首开始。
-        val readingPositionSegment = startPosition?.let { start ->
-            nodes.getOrNull(start.nodeIndex ?: -1)?.let { node ->
-                plan.findSegmentForAnchor(node.cfi, start.charOffsetInNode)
-            }
-        } ?: -1
-        try {
-            // 注入朗读配置（引擎 + 语速 + 音色），服务在开始朗读时应用。
-            // 用 latestPrefs（rememberUpdatedState）确保读到最新值，避免闭包捕获旧音色。
-            val engine = if (
-                latestPrefs.speechEngine == "kokoro" && SpeechRuntime.kokoroAvailable
-            ) {
-                SpeechEngineType.KOKORO
-            } else {
-                SpeechEngineType.SYSTEM_TTS
-            }
-            SpeechPlanStore.putConfig(
-                SpeechConfig(
-                    rate = latestPrefs.speechRate,
-                    voiceName = latestPrefs.speechVoice,
-                    engine = engine,
-                    kokoroModelId = latestPrefs.kokoroModel,
-                    kokoroSpeakerId = latestPrefs.kokoroSpeaker,
-                )
-            )
-            // 用户主动点击朗读或切换配置时，以当前可见页为起点，旧朗读游标仅用于保存记录。
-            scope.launch {
-                val resumeFrom = readingPositionSegment.coerceAtLeast(0)
-                val message = "已从当前页开始朗读"
-                try {
-                    SpeechPlanStore.startAndPlay(
-                        context, plan,
-                        EpubSpeechChapterSource(context, fileName, source),
-                        startSegment = resumeFrom,
-                    )
-                    speakRequested = true
-                    status = message
-                } catch (e: Exception) {
-                    status = "启动朗读失败：${e.message}"
+        val prefs = latestPrefs
+        val engine = if (prefs.speechEngine == "kokoro" && SpeechRuntime.kokoroAvailable) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS
+        speechPreparationJob?.cancel()
+        speechPreparationJob = scope.launch {
+            try {
+                val units = nodes.mapIndexed { index, node ->
+                    SpeechTextUnit(node.text, SourceAnchor(node.cfi, 0),
+                        node.paragraphId == null || node.paragraphId != nodes.getOrNull(index + 1)?.paragraphId)
                 }
-            }
-        } catch (e: Exception) {
-            status = "启动朗读失败：${e.message}"
+                val planning = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    SpeechTextPlanning.plan(units, engine, prefs.novelTextParsing)
+                }
+                if (planning.segments.isEmpty()) {
+                    status = "本章无可朗读文本"; speakRequested = false; return@launch
+                }
+                planning.fallbackReason?.let { Log.w("NovelText", "解析失败，当前章回退：$it") }
+                val generation = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    EpubFileGeneration.of(context, fileName, source)
+                }
+                val plan = SpeechPlan(id, generation, chapterIndex, planning.segments, planning.version,
+                    prefs.novelTextParsing && engine == SpeechEngineType.KOKORO, units)
+                val from = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    startPosition?.let { start -> nodes.getOrNull(start.nodeIndex ?: -1)?.let {
+                        plan.findSegmentForAnchor(it.cfi, start.charOffsetInNode)
+                    } }?.coerceAtLeast(0) ?: 0
+                }
+                SpeechPlanStore.putConfig(SpeechConfig(prefs.speechRate, prefs.speechVoice, engine,
+                    prefs.kokoroModel, prefs.kokoroSpeaker, prefs.novelTextParsing))
+                SpeechPlanStore.startAndPlay(context, plan, EpubSpeechChapterSource(context, fileName, source), from)
+                speakRequested = true
+                status = "已从当前页开始朗读"
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (e: Exception) { speakRequested = false; status = "启动朗读失败：${e.message}" }
         }
     }
 
@@ -930,7 +899,9 @@ private fun ReaderScreen(
                     },
                     onSync = { openSyncDialog() },
                     onSpeak = {
-                        if (speaking) {
+                        if (speaking || speakRequested) {
+                            speechPreparationJob?.cancel()
+                            speakRequested = false
                             // 朗读中 → 停止
                             SpeechPlanStore.stop(context)
                             status = "已停止朗读"

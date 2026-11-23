@@ -24,6 +24,7 @@ data class SpeechConfig(
     val engine: SpeechEngineType = SpeechEngineType.SYSTEM_TTS,
     val kokoroModelId: String = "",
     val kokoroSpeakerId: Int = 3,
+    val novelParsing: Boolean = false,
 )
 
 /**
@@ -96,6 +97,19 @@ object SpeechPlanStore {
                     .putExtra(SpeechCommands.EXTRA_RATE, rate)
             )
         }
+    }
+
+    fun setNovelParsing(context: Context, enabled: Boolean) {
+        currentConfig = currentConfig.copy(novelParsing = enabled)
+        if (current == null) return
+        context.startService(Intent(context, SpeechService::class.java)
+            .setAction(SpeechCommands.ACTION_SET_NOVEL_PARSING).putExtra(SpeechCommands.EXTRA_ENABLED, enabled))
+    }
+
+    @Synchronized
+    internal fun replacePlan(expected: Request, plan: SpeechPlan, start: Int): Request? {
+        if (current !== expected) return null
+        return expected.copy(plan = plan, startSegment = start).also { current = it }
     }
 
     /** 停止朗读并退出前台。 */
