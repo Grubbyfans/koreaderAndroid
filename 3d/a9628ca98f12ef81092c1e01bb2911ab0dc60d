@@ -1,0 +1,34 @@
+app/src/main/assets/reader/speech-highlight.js
+  s_01ceea952b99e9::t_90442310c9c460 12,14,22,27,30,37,52-120
+  s_01ceea952b99e9::t_7980d1cda92fb3 1-11,13,15-21,23-26,28-29,31-36,38-51,121
+app/src/main/assets/reader/bridge.js
+  s_01ceea952b99e9::t_7980d1cda92fb3 7,11-16,38,129-130,132,146,432,455,458
+  s_01ceea952b99e9::t_7e0b80db21ee0b 459
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_01ceea952b99e9::t_90442310c9c460 506
+  s_01ceea952b99e9::t_7980d1cda92fb3 503
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  s_01ceea952b99e9::t_7980d1cda92fb3 322-325
+doc/02-Kokoro解析开关与回退实现.md
+  s_01ceea952b99e9::t_a7c59bc1e31b6c 73-77
+doc/03-轻量语气辅助与对照试听实现.md
+  s_01ceea952b99e9::t_2b210c062d78b3 65-74
+tests/speech-highlight.test.mjs
+  s_01ceea952b99e9::t_24cfbac7c208d4 1-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3da9628ca98f12ef81092c1e01bb2911ab0dc60d",
+  "prompts": {},
+  "sessions": {
+    "s_01ceea952b99e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207f5-a95c-7ce0-8172-433da1801be7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
