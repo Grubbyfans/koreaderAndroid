@@ -1,0 +1,43 @@
+core/src/main/java/com/yuezhou/reader/core/speech/ChapterTextSource.kt
+  s_01ceea952b99e9::t_6d668465462f5c 23-24
+speech/src/test/java/com/yuezhou/reader/speech/SpeechCoordinatorTest.kt
+  s_01ceea952b99e9::t_6a1b4113aee4fc 239-254
+  s_01ceea952b99e9::t_6c8c77071b25b5 238
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/SherpaKokoroSynthesizer.kt
+  s_01ceea952b99e9::t_6d668465462f5c 4-5,37,39-41
+reader/src/main/java/com/yuezhou/reader/reader/ReaderBridge.kt
+  s_01ceea952b99e9::t_6d668465462f5c 38
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  s_01ceea952b99e9::t_6d668465462f5c 530-534
+core/src/test/java/com/yuezhou/reader/core/speech/SentencePlannerTest.kt
+  s_01ceea952b99e9::t_6a1b4113aee4fc 83-120
+core/src/main/java/com/yuezhou/reader/core/speech/SpeechSegment.kt
+  s_01ceea952b99e9::t_6d668465462f5c 91
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_01ceea952b99e9::t_6d668465462f5c 535-541
+speech/src/main/java/com/yuezhou/reader/speech/SpeechService.kt
+  s_01ceea952b99e9::t_6d668465462f5c 25,332-336
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/StageDActivity.kt
+  s_01ceea952b99e9::t_6a1b4113aee4fc 40,45,59,83
+app/src/main/assets/reader/bridge.js
+  s_01ceea952b99e9::t_6d668465462f5c 214,239-247
+core/src/main/java/com/yuezhou/reader/core/speech/SentencePlanner.kt
+  s_01ceea952b99e9::t_6d668465462f5c 31,39,45-46,51-52,57-58,125
+  s_01ceea952b99e9::t_ded86fb6908d94 126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b360549405648f95356f8745d3e97b5714c363cd",
+  "prompts": {},
+  "sessions": {
+    "s_01ceea952b99e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207f5-a95c-7ce0-8172-433da1801be7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
