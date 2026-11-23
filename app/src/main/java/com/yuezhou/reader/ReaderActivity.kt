@@ -535,6 +535,7 @@ private fun ReaderScreen(
         val (fileName, source) = openedSource ?: return
         val prefs = latestPrefs
         val engine = if (prefs.speechEngine == "kokoro" && SpeechRuntime.kokoroAvailable) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS
+        val novelParsing = engine == SpeechEngineType.KOKORO
         speechPreparationJob?.cancel()
         speechPreparationJob = scope.launch {
             try {
@@ -543,7 +544,7 @@ private fun ReaderScreen(
                         node.paragraphId == null || node.paragraphId != nodes.getOrNull(index + 1)?.paragraphId)
                 }
                 val planning = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    SpeechTextPlanning.plan(units, engine, prefs.novelTextParsing)
+                    SpeechTextPlanning.plan(units, engine, novelParsing)
                 }
                 if (planning.segments.isEmpty()) {
                     status = "本章无可朗读文本"; speakRequested = false; return@launch
@@ -553,14 +554,14 @@ private fun ReaderScreen(
                     EpubFileGeneration.of(context, fileName, source)
                 }
                 val plan = SpeechPlan(id, generation, chapterIndex, planning.segments, planning.version,
-                    prefs.novelTextParsing && engine == SpeechEngineType.KOKORO, units, engine)
+                    novelParsing, units, engine)
                 val from = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     startPosition?.let { start -> nodes.getOrNull(start.nodeIndex ?: -1)?.let {
                         plan.findSegmentForAnchor(it.cfi, start.charOffsetInNode)
                     } }?.coerceAtLeast(0) ?: 0
                 }
                 SpeechPlanStore.putConfig(SpeechConfig(prefs.speechRate, prefs.speechVoice, engine,
-                    prefs.kokoroModel, prefs.kokoroSpeaker, prefs.novelTextParsing))
+                    prefs.kokoroModel, prefs.kokoroSpeaker, novelParsing))
                 SpeechPlanStore.startAndPlay(context, plan, EpubSpeechChapterSource(context, fileName, source), from)
                 speakRequested = true
                 status = "已从当前页开始朗读"

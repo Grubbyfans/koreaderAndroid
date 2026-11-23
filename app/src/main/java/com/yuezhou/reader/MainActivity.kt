@@ -53,7 +53,6 @@ import com.yuezhou.reader.reader.db.SyncLogEntity
 import com.yuezhou.reader.speech.SpeechDiagnosticsState
 import com.yuezhou.reader.speech.KokoroImportState
 import com.yuezhou.reader.speech.SpeechRuntime
-import com.yuezhou.reader.speech.SpeechPlanStore
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -1416,8 +1415,6 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
     val credentialStore = remember(context) { CloudCredentialStore(context) }
 
     var modelBusy by remember { mutableStateOf(false) }
-    var novelPreviewBusy by remember { mutableStateOf(false) }
-    var novelPreviewMessage by remember { mutableStateOf<String?>(null) }
     var modelMessage by remember { mutableStateOf<String?>(null) }
     var modelInfos by remember { mutableStateOf(SpeechRuntime.kokoro?.modelInfos().orEmpty()) }
     var modelManagerOpen by rememberSaveable { mutableStateOf(false) }
@@ -1485,41 +1482,6 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
 
         if (SpeechRuntime.kokoro != null) {
             SettingsCard("Kokoro 朗读模型") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("小说文字解析（实验）", style = MaterialTheme.typography.bodyMedium)
-                        Text("仅 Kokoro 生效；优化断句与对白上下文。关闭后使用当前朗读方式。",
-                            style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
-                    }
-                    Switch(checked = prefs.novelTextParsing, onCheckedChange = { enabled ->
-                        scope.launch {
-                            ReaderSettings.setNovelTextParsing(context, enabled)
-                            SpeechPlanStore.setNovelParsing(context, enabled)
-                        }
-                    })
-                }
-                Text("基于规则轻微调整语速与停顿，不保证真实情绪声线。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
-                Row {
-                    listOf(false to "试听当前方式", true to "试听解析方式").forEach { (optimized, label) ->
-                        TextButton(enabled = !novelPreviewBusy && !modelBusy && importProgress?.running != true && modelInfos.isNotEmpty(), onClick = {
-                            novelPreviewBusy = true
-                            novelPreviewMessage = "正在$label…"
-                            scope.launch {
-                                try {
-                                    val provider = SpeechRuntime.kokoro
-                                    val model = prefs.kokoroModel.ifBlank { provider?.defaultModelId.orEmpty() }
-                                    val error = provider?.auditionNovelText(model, prefs.kokoroSpeaker, prefs.speechRate, optimized)
-                                    novelPreviewMessage = error ?: "$label 已完成"
-                                } catch (cancelled: CancellationException) { throw cancelled }
-                                catch (e: Exception) { novelPreviewMessage = "试听失败：${e.message}" }
-                                finally { novelPreviewBusy = false }
-                            }
-                        }) { Text(label) }
-                    }
-                }
-                if (novelPreviewBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                novelPreviewMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                Spacer(Modifier.height(8.dp))
                 val selectedModel = modelInfos.firstOrNull { it.id == prefs.kokoroModel }
                 Text(
                     selectedModel?.label ?: "未选择模型",

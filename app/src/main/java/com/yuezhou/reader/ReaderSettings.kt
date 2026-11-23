@@ -36,7 +36,6 @@ data class ReaderPreferences(
     /** Kokoro 中文音色 ID。 */
     val kokoroSpeaker: Int = 3,
     /** 实验性小说解析，仅 Kokoro 使用；默认关闭。 */
-    val novelTextParsing: Boolean = false,
     val fontId: String = "book",
     val fontWeight: Int = 0,
     /** 是否开启自动进度同步：开启时进入书籍自动拉取云端进度覆盖本地，退出/切出时自动上传覆盖云端。 */
@@ -61,7 +60,6 @@ object ReaderSettings {
     private val KEY_SPEECH_VOICE = stringPreferencesKey("speech_voice")
     private val KEY_SPEECH_ENGINE = stringPreferencesKey("speech_engine")
     private val KEY_KOKORO_MODEL = stringPreferencesKey("kokoro_model")
-    private val KEY_NOVEL_TEXT_PARSING = booleanPreferencesKey("novel_text_parsing")
     private val KEY_KOKORO_SPEAKER = intPreferencesKey("kokoro_speaker")
     private val KEY_AUTO_SYNC = booleanPreferencesKey("auto_sync")
     private val KEY_BRIGHTNESS = floatPreferencesKey("brightness")
@@ -83,7 +81,6 @@ object ReaderSettings {
                 speechEngine = prefs[KEY_SPEECH_ENGINE] ?: "system",
                 kokoroModel = prefs[KEY_KOKORO_MODEL] ?: "",
                 kokoroSpeaker = prefs[KEY_KOKORO_SPEAKER] ?: 3,
-                novelTextParsing = prefs[KEY_NOVEL_TEXT_PARSING] ?: false,
                 autoSync = prefs[KEY_AUTO_SYNC] ?: false,
                 brightness = prefs[KEY_BRIGHTNESS] ?: -1f,
             )
@@ -102,10 +99,6 @@ object ReaderSettings {
         context.readerDataStore.edit { it[KEY_BRIGHTNESS] = brightness }
     }
 
-    suspend fun setNovelTextParsing(context: Context, enabled: Boolean) {
-        context.readerDataStore.edit { it[KEY_NOVEL_TEXT_PARSING] = enabled }
-    }
-
     /** 保存整份设置。 */
     suspend fun save(context: Context, prefs: ReaderPreferences) {
         context.readerDataStore.edit { it ->
@@ -122,7 +115,6 @@ object ReaderSettings {
             it[KEY_SPEECH_ENGINE] = prefs.speechEngine
             it[KEY_KOKORO_MODEL] = prefs.kokoroModel
             it[KEY_KOKORO_SPEAKER] = prefs.kokoroSpeaker
-            it[KEY_NOVEL_TEXT_PARSING] = prefs.novelTextParsing
             it[KEY_AUTO_SYNC] = prefs.autoSync
             it[KEY_BRIGHTNESS] = prefs.brightness
         }
