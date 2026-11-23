@@ -1,0 +1,36 @@
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/KokoroTrialActivity.kt
+  h_7f20b2a03eb3b6 20-26,33-39,58-65,81-89,100-108,135,140-143,148,173-272,441-444
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/SherpaKokoroSynthesizer.kt
+  h_7f20b2a03eb3b6 1-40
+core/src/main/java/com/yuezhou/reader/core/speech/AudioHealthCheck.kt
+  h_7f20b2a03eb3b6 1-216
+core/src/main/java/com/yuezhou/reader/core/speech/SpeechPlaybackBackend.kt
+  h_7f20b2a03eb3b6 1-159
+core/src/main/java/com/yuezhou/reader/core/speech/SpeechStateMachine.kt
+  h_7f20b2a03eb3b6 42-56,62,70,103-106,114-140,143-144,150-154,163
+core/src/test/java/com/yuezhou/reader/core/speech/AudioHealthCheckTest.kt
+  h_7f20b2a03eb3b6 1-94
+core/src/test/java/com/yuezhou/reader/core/speech/SpeechStateMachineTest.kt
+  h_7f20b2a03eb3b6 113-171
+speech/build.gradle.kts
+  h_7f20b2a03eb3b6 20-23,28,30-33
+speech/src/main/java/com/yuezhou/reader/speech/AudioTrackPcmPlayer.kt
+  h_7f20b2a03eb3b6 1-284
+speech/src/main/java/com/yuezhou/reader/speech/SpeechCoordinator.kt
+  h_7f20b2a03eb3b6 1-366
+speech/src/test/java/com/yuezhou/reader/speech/Fakes.kt
+  h_7f20b2a03eb3b6 1-129
+speech/src/test/java/com/yuezhou/reader/speech/SpeechCoordinatorTest.kt
+  h_7f20b2a03eb3b6 1-317
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5b6cd313feb40c2b38002ce9fa4469b64ad1301c",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
