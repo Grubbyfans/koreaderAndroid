@@ -1,0 +1,60 @@
+app/build.gradle.kts
+  h_7f20b2a03eb3b6 67-68
+app/src/main/assets/reader/bridge.js
+  h_7f20b2a03eb3b6 183-186,191,214-215,224-228,230-234,240-253
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  h_7f20b2a03eb3b6 8,54,92,107,109-110,255-273,546-552,564-565,568,572-577,597,600-625,633,712,928,948,951-954,967-971,1000-1044,1048-1128,1247,1370,1391,1574-1578
+app/src/main/java/com/yuezhou/reader/RoomSpeechProgressSink.kt
+  h_7f20b2a03eb3b6 18-19,28-29
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/KokoroModelImporter.kt
+  h_7f20b2a03eb3b6 1-274
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/KokoroModels.kt
+  h_7f20b2a03eb3b6 7,9-10,12,21,23-98,100,103-108,140-153
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/SherpaKokoroProvider.kt
+  h_7f20b2a03eb3b6 4-5,7-8,10,12,14-15,18,21,25-27,29-32,40-112,114
+core/src/main/java/com/yuezhou/reader/core/speech/SpeechProgressSink.kt
+  h_7f20b2a03eb3b6 12-16,23-24
+core/src/main/java/com/yuezhou/reader/core/speech/SpeechSegment.kt
+  h_7f20b2a03eb3b6 58,65,72-92
+core/src/test/java/com/yuezhou/reader/core/speech/SpeechPlanAnchorTest.kt
+  h_7f20b2a03eb3b6 1-67
+docs/TTS验收报告.md
+  h_7f20b2a03eb3b6 131,135,139,170-172,175-237
+reader/src/main/java/com/yuezhou/reader/reader/EpubFileGeneration.kt
+  h_7f20b2a03eb3b6 1-52
+reader/src/main/java/com/yuezhou/reader/reader/ReaderBridge.kt
+  h_7f20b2a03eb3b6 20-29,40-52
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  h_7f20b2a03eb3b6 454-458,509-520
+reader/src/main/java/com/yuezhou/reader/reader/SpeechPositionStore.kt
+  h_7f20b2a03eb3b6 30-31,41-42
+reader/src/main/java/com/yuezhou/reader/reader/db/AppDatabase.kt
+  h_7f20b2a03eb3b6 27,88-95,105-106
+reader/src/main/java/com/yuezhou/reader/reader/db/SpeechPositionEntity.kt
+  h_7f20b2a03eb3b6 13-16,26-27
+speech/src/main/java/com/yuezhou/reader/speech/SpeechCommands.kt
+  h_7f20b2a03eb3b6 30-35
+speech/src/main/java/com/yuezhou/reader/speech/SpeechDiagnostics.kt
+  h_7f20b2a03eb3b6 1-50
+speech/src/main/java/com/yuezhou/reader/speech/SpeechPlanStore.kt
+  h_7f20b2a03eb3b6 88-100
+speech/src/main/java/com/yuezhou/reader/speech/SpeechProgressWriter.kt
+  h_7f20b2a03eb3b6 33-34,48-49,51-54,104-105
+speech/src/main/java/com/yuezhou/reader/speech/SpeechRuntime.kt
+  h_7f20b2a03eb3b6 3,41-57,71-85
+speech/src/main/java/com/yuezhou/reader/speech/SpeechService.kt
+  h_7f20b2a03eb3b6 100-103,145-146,185-195,220-231,288,304-310,336-337,342-347,371-374,385-387,406-408,411-414,418,425,438-440,711,756-763,822,839-842
+speech/src/test/java/com/yuezhou/reader/speech/SpeechProgressWriterTest.kt
+  h_7f20b2a03eb3b6 3,27-28,34,104-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eb61597f99818daf57bb6ce2edb23ea508ab2b3b",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
