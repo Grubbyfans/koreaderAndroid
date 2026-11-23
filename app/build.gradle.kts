@@ -62,6 +62,9 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
+    // 阶段 B 试音：仅测试版打包 sherpa-onnx 运行时，正式版不含该依赖
+    add("ttsTestImplementation", files("${rootProject.projectDir}/speech/libs/sherpa-onnx-1.13.4.aar"))
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)
 }
