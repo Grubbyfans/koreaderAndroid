@@ -35,6 +35,7 @@ sealed interface ReaderEvent {
 data class ChapterTextNode(
     val cfi: String,
     val text: String,
+    val paragraphId: Int? = null,
 )
 
 /**

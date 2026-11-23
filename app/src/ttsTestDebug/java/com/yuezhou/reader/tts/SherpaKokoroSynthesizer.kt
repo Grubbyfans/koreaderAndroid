@@ -1,6 +1,8 @@
 package com.yuezhou.reader.tts
 
 import com.k2fsa.sherpa.onnx.OfflineTts
+import android.os.SystemClock
+import android.util.Log
 import com.yuezhou.reader.core.speech.SessionToken
 import com.yuezhou.reader.core.speech.KokoroTextNormalizer
 import com.yuezhou.reader.core.speech.SpeechSynthesizer
@@ -32,7 +34,11 @@ class SherpaKokoroSynthesizer(
         // 试音直接使用合成器，也执行同样的输入规范化。
         val spokenText = KokoroTextNormalizer.normalize(text)
         if (spokenText.isEmpty()) return@withContext KokoroTextNormalizer.punctuationPause()
+        val startedAt = SystemClock.elapsedRealtime()
         val audio = tts.generate(spokenText, speakerId, speed)
+        val synthMs = SystemClock.elapsedRealtime() - startedAt
+        val audioMs = audio.samples.size * 1000L / audio.sampleRate.coerceAtLeast(1)
+        Log.d("KokoroSynth", "segment=$segmentIndex chars=${spokenText.length} speed=$speed synthMs=$synthMs audioMs=$audioMs")
         SynthesizedAudio(audio.samples, audio.sampleRate)
     }
 

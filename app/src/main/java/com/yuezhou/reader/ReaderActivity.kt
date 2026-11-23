@@ -532,8 +532,13 @@ private fun ReaderScreen(
         val id = bookId ?: return
         val (fileName, source) = openedSource ?: return
         // 文本节点 → SpeechTextUnit：用 CFI 字符串作为 nodeId（跨章节唯一，映射回原文锚点）
-        val units = nodes.map { node ->
-            SpeechTextUnit(text = node.text, anchor = SourceAnchor(nodeId = node.cfi, offset = 0))
+        val units = nodes.mapIndexed { index, node ->
+            SpeechTextUnit(
+                text = node.text,
+                anchor = SourceAnchor(nodeId = node.cfi, offset = 0),
+                paragraphEnd = node.paragraphId == null ||
+                    node.paragraphId != nodes.getOrNull(index + 1)?.paragraphId,
+            )
         }
         val segments = SentencePlanner().plan(units)
         if (segments.isEmpty()) {

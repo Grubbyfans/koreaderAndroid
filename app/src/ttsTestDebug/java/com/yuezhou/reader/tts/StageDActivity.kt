@@ -37,11 +37,12 @@ class StageDActivity : Activity() {
         val engine = intent.getStringExtra("engine") ?: "kokoro"
         val model = intent.getStringExtra("model") ?: "int8"
         val sid = intent.getIntExtra("sid", 3)
+        val rate = intent.getFloatExtra("rate", 1.0f).coerceIn(0.5f, 2.0f)
         val bookId = intent.getStringExtra("book")
         val finishDelayMs = intent.getLongExtra("finishDelayMs", 1000L)
         executor.execute {
             try {
-                startTrial(engine, model, sid, bookId, finishDelayMs)
+                startTrial(engine, model, sid, bookId, finishDelayMs, rate)
             } catch (t: Throwable) {
                 Log.e(TAG, "D_HARNESS_FAIL", t)
                 finishAndRemoveTask()
@@ -55,6 +56,7 @@ class StageDActivity : Activity() {
         sid: Int,
         requestedBookId: String?,
         finishDelayMs: Long,
+        rate: Float,
     ) {
         val books = runBlocking { LibraryStore(applicationContext).snapshot() }.books
         val entry = books.firstOrNull { requestedBookId == null || it.bookId == requestedBookId }
@@ -78,7 +80,7 @@ class StageDActivity : Activity() {
         val engine = if (engineRaw == "system") SpeechEngineType.SYSTEM_TTS else SpeechEngineType.KOKORO
         SpeechPlanStore.putConfig(
             SpeechConfig(
-                rate = 1.0f,
+                rate = rate,
                 engine = engine,
                 kokoroModelId = model,
                 kokoroSpeakerId = sid,

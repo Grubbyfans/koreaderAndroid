@@ -236,6 +236,23 @@ class SpeechCoordinatorTest {
     }
 
     @Test
+    fun `初次播放使用配置语速且跨章继续保留`() = runTest {
+        val synth = FakeSynthesizer()
+        val player = FakePcmPlayer()
+        val coordinator = SpeechCoordinator(synth, player, backgroundScope)
+        coordinator.prepare(com.yuezhou.reader.core.speech.SpeechEngineConfig(
+            engine = com.yuezhou.reader.core.speech.SpeechEngineType.KOKORO,
+            rate = 1.8f,
+        ))
+        coordinator.play(planOf(3), 0, tokenA)
+        settle()
+        assertEquals(listOf(1.8f, 1.8f, 1.8f), synth.calls.map { it.speed })
+        coordinator.play(planOf(2, "下一章"), 0, tokenB)
+        settle()
+        assertTrue(synth.calls.all { it.speed == 1.8f })
+    }
+
+    @Test
     fun `有界预合成最多领先当前句两句`() = runTest {
         val synth = FakeSynthesizer()
         val player = FakePcmPlayer()

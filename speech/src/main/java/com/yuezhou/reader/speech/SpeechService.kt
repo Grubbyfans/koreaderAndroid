@@ -22,6 +22,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.yuezhou.reader.core.speech.SessionToken
+import com.yuezhou.reader.core.speech.SpeechEngineConfig
 import com.yuezhou.reader.core.speech.SpeechEngineType
 import com.yuezhou.reader.core.speech.SpeechPlaybackEvent
 import com.yuezhou.reader.core.speech.SpeechPlan
@@ -328,6 +329,11 @@ class SpeechService : Service() {
                 withContext(Dispatchers.Main) { onKokoroChapterCompleted(finished) }
             },
         )
+        coordinator.prepare(SpeechEngineConfig(
+            engine = SpeechEngineType.KOKORO,
+            rate = kokoroSpeed,
+            speakerId = config.kokoroSpeakerId,
+        ))
         kokoroCoordinator = coordinator
         lastKokoroEventAt = SystemClock.elapsedRealtime()
         lastKokoroProgressAt = lastKokoroEventAt

@@ -28,6 +28,7 @@ class SentencePlanner(
         // 累积一段文本及其逐字符锚点。
         val buf = StringBuilder()
         val anchors = ArrayList<SourceAnchor>()
+        var sentenceEnded = false
 
         fun flush() {
             if (buf.isEmpty()) return
@@ -35,24 +36,26 @@ class SentencePlanner(
             splitAndEmit(buf.toString(), anchors.toList(), segments)
             buf.setLength(0)
             anchors.clear()
+            sentenceEnded = false
         }
 
         for (unit in units) {
             if (unit.text.isEmpty()) continue
             for ((i, ch) in unit.text.withIndex()) {
+                // 延后切分，让连续句末标点及右引号留在前句，避免独立的 1 字片段。
+                if (sentenceEnded && !isSentenceBoundary(ch) && ch !in SENTENCE_CLOSERS) flush()
                 // 片段起始处跳过前导空白（句末标点后的空格等），避免片段以空格开头。
                 if (buf.isEmpty() && ch.isWhitespace()) continue
                 buf.append(ch)
                 anchors.add(SourceAnchor(unit.anchor.nodeId, unit.anchor.offset + i))
-                if (isSentenceBoundary(ch)) {
-                    flush()
-                } else if (buf.length >= maxSegmentChars) {
+                if (isSentenceBoundary(ch)) sentenceEnded = true
+                if (buf.length >= maxSegmentChars) {
                     // 达到上限仍无句边界，强制切段（在当前位置切断）。
                     flush()
                 }
             }
-            // 段落/单元边界必然是语义停顿点：结束当前累积片段。
-            flush()
+            // 仅真正段落结束才断句；行内样式节点继续累积并保留各自锚点。
+            if (unit.paragraphEnd) flush()
         }
         flush()
 
@@ -118,6 +121,8 @@ class SentencePlanner(
             '。', '！', '？', '；', '…', // 中文（… 为省略号 U+2026）
             '.', '!', '?', ';', // 英文
         )
+
+        private val SENTENCE_CLOSERS = setOf('”', '’', '」', '』', '》', '〉', '）', ')', '】', ']', '"', '\'')
 
         /** 可回退切分的字符（英文分词友好的标点）。 */
         private val BREAK_CHARS = setOf(',', '，', '、', ':', '：', '-', '—', ' ')

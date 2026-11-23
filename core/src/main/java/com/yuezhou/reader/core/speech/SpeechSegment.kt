@@ -88,6 +88,6 @@ data class SpeechPlan(
 
     companion object {
         /** 当前分段算法版本。改动分句规则时应递增，使旧 position 的 segmentIndex 失效。 */
-        const val PLANNER_VERSION = 1
+        const val PLANNER_VERSION = 2
     }
 }

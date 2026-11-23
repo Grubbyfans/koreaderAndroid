@@ -211,6 +211,7 @@ window.__reader = {
             }
 
             const items = []
+            const paragraphIds = new Map()
             let startNodeIndex = -1
             let startCharOffsetInNode = 0
             const walker = doc.createTreeWalker(doc.body || doc.documentElement, NodeFilter.SHOW_TEXT)
@@ -235,7 +236,15 @@ window.__reader = {
                     }
                 }
 
-                items.push({ cfi, text: text.replace(/\u00a0/g, ' ') })
+                // 同一块级段落中的 span/em/strong 文本属于同一句，不能逐节点断开。
+                let paragraph = parent
+                while (paragraph.parentElement && paragraph !== doc.body) {
+                    const display = doc.defaultView.getComputedStyle(paragraph).display
+                    if (!['inline', 'contents', 'inline-block'].includes(display)) break
+                    paragraph = paragraph.parentElement
+                }
+                if (!paragraphIds.has(paragraph)) paragraphIds.set(paragraph, paragraphIds.size)
+                items.push({ cfi, text: text.replace(/\u00a0/g, ' '), paragraphId: paragraphIds.get(paragraph) })
             }
 
             let startPosition = null

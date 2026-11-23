@@ -81,6 +81,44 @@ class SentencePlannerTest {
     }
 
     @Test
+    fun `连续标点和右引号留在前句不产生单字片段`() {
+        val text = "“真的吗？！”他问。等一下……再说。"
+        val segments = SentencePlanner().plan(listOf(speechUnit(text, "n1")))
+        assertEquals(listOf("“真的吗？！”", "他问。", "等一下……", "再说。"), segments.map { it.text })
+        assertEquals(text, segments.joinToString("") { it.text })
+        segments.forEach { assertEquals(it.text.length + 1, it.charToSource.size) }
+    }
+
+    @Test
+    fun `行内样式节点拼成完整句并保留跨节点定位`() {
+        val units = listOf(
+            SpeechTextUnit("他拿起", SourceAnchor("n1", 0), paragraphEnd = false),
+            SpeechTextUnit("金箍棒", SourceAnchor("n2", 0), paragraphEnd = false),
+            SpeechTextUnit("向前走去。下一句。", SourceAnchor("n3", 0)),
+        )
+        val segments = SentencePlanner().plan(units)
+        assertEquals(listOf("他拿起金箍棒向前走去。", "下一句。"), segments.map { it.text })
+        val plan = SpeechPlan("book", "gen", 0, segments)
+        assertEquals(0, plan.findSegmentForAnchor("n2", 1))
+        assertEquals(SourceAnchor("n2", 1), segments[0].anchorAt(4))
+        assertEquals(1, plan.findSegmentForAnchor("n3", 6))
+    }
+
+    @Test
+    fun `真实段落不会因为行内合并而串在一起`() {
+        val segments = SentencePlanner().plan(listOf(speechUnit("章名", "n1"), speechUnit("正文", "n2")))
+        assertEquals(listOf("章名", "正文"), segments.map { it.text })
+    }
+
+    @Test
+    fun `跨节点长句仍受长度上限约束`() {
+        val units = (0..9).map { SpeechTextUnit("字".repeat(30), SourceAnchor("n$it", 0), paragraphEnd = it == 9) }
+        val segments = SentencePlanner(maxSegmentChars = 80).plan(units)
+        assertEquals(300, segments.sumOf { it.text.length })
+        assertTrue(segments.all { it.text.length <= 80 })
+    }
+
+    @Test
     fun `空输入返回空计划`() {
         assertTrue(SentencePlanner().plan(emptyList()).isEmpty())
     }

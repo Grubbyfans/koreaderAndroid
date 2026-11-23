@@ -527,7 +527,11 @@ class ReaderWebView(context: Context) : WebView(context) {
             val cfi = node.optString("cfi")
             val text = node.optString("text")
             if (cfi.isBlank() || text.isBlank()) continue
-            result.add(ChapterTextNode(cfi = cfi, text = text))
+            result.add(ChapterTextNode(
+                cfi = cfi,
+                text = text,
+                paragraphId = if (node.has("paragraphId")) node.optInt("paragraphId") else null,
+            ))
         }
         return result
     }

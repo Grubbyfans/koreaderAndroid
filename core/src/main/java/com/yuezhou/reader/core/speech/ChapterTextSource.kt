@@ -20,6 +20,8 @@ package com.yuezhou.reader.core.speech
 data class SpeechTextUnit(
     val text: String,
     val anchor: SourceAnchor,
+    /** 行内 span/em 等节点不构成段落结束，允许保留完整句子的合成上下文。 */
+    val paragraphEnd: Boolean = true,
 )
 
 /**
