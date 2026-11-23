@@ -158,6 +158,55 @@ class SpeechCoordinatorTest {
     }
 
     @Test
+    fun `后台释放先停止播放且等待不可取消的合成返回后才释放模型`() = runTest {
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val nativeReturned = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var released = false
+        val synth = object : com.yuezhou.reader.core.speech.SpeechSynthesizer {
+            override suspend fun synthesize(
+                text: String,
+                segmentIndex: Int,
+                speed: Float,
+                token: SessionToken,
+            ): com.yuezhou.reader.core.speech.SynthesizedAudio {
+                entered.complete(Unit)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    nativeReturned.await()
+                }
+                assertFalse(released)
+                return com.yuezhou.reader.core.speech.SynthesizedAudio(FloatArray(240) { 0.2f }, 24_000)
+            }
+
+            override suspend fun release() { released = true }
+        }
+        val player = FakePcmPlayer()
+        val coordinator = SpeechCoordinator(synth, player, backgroundScope)
+        val events = recordEvents(coordinator)
+        coordinator.play(planOf(3), 0, tokenA)
+        settle()
+        assertTrue(entered.isCompleted)
+
+        val cleanup = backgroundScope.launch { coordinator.release() }
+        settle()
+        assertTrue(player.stopped)
+        assertFalse(cleanup.isCompleted)
+        assertFalse(released)
+        // 清理在等待 native 时，其他协程仍可运行。
+        var responsive = false
+        backgroundScope.launch { responsive = true }
+        settle()
+        assertTrue(responsive)
+
+        nativeReturned.complete(Unit)
+        settle()
+        assertTrue(cleanup.isCompleted)
+        assertTrue(released)
+        assertTrue(player.released)
+        assertTrue(player.enqueued.isEmpty())
+        assertTrue(events.none { it is SpeechPlaybackEvent.SegmentCompleted })
+    }
+
+    @Test
     fun `有界预合成最多领先当前句两句`() = runTest {
         val synth = FakeSynthesizer()
         val player = FakePcmPlayer()

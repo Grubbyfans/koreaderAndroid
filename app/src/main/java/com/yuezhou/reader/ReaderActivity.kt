@@ -94,7 +94,6 @@ import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.ReaderEvent
 import com.yuezhou.reader.reader.ReaderWebView
-import com.yuezhou.reader.reader.SpeechPositionStore
 import com.yuezhou.reader.reader.SyncLogStore
 import com.yuezhou.reader.reader.TocItem
 import com.yuezhou.reader.core.speech.SentencePlanner
@@ -571,35 +570,10 @@ private fun ReaderScreen(
                     kokoroSpeakerId = latestPrefs.kokoroSpeaker,
                 )
             )
-            // 恢复优先级：稳定原文锚点 → 同代次/同算法的 segmentIndex → 当前阅读位置。
+            // 用户主动点击朗读或切换配置时，以当前可见页为起点，旧朗读游标仅用于保存记录。
             scope.launch {
-                val restored = runCatching { SpeechPositionStore.load(context, id) }.getOrNull()
-                var resumeFrom = -1
-                var message = "已开始朗读"
-                if (restored != null && restored.chapterIndex == chapterIndex) {
-                    val currentGeneration = restored.fileGeneration == fileGeneration
-                    val currentPlanner = restored.plannerVersion == plan.plannerVersion
-                    if (currentGeneration && currentPlanner) {
-                        val byAnchor = if (restored.anchorNodeId.isNotBlank()) {
-                            plan.findSegmentForAnchor(restored.anchorNodeId, restored.charOffset)
-                        } else {
-                            -1
-                        }
-                        resumeFrom = when {
-                            byAnchor >= 0 -> byAnchor
-                            restored.segmentIndex in segments.indices -> restored.segmentIndex
-                            else -> -1
-                        }
-                        if (resumeFrom >= 0) message = "已从上次位置继续朗读"
-                    } else {
-                        // 文件被同名覆盖或分段算法升级：旧游标失效，回到当前阅读位置。
-                        message = "文件已更新，旧朗读位置已失效"
-                    }
-                }
-                if (resumeFrom < 0) {
-                    resumeFrom = readingPositionSegment.coerceAtLeast(0)
-                    if (resumeFrom > 0) message = "已从当前位置开始朗读"
-                }
+                val resumeFrom = readingPositionSegment.coerceAtLeast(0)
+                val message = "已从当前页开始朗读"
                 try {
                     SpeechPlanStore.startAndPlay(
                         context, plan,

@@ -36,7 +36,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /**
@@ -208,7 +208,13 @@ class SpeechService : Service() {
         kokoroEventJob = null
         val coordinator = kokoroCoordinator
         kokoroCoordinator = null
-        if (coordinator != null) runCatching { coordinator.release() }
+        if (coordinator != null) {
+            // cancel 只能作废结果，JNI 仍可能运行；后台等待结束后再释放，且不能中途取消清理。
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { coordinator.release() }
+                    .onFailure { Log.w(TAG, "Kokoro 资源释放失败", it) }
+            }
+        }
     }
 
     private fun playChapter(engine: TtsEngine, plan: SpeechPlan, startSegment: Int = 0) {
@@ -287,7 +293,10 @@ class SpeechService : Service() {
         )
         val loadStartedAt = SystemClock.elapsedRealtime()
         val synthesizer = try {
-            provider.createSynthesizer(modelId, config.kokoroSpeakerId)
+            // native 初始化无法立即取消；保留结果，让过期会话仍能安全释放它。
+            withContext(NonCancellable) {
+                provider.createSynthesizer(modelId, config.kokoroSpeakerId)
+            }
         } catch (e: CancellationException) {
             releaseWakeLock()
             throw e
@@ -298,7 +307,9 @@ class SpeechService : Service() {
         }
         if (generation != playGeneration) {
             Log.d(TAG, "Kokoro 初始化完成但会话已被取代，释放")
-            runCatching { synthesizer.release() }
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { synthesizer.release() }
+            }
             return
         }
         SpeechDiagnosticsState.resetSession(
@@ -531,7 +542,8 @@ class SpeechService : Service() {
         clearChapterTransition()
         kokoroEventJob?.cancel()
         kokoroEventJob = null
-        scope.launch { runCatching { kokoroCoordinator?.stop() } }
+        val coordinator = kokoroCoordinator
+        kokoroScope.launch { runCatching { coordinator?.stop() } }
         stateMachine.stop()
         activeEngine = SpeechEngineType.SYSTEM_TTS
         request?.let { SpeechPlanStore.clear(it) }
@@ -714,6 +726,7 @@ class SpeechService : Service() {
             return
         }
         sessionId++
+        playGeneration++
         playJob?.cancel()
         stopWatchdog()
         clearChapterTransition()
@@ -1135,9 +1148,9 @@ class SpeechService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         sessionId++
+        playGeneration++
         stopWatchdog()
         releaseWakeLock()
-        runBlocking { runCatching { progressWriter.flush() } }
         scope.cancel()
         request?.let { SpeechPlanStore.clear(it) }
         SpeechProgressTracker.clear()
@@ -1148,10 +1161,20 @@ class SpeechService : Service() {
         kokoroEventJob = null
         val coordinator = kokoroCoordinator
         kokoroCoordinator = null
-        if (coordinator != null) {
-            runBlocking { runCatching { coordinator.release() } }
+        // Service.onDestroy 在主线程执行。不能阻塞等待尚未结束的 native 推理，
+        // 也不能提前释放仍在使用的模型。独立清理任务负责等流水线结束再释放。
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                runCatching { progressWriter.flush() }
+                if (coordinator != null) {
+                    runCatching { coordinator.release() }
+                        .onFailure { Log.w(TAG, "Kokoro 销毁清理失败", it) }
+                }
+            } finally {
+                kokoroScope.cancel()
+                persistScope.cancel()
+            }
         }
-        kokoroScope.cancel()
         SpeechVoices.clear()
         mediaSession?.release()
         mediaSession = null
