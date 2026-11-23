@@ -6,7 +6,7 @@
 - 云端对接流程：[docs/cloud-integration.md](docs/cloud-integration.md)（WebDAV / 百度网盘）
 - 同步冲突模型：[docs/sync-model.md](docs/sync-model.md)（冲突检测 / 裁决 / 待发布恢复）
 - 兼容基线：BaiduPanSync 0.10.8/0.10.9 现行 `schemaVersion=2` 云端协议（见方案 §4）
-- 应用名：阅舟；包名：`com.yuezhou.reader`
+- 应用名：静读；包名：`com.yuezhou.reader`。默认打包「静读测试版」，包名为 `com.yuezhou.reader.tts.test`。
 - 首版范围与实施阶段：见方案 §1.2、§16（P0→P6）
 
 ## 工程结构
@@ -30,10 +30,11 @@ Gradle 9.7.0 · AGP 9.3.1 · Kotlin 2.4.20 · Compose BOM 2026.09.00 · JDK 25�
 
 ## 构建
 
+默认构建「静读测试版」。正式版任务、签名和真机安装步骤见[打包文档](docs/BUILD.md)。
+
 ```bash
-./gradlew assembleDebug          # Debug APK
-./gradlew test                   # 单元测试
-./gradlew :app:assembleDebug
+./gradlew :app:assembleTtsTestDebug
+./gradlew test
 ```
 
 SDK 路径由本机 `local.properties` 的 `sdk.dir` 指定（该文件不入库）。

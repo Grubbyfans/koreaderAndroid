@@ -5,17 +5,12 @@
     <application
         android:name=".tts.ReaderTtsApplication"
         tools:replace="android:name">
-        <!-- 阶段 B 试音入口：仅存在于 ttsTestDebug 变体 -->
+        <!-- 阶段 B 试音入口：通过 ADB 显式启动 -->
         <activity
             android:name=".tts.KokoroTrialActivity"
             android:exported="true"
             android:label="Kokoro 试音"
-            android:theme="@style/Theme.YuezhouReader">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/Theme.YuezhouReader" />
 
         <!-- 阶段 D 服务验收：启动后销毁 Activity，由前台服务继续跨章朗读 -->
         <activity
