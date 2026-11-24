@@ -1,0 +1,26 @@
+core/src/main/java/com/yuezhou/reader/core/online/config/ServerImportPreview.kt
+  h_7f20b2a03eb3b6 1-15
+core/src/main/java/com/yuezhou/reader/core/online/config/ServerModels.kt
+  h_7f20b2a03eb3b6 1-57
+core/src/main/java/com/yuezhou/reader/core/online/config/ServerUrlPolicy.kt
+  h_7f20b2a03eb3b6 1-74
+core/src/main/java/com/yuezhou/reader/core/online/config/ZLibraryConfig.kt
+  h_7f20b2a03eb3b6 6,8,10-11,15,20,26,28-33,69-73,79-82,84-128,135-136,141-170,172,178-180,197-198
+core/src/main/java/com/yuezhou/reader/core/online/config/ZLibraryConnectionTester.kt
+  h_7f20b2a03eb3b6 22-24,34
+core/src/test/java/com/yuezhou/reader/core/online/ZLibraryConfigTest.kt
+  h_7f20b2a03eb3b6 3-5,7,11,13,23,34-36,44-46,50-52,72-73,79-153
+reader/src/main/java/com/yuezhou/reader/reader/online/config/ZLibraryConfigStore.kt
+  h_7f20b2a03eb3b6 4-7,9,19,21-24,30,38-42,52-115,117-134,139-140,149,151-153,157,162-163,166,168-169,173-202,208-214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fe710a7489521e4d8eb8e6ab4cbe436a30610c03",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
