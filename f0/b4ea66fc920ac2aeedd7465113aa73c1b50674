@@ -1,0 +1,28 @@
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  h_7f20b2a03eb3b6 128,1417-1418,1424-1427,1472-1491
+app/src/main/java/com/yuezhou/reader/ui/online/ZLibrarySettingsScreen.kt
+  h_7f20b2a03eb3b6 1-308
+core/src/main/java/com/yuezhou/reader/core/online/config/ZLibraryConfig.kt
+  h_7f20b2a03eb3b6 1-133
+core/src/main/java/com/yuezhou/reader/core/online/config/ZLibraryConnectionTester.kt
+  h_7f20b2a03eb3b6 1-54
+core/src/test/java/com/yuezhou/reader/core/online/ZLibraryConfigTest.kt
+  h_7f20b2a03eb3b6 1-70
+reader/src/main/java/com/yuezhou/reader/reader/CredentialCrypto.kt
+  h_7f20b2a03eb3b6 17,27-29,31,39-41,47,51,53,58
+reader/src/main/java/com/yuezhou/reader/reader/online/config/OnlineCredentialStore.kt
+  h_7f20b2a03eb3b6 1-93
+reader/src/main/java/com/yuezhou/reader/reader/online/config/ZLibraryConfigStore.kt
+  h_7f20b2a03eb3b6 1-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f0b4ea66fc920ac2aeedd7465113aa73c1b50674",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
