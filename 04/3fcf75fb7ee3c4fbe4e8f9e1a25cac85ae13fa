@@ -1,0 +1,46 @@
+README.md
+  h_7f20b2a03eb3b6 5-8,23,34
+app/src/main/assets/reader/bridge.js
+  h_7f20b2a03eb3b6 3
+docs/00-项目总览/Android阅读App_技术方案.md
+  h_7f20b2a03eb3b6 115
+docs/02-架构与协议/cloud-integration.md
+  h_7f20b2a03eb3b6 5
+docs/03-TTS与语音/TTS验收报告.md
+  h_7f20b2a03eb3b6 3
+docs/03-TTS与语音/内置Sherpa-ONNX_Kokoro_TTS技术改造方案.md
+  h_7f20b2a03eb3b6 184,644
+docs/03-TTS与语音/内置Sherpa-ONNX_Kokoro_TTS技术改造方案_v3.3.md
+  h_7f20b2a03eb3b6 195,761
+"docs/03-TTS与语音/静读 Android：Kokoro 中文小说朗读调优技术方案.md"
+  h_7f20b2a03eb3b6 42,216-217,219
+"docs/03-TTS与语音/静读 Android：Kokoro 轻量情绪朗读技术方案.md"
+  h_7f20b2a03eb3b6 379,447
+docs/04-在线书库统一化/阶段A-源码分析与架构设计报告.md
+  h_7f20b2a03eb3b6 3,298
+docs/04-在线书库统一化/阶段B-实施报告.md
+  h_7f20b2a03eb3b6 3
+docs/04-在线书库统一化/静读在线书库统一化与多书源扩展技术方案.md
+  h_7f20b2a03eb3b6 366-367
+docs/05-Z-Library服务器管理/Z-Library服务器发现-阶段A核对报告与实施计划.md
+  h_7f20b2a03eb3b6 5-6,28
+docs/05-Z-Library服务器管理/服务器发现-增量实施报告.md
+  h_7f20b2a03eb3b6 5-6,45-46
+docs/README.md
+  h_7f20b2a03eb3b6 1-90
+protocol-fixtures/cloud/README.md
+  h_7f20b2a03eb3b6 22
+reader-web/README.md
+  h_7f20b2a03eb3b6 10,17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "043fcf75fb7ee3c4fbe4e8f9e1a25cac85ae13fa",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
