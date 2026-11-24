@@ -1,0 +1,36 @@
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_c63cf5318d23cb::t_1e4cf13fb1c76a 117-119,123,256,269-279,286,288,290,293,295-300,317,322-323,329,342-352,354,359-361,363-364
+  s_c63cf5318d23cb::t_c955a45d74a69e 424,428-431,437-446,448,464,608,635,644,646,651,941,943,958,984,986,990-991,993,1027,1034,1042-1046
+tests/progress-jump.test.mjs
+  s_c63cf5318d23cb::t_1207b5357cd9e1 1-44
+reader/src/main/java/com/yuezhou/reader/reader/ReaderBridge.kt
+  s_c63cf5318d23cb::t_d19f691270eff6 7
+core/src/test/java/com/yuezhou/reader/core/cloud/CloudServiceTest.kt
+  s_c63cf5318d23cb::t_1207b5357cd9e1 134,140-152,252
+reader/src/main/java/com/yuezhou/reader/reader/LibraryStore.kt
+  s_c63cf5318d23cb::t_41e80b7c5d49c4 281-285
+app/src/main/assets/reader/bridge.js
+  s_c63cf5318d23cb::t_d19f691270eff6 71,74-75,80-81,87
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  s_c63cf5318d23cb::t_d19f691270eff6 440-444
+core/src/main/java/com/yuezhou/reader/core/cloud/CloudService.kt
+  s_c63cf5318d23cb::t_d19f691270eff6 129,132,143-144
+reader/src/main/java/com/yuezhou/reader/reader/CloudSync.kt
+  s_c63cf5318d23cb::t_41e80b7c5d49c4 15,678,686,696,704-716,719-720,725-726,754-755,761-770
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8795ab482bbdfe9ebaafd0b85f626d9b94d94c50",
+  "prompts": {},
+  "sessions": {
+    "s_c63cf5318d23cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20b7d-1093-77d0-affc-45225c60edbc",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
