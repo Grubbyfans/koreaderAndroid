@@ -1,8 +1,8 @@
 package com.yuezhou.reader.ui.online
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -54,7 +54,16 @@ fun OnlineLibraryScreen(
                 onClick = {},
                 label = { Text("Z-Library") },
             )
-            Spacer(Modifier.weight(1f))
+        }
+
+        // 操作入口单独一行右对齐：窄屏上若与书源 Tab 同行会被挤压成竖排文字并裁切。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             TextButton(onClick = onShowDownloads) { Text("下载") }
             TextButton(onClick = onOpenSettings) { Text("书源设置") }
         }
