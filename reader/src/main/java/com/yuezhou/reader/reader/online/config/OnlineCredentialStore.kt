@@ -20,6 +20,8 @@ data class OnlineCredentials(
     val cookies: String = "",
     val token: String? = null,
     val userId: String? = null,
+    /** 凭证绑定主机：切换到未授权地址时需重新登录，避免把 Cookie 发到新主机。 */
+    val serverHost: String = "",
     val savedAt: Long = System.currentTimeMillis(),
 )
 

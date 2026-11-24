@@ -14,6 +14,7 @@ import com.yuezhou.reader.core.online.model.ProviderException
 import com.yuezhou.reader.core.online.model.SearchQuery
 import com.yuezhou.reader.core.online.provider.CatalogBookProvider
 import com.yuezhou.reader.core.online.provider.ProviderCapability
+import com.yuezhou.reader.core.online.config.ServerTrustScope
 import com.yuezhou.reader.reader.online.config.OnlineCredentialStore
 import com.yuezhou.reader.reader.online.config.OnlineCredentials
 import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
@@ -49,6 +50,7 @@ class ZLibraryBookProvider(context: Context) : CatalogBookProvider {
                 account = account.trim(),
                 cookies = session.cookies,
                 userId = session.userId,
+                serverHost = currentHost(),
             ),
         )
         if (!saved) return Result.failure(IllegalStateException("凭证加密保存失败"))
@@ -58,7 +60,20 @@ class ZLibraryBookProvider(context: Context) : CatalogBookProvider {
     suspend fun currentSession(): ZLibraryApi.AuthSession? {
         val account = credentialStore.currentAccount() ?: return null
         val credentials = credentialStore.load(account) ?: return null
+        // 会话与服务器主机绑定：切换到未授权的新地址后不复用旧 Cookie，要求重新登录。
+        if (!ServerTrustScope.isTrusted(credentials.serverHost, config.servers.baseUrls.firstOrNull().orEmpty())) return null
         return ZLibraryApi.AuthSession(cookies = credentials.cookies, userId = credentials.userId ?: credentials.token)
+    }
+
+    /** 当前配置中生效的服务器主机。 */
+    fun currentHost(): String = ServerTrustScope.hostOf(config.servers.baseUrls.firstOrNull().orEmpty())
+
+    /** 当前会话是否绑定在生效主机上（供 UI 提示重新登录）。 */
+    suspend fun sessionTrusted(): Boolean {
+        val account = credentialStore.currentAccount() ?: return false
+        val credentials = credentialStore.load(account) ?: return false
+        if (credentials.serverHost.isBlank()) return true // 旧版凭证无绑定，视为可信
+        return ServerTrustScope.isTrusted(credentials.serverHost, config.servers.baseUrls.firstOrNull().orEmpty())
     }
 
     fun currentAccount(): String? = credentialStore.currentAccount()
