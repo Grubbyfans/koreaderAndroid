@@ -87,12 +87,20 @@ class CloudSync(private val context: Context) {
      * 以统计本次任务的请求数/字节/重定向（对齐方案 §13.2）。
      * @throws CloudException 凭据格式非法（如应用目录不是 /apps/xxx、token 缺失）。
      */
-    suspend fun backend(collector: DiagnosticCollector? = null): CloudBackend? {
+    suspend fun backend(
+        collector: DiagnosticCollector? = null,
+        /** 指定书源对应的后端；null 表示沿用原有的「显式选择 / 自动优先百度」规则。 */
+        forced: BackendKind? = null,
+    ): CloudBackend? {
         val creds = credentialStore.load()
         val baiduAvailable = creds.baiduAccessToken != null && creds.baiduAppDir != null
         val webdavAvailable = creds.webdavRootUrl != null && creds.webdavUsername != null
 
-        val useBaidu = when (creds.activeBackend) {
+        // 指定后端未配置时不回退到另一侧，避免「选了 WebDAV 却操作百度」。
+        if (forced == BackendKind.Baidu && !baiduAvailable) return null
+        if (forced == BackendKind.WebDav && !webdavAvailable) return null
+
+        val useBaidu = forced?.let { it == BackendKind.Baidu } ?: when (creds.activeBackend) {
             "baidu" -> true
             "webdav" -> false
             else -> baiduAvailable || !webdavAvailable
@@ -107,8 +115,8 @@ class CloudSync(private val context: Context) {
         return when {
             useBaidu && baiduAvailable -> {
                 BaiduBackend.create(
-                    appDir = creds.baiduAppDir!!,
-                    accessToken = creds.baiduAccessToken!!,
+                    appDir = creds.baiduAppDir,
+                    accessToken = creds.baiduAccessToken,
                     expiresAt = creds.baiduExpiresAt ?: 0L,
                     userId = creds.baiduUserId,
                     clientFactory = withDiagnostics { BaiduBackend.defaultClientForDiagnostics() },
@@ -116,8 +124,8 @@ class CloudSync(private val context: Context) {
             }
             !useBaidu && webdavAvailable -> {
                 WebDavBackend.create(
-                    rootUrl = creds.webdavRootUrl!!,
-                    username = creds.webdavUsername!!,
+                    rootUrl = creds.webdavRootUrl,
+                    username = creds.webdavUsername,
                     password = creds.webdavPassword ?: "",
                     clientFactory = withDiagnostics { WebDavBackend.defaultClientForDiagnostics() },
                 )
@@ -125,15 +133,15 @@ class CloudSync(private val context: Context) {
             // 显式选了某后端但该后端未配置 → 回退到另一侧（容错，避免误报未配置）
             else -> when {
                 baiduAvailable -> BaiduBackend.create(
-                    appDir = creds.baiduAppDir!!,
-                    accessToken = creds.baiduAccessToken!!,
+                    appDir = creds.baiduAppDir,
+                    accessToken = creds.baiduAccessToken,
                     expiresAt = creds.baiduExpiresAt ?: 0L,
                     userId = creds.baiduUserId,
                     clientFactory = withDiagnostics { BaiduBackend.defaultClientForDiagnostics() },
                 )
                 webdavAvailable -> WebDavBackend.create(
-                    rootUrl = creds.webdavRootUrl!!,
-                    username = creds.webdavUsername!!,
+                    rootUrl = creds.webdavRootUrl,
+                    username = creds.webdavUsername,
                     password = creds.webdavPassword ?: "",
                     clientFactory = withDiagnostics { WebDavBackend.defaultClientForDiagnostics() },
                 )
@@ -157,8 +165,8 @@ class CloudSync(private val context: Context) {
         val message: String? = null,
     )
 
-    suspend fun uploadSelection(): UploadSelection = withContext(Dispatchers.IO) {
-        val backend = backend() ?: throw CloudException(ErrorCode.INVALID_INPUT, "请先配置云同步后端")
+    suspend fun uploadSelection(forced: BackendKind? = null): UploadSelection = withContext(Dispatchers.IO) {
+        val backend = backend(forced = forced) ?: throw CloudException(ErrorCode.INVALID_INPUT, "请先配置云同步后端")
         backend.ensureAuthorized()
         val catalog = CloudService(backend).index().books.associateBy { it.bookId }
         val store = LibraryStore(context)
@@ -176,6 +184,7 @@ class CloudSync(private val context: Context) {
         books: List<LibraryStore.Entry>,
         isStopped: (String) -> Boolean,
         onProgress: (String, BookUploadProgress) -> Unit,
+        forced: BackendKind? = null,
     ): SyncOutcome = withContext(Dispatchers.IO) {
         val collector = DiagnosticCollector()
         val start = System.currentTimeMillis()
@@ -186,7 +195,7 @@ class CloudSync(private val context: Context) {
         var pending = 0
         var cancelled = 0
         try {
-            val backend = backend(collector)
+            val backend = backend(collector, forced)
             check(backend?.backendId == backendId) { "云后端已变更，请重新选择书籍" }
             val selectedBackend = checkNotNull(backend)
             selectedBackend.ensureAuthorized()
@@ -353,10 +362,10 @@ class CloudSync(private val context: Context) {
      * - [force] 为 true 时强制绕过缓存重新请求（主动更新）；
      * - 更新失败保留旧缓存，抛异常由 UI 展示失败状态。
      */
-    suspend fun listBooks(force: Boolean = false): RemoteLibrary = withContext(Dispatchers.IO) {
+    suspend fun listBooks(force: Boolean = false, forced: BackendKind? = null): RemoteLibrary = withContext(Dispatchers.IO) {
         val collector = DiagnosticCollector()
         val start = System.currentTimeMillis()
-        val backend = backend(collector) ?: throw CloudException(
+        val backend = backend(collector, forced) ?: throw CloudException(
             ErrorCode.INVALID_INPUT, "尚未配置云后端，请先在设置页配置 WebDAV 或百度网盘",
         )
         val ns = backend.backendId
@@ -423,8 +432,8 @@ class CloudSync(private val context: Context) {
      * 发现并登记外部上传的 EPUB（方案 §10）。返回实际新增/更新的条目数（0=无变化）。
      * 不失效列表缓存，由调用方决定是否强制重拉。失败抛异常。
      */
-    suspend fun discoverExternalBooks(): Int = withContext(Dispatchers.IO) {
-        val backend = backend() ?: throw CloudException(
+    suspend fun discoverExternalBooks(forced: BackendKind? = null): Int = withContext(Dispatchers.IO) {
+        val backend = backend(forced = forced) ?: throw CloudException(
             ErrorCode.INVALID_INPUT, "尚未配置云后端，请先在设置页配置 WebDAV 或百度网盘",
         )
         backend.ensureAuthorized()
@@ -435,10 +444,10 @@ class CloudSync(private val context: Context) {
      * 「主动更新书库」：强制刷新列表并登记外部上传的 EPUB（方案 §10）。
      * 返回用户可读的结果描述；失败抛异常由 UI 提示。
      */
-    suspend fun refreshLibrary(): String = withContext(Dispatchers.IO) {
+    suspend fun refreshLibrary(forced: BackendKind? = null): String = withContext(Dispatchers.IO) {
         val collector = DiagnosticCollector()
         val start = System.currentTimeMillis()
-        val backend = backend(collector) ?: throw CloudException(
+        val backend = backend(collector, forced) ?: throw CloudException(
             ErrorCode.INVALID_INPUT, "尚未配置云后端，请先在设置页配置 WebDAV 或百度网盘",
         )
         try {
@@ -556,6 +565,7 @@ class CloudSync(private val context: Context) {
         book: RemoteBook,
         isOpen: (String) -> Boolean,
         onProgress: ((received: Long, total: Long, phase: DownloadPhase) -> Unit)? = null,
+        forced: BackendKind? = null,
     ): Result<String> = withContext(Dispatchers.IO) {
         downloadMutex.withLock {
             try {
@@ -564,7 +574,7 @@ class CloudSync(private val context: Context) {
                 }
                 check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
                 val directory = DownloadDirectory(context)
-                val backend = backend() ?: return@withLock Result.failure(
+                val backend = backend(forced = forced) ?: return@withLock Result.failure(
                     IllegalStateException("尚未配置云后端"),
                 )
                 backend.ensureAuthorized()
