@@ -93,13 +93,27 @@ class ZLibraryBookProvider(context: Context) : CatalogBookProvider {
     override suspend fun getConnectionState(): ConnectionState {
         val errors = ZLibraryConfigValidator.validate(config)
         if (errors.isNotEmpty()) return ConnectionState.Failed(errors.first())
+        if (config.servers.baseUrls.isEmpty()) return ConnectionState.NotConfigured
         return ConnectionState.Connected
     }
 
     override suspend fun search(query: SearchQuery): BookPage {
         val session = currentSession()
-        return api().search(query, session).getOrElse { throw asProviderException(it) }
+        // UI 使用中文标识排序；实际表单值按参考实现的 SUPPORTED_ORDERS 映射。
+        val order = when (query.sort) {
+            "relevance", "bestmatch" -> "bestmatch"
+            "newest" -> "date"
+            else -> query.sort
+        }
+        val effective = query.copy(
+            format = "EPUB",
+            sort = order,
+            pageSize = config.preferences.pageSize.coerceIn(1, 30),
+        )
+        return api().search(effective, session).getOrElse { throw asProviderException(it) }
     }
+
+    override suspend fun fetchCover(url: String): Result<ByteArray> = api().fetchCover(url)
 
     override suspend fun getBookDetail(remoteId: String): OnlineBook {
         val parts = remoteId.split(":", limit = 2)

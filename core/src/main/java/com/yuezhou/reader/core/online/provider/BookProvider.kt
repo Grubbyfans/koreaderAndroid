@@ -46,4 +46,8 @@ interface CloudBookProvider : BookProvider {
 /** 检索型书源：关键词搜索；不实现 CloudBackend，不上传、不进度同步。 */
 interface CatalogBookProvider : BookProvider {
     suspend fun search(query: SearchQuery): BookPage
+
+    /** 封面是无凭证的静态资源；不支持的书源返回失败，UI 回退为文字占位封面。 */
+    suspend fun fetchCover(url: String): Result<ByteArray> =
+        Result.failure(UnsupportedOperationException("该书源不支持封面加载"))
 }

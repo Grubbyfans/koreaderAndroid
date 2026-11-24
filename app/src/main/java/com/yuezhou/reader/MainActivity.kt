@@ -333,6 +333,11 @@ private fun BookshelfScreen() {
 
     // 主动更新书库：登记外部书籍 + 强制刷新当前书源
     fun refreshRemoteLibrary() {
+        if (onlineVm.isCatalogSelected) {
+            // 检索型书源无云端索引可同步，刷新即按当前条件重新搜索。
+            scope.launch { onlineVm.refreshSelected() }
+            return
+        }
         if (uploadQueue.busy || remoteLoading) return
         scope.launch {
             val (_, message) = onlineVm.refreshSelected()
@@ -561,6 +566,10 @@ private fun BookshelfScreen() {
                             vm = onlineVm,
                             onRefresh = { refreshRemoteLibrary() },
                             onOpenDetail = { detailBook = it },
+                            onOpenSettings = {
+                                currentTab = Tab.设置
+                                showZLibrarySettings = true
+                            },
                         )
                     }
                 }

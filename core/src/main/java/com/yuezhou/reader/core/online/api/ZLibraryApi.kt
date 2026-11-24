@@ -23,6 +23,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
+import java.io.ByteArrayOutputStream
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import java.net.URL
@@ -126,6 +127,49 @@ class ZLibraryApi(
             }
         }
 
+    /**
+     * 下载封面字节：不携带 Cookie、不跟随重定向、限制大小与内容类型。
+     * 封面 URL 即使来自可信书源，也只作为无凭证的静态资源处理。
+     */
+    suspend fun fetchCover(url: String): Result<ByteArray> = withContext(Dispatchers.IO) {
+        runCatching {
+            val target = runCatching { URL(url) }.getOrNull()
+                ?: throw ProviderException(ProviderErrorCode.NETWORK, "封面地址格式无效")
+            if (target.protocol != "https") {
+                throw ProviderException(ProviderErrorCode.NETWORK, "封面必须使用 HTTPS")
+            }
+            val response = execute(Request.Builder().url(url).get().build())
+            verifyRedirect(response)
+            response.use { resp ->
+                if (resp.code !in 200..299) throw classify(resp.code, "")
+                val body = resp.body
+                val type = body.contentType()?.toString().orEmpty()
+                if (!type.startsWith("image/")) {
+                    throw ProviderException(ProviderErrorCode.NETWORK, "封面地址返回的不是图片")
+                }
+                val declared = body.contentLength()
+                if (declared > MAX_COVER_BYTES) {
+                    throw ProviderException(ProviderErrorCode.NETWORK, "封面文件过大")
+                }
+                val out = ByteArrayOutputStream()
+                val buffer = ByteArray(8 * 1024)
+                body.byteStream().use { stream ->
+                    var total = 0L
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > MAX_COVER_BYTES) {
+                            throw ProviderException(ProviderErrorCode.NETWORK, "封面文件过大")
+                        }
+                        out.write(buffer, 0, read)
+                    }
+                }
+                out.toByteArray()
+            }
+        }
+    }
+
     suspend fun getQuota(session: AuthSession): Result<Quota> = withContext(Dispatchers.IO) {
         runCatching {
             val response = execute(buildGetRequest(config.endpoints.profile.path), session)
@@ -159,15 +203,15 @@ class ZLibraryApi(
         }
     }
 
-    /** 供单测验证端点与表单构造。 */
+    /** 供单测验证端点与表单构造。字段语义按固定 commit b7eacbab 的实际请求体修正。 */
     internal fun buildSearchRequest(query: SearchQuery, page: Int = 1): Request {
         val form = FormBody.Builder()
             .add("message", query.keyword)
             .add("page", page.toString())
             .add("limit", query.pageSize.coerceIn(1, 30).toString())
-            .add("content_type", "article")
-            .add("extensions[0]", query.format ?: "epub")
-            .add("order[1]", query.sort)
+            // 第一版只检索 EPUB 图书；文章模式会忽略格式过滤，故不发送 content_type=article。
+            .add("extensions[0]", (query.format ?: "epub").uppercase())
+            .add("order", query.sort)
         query.language?.takeIf { it.isNotBlank() }?.let { form.add("languages[0]", it) }
         return Request.Builder()
             .url(baseUrl + config.endpoints.search.path)
@@ -337,6 +381,9 @@ class ZLibraryApi(
     private fun String?.orElse(default: String): String = this ?: default
 
     companion object {
+        /** 封面是Decoration资源，限制单张 2 MiB，防止异常响应占用内存。 */
+        const val MAX_COVER_BYTES = 2L * 1024 * 1024
+
         fun buildClient(config: ZLibraryConfig): OkHttpClient = OkHttpClient.Builder()
             .followRedirects(false)
             .followSslRedirects(false)

@@ -43,15 +43,34 @@ class ZLibraryApiTest {
 
     @Test
     fun `搜索端点与表单符合参考实现`() {
-        val request = api().buildSearchRequest(SearchQuery(keyword = "kotlin", pageSize = 30))
+        val request = api().buildSearchRequest(
+            SearchQuery(keyword = "kotlin", pageSize = 30, language = "chinese", sort = "bestmatch"),
+        )
         assertEquals("POST", request.method)
         assertEquals("/eapi/book/search", request.url.encodedPath)
         val form = Buffer().also { request.body!!.writeTo(it) }.readUtf8()
         assertTrue(form.contains("message=kotlin"))
         assertTrue(form.contains("limit=30"))
-        assertTrue(form.contains("order%5B1%5D=relevance") || form.contains("order[1]=relevance"))
-        assertTrue(form.contains("extensions%5B0%5D=epub") || form.contains("extensions[0]=epub"))
-        assertTrue(form.contains("content_type=article"))
+        assertTrue(form.contains("languages%5B0%5D=chinese") || form.contains("languages[0]=chinese"))
+        assertTrue(form.contains("order=bestmatch"))
+        assertTrue(form.contains("extensions%5B0%5D=EPUB") || form.contains("extensions[0]=EPUB"))
+        // 文章模式会忽略格式过滤；第一版只检索 EPUB 图书。
+        assertTrue(!form.contains("content_type"))
+    }
+
+    @Test
+    fun `封面只接受HTTPS图片且拒绝非图片响应`() = runBlocking {
+        val html = api(body = "<html>error</html>").fetchCover("https://cover.example/a.jpg")
+        assertTrue(html.isFailure)
+
+        val redirected = api(
+            code = 302,
+            headers = mapOf("Location" to "http://evil.example/a.jpg"),
+        ).fetchCover("https://cover.example/a.jpg")
+        assertTrue(redirected.isFailure)
+
+        val http = api().fetchCover("http://cover.example/a.jpg")
+        assertTrue(http.isFailure)
     }
 
     @Test
