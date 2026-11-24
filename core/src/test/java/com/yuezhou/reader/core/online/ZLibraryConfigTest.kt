@@ -181,6 +181,40 @@ class ZLibraryConfigTest {
     }
 
     @Test
+    fun `旧版完整JSON反序列化后迁移为v3单一列表`() {
+        // 模拟磁盘上的 v2 配置：含独立 manualBaseUrl、字符串 baseUrls，无 candidates 新字段的手动选择关系。
+        val legacyJson = """
+            {
+              "schemaVersion": 2,
+              "providerId": "zlibrary",
+              "configVersion": "1.0.0",
+              "servers": {
+                "mode": "manual",
+                "manualBaseUrl": "https://manual.example.com",
+                "candidates": [
+                  {"id": "c1", "baseUrl": "https://auto.example.com", "enabled": true, "priority": 1}
+                ],
+                "baseUrls": ["https://auto.example.com"]
+              }
+            }
+        """.trimIndent()
+        val parsed = json.decodeFromString<ZLibraryConfig>(legacyJson)
+        val migrated = ZLibraryConfigMigration.normalize(parsed)
+        assertEquals(3, migrated.schemaVersion)
+        // 旧手动地址并入统一列表，共 2 项；选择关系指向迁移出的手动地址。
+        assertEquals(2, migrated.servers.candidates.size)
+        assertEquals(
+            "https://manual.example.com",
+            migrated.servers.candidates.first { it.id == migrated.servers.manualSelectedServerId }.baseUrl,
+        )
+        assertEquals(listOf("https://manual.example.com"), migrated.servers.baseUrls)
+        assertEquals("", migrated.servers.manualBaseUrl)
+        assertTrue(ZLibraryConfigValidator.validate(migrated).isEmpty())
+        // 迁移结果可稳定序列化往返。
+        assertEqualsConfig(migrated, ZLibraryConfigMigration.normalize(json.decodeFromString(json.encodeToString(migrated))))
+    }
+
+    @Test
     fun `手动选中项被禁用时清除选择关系`() {
         val selected = candidate("https://manual.example.com", 1, enabled = false)
         val config = ZLibraryConfig.DEFAULT.copy(
