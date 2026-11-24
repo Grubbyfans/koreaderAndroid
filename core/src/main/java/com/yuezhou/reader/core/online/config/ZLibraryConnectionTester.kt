@@ -19,6 +19,9 @@ object ZLibraryConnectionTester {
         val errors = ZLibraryConfigValidator.validate(config)
         if (errors.isNotEmpty()) return Result.failure(IllegalArgumentException(errors.joinToString("；")))
 
+        // baseUrls 由配置仓库同步为当前生效地址（自动模式取启用候选，手动模式取固定地址）。
+        val effective = config.servers.baseUrls.firstOrNull()
+            ?: return Result.failure(IllegalStateException("未配置生效的服务器地址"))
         val allowedHosts = config.servers.baseUrls.mapNotNull { runCatching { java.net.URL(it).host }.getOrNull() }.toSet()
         val client = OkHttpClient.Builder()
             .followRedirects(false)
@@ -28,7 +31,7 @@ object ZLibraryConnectionTester {
             .build()
 
         return runCatching {
-            val request = Request.Builder().url(config.servers.baseUrls.first()).head().build()
+            val request = Request.Builder().url(effective).head().build()
             client.newCall(request).execute().use { response ->
                 val code = response.code
                 if (code in 300..399) {
