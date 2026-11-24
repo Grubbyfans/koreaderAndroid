@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -2222,7 +2223,8 @@ private fun EmptyState(
 private fun BottomNavBar(current: Tab, onSelect: (Tab) -> Unit) {
     NavigationBar(
         containerColor = YuezhouColors.Surface,
-        windowInsets = WindowInsets.safeDrawing,
+        // 只预留底部系统栏；safeDrawing 会把状态栏高度也算进来，导致导航栏明显变高。
+        windowInsets = WindowInsets.navigationBars,
     ) {
         NavigationBarItem(
             selected = current == Tab.书架,

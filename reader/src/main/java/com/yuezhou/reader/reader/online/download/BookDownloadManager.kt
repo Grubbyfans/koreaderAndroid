@@ -206,6 +206,11 @@ class BookDownloadManager(
                                 task = task.copy(localPath = pending.path, receivedBytes = pending.length())
                             }
                         }
+                    } else {
+                        // 已有 pending 文件（例如只重试导入）：补齐 PREPARING → DOWNLOADING，
+                        // 否则下一步 VERIFYING 会被状态机判为非法跳转。
+                        task = transit(task, DownloadStatus.DOWNLOADING)
+                        repository.save(task)
                     }
 
                     task = transit(task, DownloadStatus.VERIFYING)

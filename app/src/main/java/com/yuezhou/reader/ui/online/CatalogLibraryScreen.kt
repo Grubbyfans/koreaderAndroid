@@ -231,7 +231,7 @@ private fun CatalogResults(
     downloadedIds: Set<String>,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(if (state.gridMode) 2 else 1),
+        columns = GridCells.Fixed(if (state.gridMode) 3 else 1),
         state = gridState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),

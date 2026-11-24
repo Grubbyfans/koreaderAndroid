@@ -69,3 +69,18 @@
 ## 7. 暂停声明
 
 阶段 E 已完成；后续经确认已实施阶段 F（云端上传联动与 KOReader 同步兼容），详见 `docs/04-在线书库统一化/阶段F-实施报告.md`。
+
+## 8. 真机回归发现与修复（2026-11-25）
+
+### 现象
+真机下载完成后，下载管理页两本书均显示「导入失败，已恢复原文件：正文不存在」。点击「重试导入」后又出现「非法下载状态跳转：PREPARING → VERIFYING」。
+
+### 根因与修复
+1. **新书正文从未落盘**：`OnlineImportCoordinator.import()` 在 `replacing == false` 时直接 `staging.delete()`，只提取了封面/标题就调用 `LibraryStore.registerBook()`；后者要求 `files/epub/<fileName>` 已存在，于是抛出「正文不存在」。原实现只有「同名且内容不同」的覆盖分支会移动文件，新书路径漏了这一步。
+   - 修复：抽出 `placeBody()`，新书把 staging 原子移动到 `files/epub/`，同名同内容保留原文件、同名不同内容备份后替换；登记失败时清理本次新写入的文件，避免留下未登记的孤儿正文。
+2. **重试路径状态跳转断裂**：`BookDownloadManager.run()` 在 pending 文件已存在（即只重试导入）时跳过下载分支，任务状态停留在 `PREPARING`，下一步直接 `transit(VERIFYING)` 被状态机拒绝。
+   - 修复：该分支补上 `PREPARING → DOWNLOADING`，使状态链完整；不重新下载、不重新申请额度。
+
+### 验证
+- 新增 3 项 `OnlineImportCoordinatorTest`（新书落盘、同名同内容保留、同名不同内容备份替换）；全量 **258 项测试通过、0 失败**。
+- 真机对两个失败任务分别点「重试导入」：两本均变为「已导入」，正文出现在 `files/epub/`，`pending_import/` 清空，无状态跳转错误。
