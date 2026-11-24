@@ -1,0 +1,14 @@
+core/src/test/java/com/yuezhou/reader/core/online/ZLibraryConfigTest.kt
+  h_7f20b2a03eb3b6 183-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7c002a3b9ade67468d2a697ba6c89529cb55cc1",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
