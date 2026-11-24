@@ -1,0 +1,18 @@
+app/src/main/java/com/yuezhou/reader/ui/online/ServerDialogs.kt
+  h_7f20b2a03eb3b6 26-30,48-49,55,61-64,70-97,126,129,132
+app/src/main/java/com/yuezhou/reader/ui/online/ServerListCards.kt
+  h_7f20b2a03eb3b6 4,11-12,14-20,22,34,41-47,49-50,53-55,57,60,64,66,73,76,80,82-93,95,97,102-105,109,119,125-127,131,135-153,155,157-158,161-173,175-210,215-259,263-265,269,272
+app/src/main/java/com/yuezhou/reader/ui/online/ServerSettingsScreen.kt
+  h_7f20b2a03eb3b6 19-22,50,57,59-61,73,78,82-86,110-111,115-116,118-121,123,129-163,165-172,178,180-181,191,197,199,203-228,230-249,256,262-280,293,295,302-303,307-309,311,315-317,319,322,324-325,334-351,354-380,382,390,398,404-410,421-422,424,436-452,466-535
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9460841407d42b2bf9769ef7be2be6efa20cdd8e",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
