@@ -248,8 +248,7 @@ private fun BookshelfScreen() {
                 status = null
                 try {
                     // 持久授权：允许后续扫描同一目录
-                    val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                    val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                     try {
                         context.contentResolver.takePersistableUriPermission(uri, flags)
                     } catch (e: Exception) {
@@ -1801,8 +1800,7 @@ private fun SettingsPage(
                     // 倒序展示最近的在前面
                     diagnostics.reversed().forEach { (at, pair) ->
                         val (kind, s) = pair
-                        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-                            .format(java.util.Date(at))
+                        val time = formatLocalTime("HH:mm:ss", at)
                         val phaseText = s.phasesMs.entries.joinToString(" ") { "${it.key}=${it.value}ms" }
                         Text(
                             "[$time] $kind · 请求${s.totalRequests} · ↑${s.bytesUp}B ↓${s.bytesDown}B · 缓存${s.cacheHits}" +
@@ -1869,8 +1867,7 @@ private fun SyncLogPage(onBack: () -> Unit) {
             ) {
                 items(list, key = { it.id }) { log ->
                     val dirLabel = if (log.direction == "pull") "拉取" else "上传"
-                    val time = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                        .format(java.util.Date(log.at))
+                    val time = formatLocalTime("MM-dd HH:mm:ss", log.at)
                     val ok = if (log.success) "成功" else "失败"
                     val okColor = if (log.success) YuezhouColors.BrandDark else MaterialTheme.colorScheme.error
                     Surface(
@@ -2255,3 +2252,7 @@ private fun BottomNavBar(current: Tab, onSelect: (Tab) -> Unit) {
         )
     }
 }
+
+/** 日志时间戳格式化：从 Composable 中移出，避免在组合期间读取非可观察的 Locale。 */
+private fun formatLocalTime(pattern: String, epochMillis: Long): String =
+    java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(java.util.Date(epochMillis))

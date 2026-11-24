@@ -509,10 +509,7 @@ private fun currentServerSummary(
         ProbeStatus.API_INCOMPATIBLE, ProbeStatus.CANCELLED -> "连接失败" to MaterialTheme.colorScheme.error
         else -> "已选择 · 尚未检测" to YuezhouColors.TextSecondary
     }
-    val lastCheckedAtText = lastCheckedAt?.let {
-        val formatter = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-        formatter.format(java.util.Date(it))
-    }
+    val lastCheckedAtText = lastCheckedAt?.let { formatServerTime(it) }
     val detail = buildString {
         if (result?.latencyMs != null) append("响应耗时：${result.latencyMs}ms")
         if (lastCheckedAtText != null) {
@@ -525,6 +522,10 @@ private fun currentServerSummary(
 
 private fun normalizeUrl(url: String): String =
     runCatching { ServerUrlPolicy.normalize(url) }.getOrNull() ?: url.trim().trimEnd('/').lowercase()
+
+/** 检测时间格式化：从 Composable 中移出，避免在组合期间读取非可观察的 Locale。 */
+private fun formatServerTime(epochMillis: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(epochMillis))
 
 private fun suggestionMissing(config: ZLibraryConfig, next: ServerMode, currentAutoUrl: String?): Boolean {
     if (next != ServerMode.MANUAL) return false
