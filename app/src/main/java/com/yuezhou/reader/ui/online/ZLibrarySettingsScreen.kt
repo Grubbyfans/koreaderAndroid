@@ -31,10 +31,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
+import com.yuezhou.reader.reader.online.zlibrary.ZLibraryBookProvider
 import kotlinx.coroutines.launch
 
 /**
@@ -55,6 +57,12 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
     var serverText by remember { mutableStateOf(config.servers.baseUrls.joinToString("\n")) }
     var languageText by remember { mutableStateOf(config.preferences.defaultLanguage) }
     var pageSizeText by remember { mutableStateOf(config.preferences.pageSize.toString()) }
+    val provider = remember(context, config) { ZLibraryBookProvider(context) }
+    var account by remember { mutableStateOf(provider.currentAccount()) }
+    var quotaText by remember { mutableStateOf<String?>(null) }
+    var showLogin by remember { mutableStateOf(false) }
+    var loginUser by remember { mutableStateOf("") }
+    var loginPassword by remember { mutableStateOf("") }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -256,6 +264,52 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
                 }
             }
 
+            Spacer(Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("账号", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    val current = account
+                    if (current == null) {
+                        Text(
+                            "未登录 · 搜索无需登录，下载需登录并计额度。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = { showLogin = true }) { Text("登录") }
+                    } else {
+                        Text("已登录：$current", style = MaterialTheme.typography.bodyMedium)
+                        Row {
+                            TextButton(onClick = {
+                                scope.launch {
+                                    provider.quota().fold(
+                                        onSuccess = { quota ->
+                                            quotaText = "今日下载 ${quota.downloadsToday ?: "未知"} / ${quota.downloadsLimit ?: "未知"}"
+                                        },
+                                        onFailure = { message = "额度查询失败：${it.message ?: "未知错误"}" },
+                                    )
+                                }
+                            }) { Text("查询额度") }
+                            TextButton(onClick = {
+                                scope.launch {
+                                    provider.logout()
+                                    account = null
+                                    quotaText = null
+                                    message = "已退出登录"
+                                }
+                            }) { Text("退出登录") }
+                        }
+                        quotaText?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+
             if (message != null) {
                 Spacer(Modifier.height(12.dp))
                 Text(
@@ -303,6 +357,57 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
                 }) { Text("保存") }
             },
             dismissButton = { TextButton(onClick = { showEdit = false }) { Text("取消") } },
+        )
+    }
+
+    if (showLogin) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showLogin = false },
+            title = { Text("登录 Z-Library") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = loginUser,
+                        onValueChange = { loginUser = it },
+                        label = { Text("账号") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = loginPassword,
+                        onValueChange = { loginPassword = it },
+                        label = { Text("密码") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "凭证加密保存，不写入配置文件；请勿在不可信服务器上使用常用密码。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        provider.login(loginUser, loginPassword).fold(
+                            onSuccess = {
+                                account = loginUser.trim()
+                                showLogin = false
+                                loginPassword = ""
+                                message = "登录成功"
+                            },
+                            onFailure = { message = "登录失败：${it.message ?: "未知错误"}" },
+                        )
+                    }
+                }) { Text("登录") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogin = false; loginPassword = "" }) { Text("取消") }
+            },
         )
     }
 }

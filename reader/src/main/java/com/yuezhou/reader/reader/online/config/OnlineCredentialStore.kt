@@ -19,6 +19,7 @@ data class OnlineCredentials(
     val account: String,
     val cookies: String = "",
     val token: String? = null,
+    val userId: String? = null,
     val savedAt: Long = System.currentTimeMillis(),
 )
 
