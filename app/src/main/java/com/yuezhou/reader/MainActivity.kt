@@ -355,12 +355,23 @@ private fun BookshelfScreen() {
         selecting = null
     }
 
+    // 二级设置页：以独立全屏页面呈现，隐藏外层顶栏、底部导航与悬浮按钮（方案 §3.1）。
+    var showSyncLogPage by rememberSaveable { mutableStateOf(false) }
+    var showZLibrarySettings by rememberSaveable { mutableStateOf(false) }
+    var showServerSettings by rememberSaveable { mutableStateOf(false) }
+    val fullscreenSubPage = showSyncLogPage || showZLibrarySettings || showServerSettings
+
+    // 系统返回键逐层退出二级页，恢复原有导航结构（方案 §3.1）。
+    BackHandler(enabled = showServerSettings) { showServerSettings = false }
+    BackHandler(enabled = !showServerSettings && showZLibrarySettings) { showZLibrarySettings = false }
+    BackHandler(enabled = !showServerSettings && !showZLibrarySettings && showSyncLogPage) { showSyncLogPage = false }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = YuezhouColors.Background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            if (selecting != null && currentTab == Tab.书架 && bookScope == BookScope.本地) {
+            if (!fullscreenSubPage && selecting != null && currentTab == Tab.书架 && bookScope == BookScope.本地) {
                 // 管理态顶栏：已选数量 + 全选/删除
                 val selected = selecting!!
                 TopAppBar(
@@ -428,7 +439,7 @@ private fun BookshelfScreen() {
                         titleContentColor = YuezhouColors.TextPrimary,
                     ),
                 )
-            } else {
+            } else if (!fullscreenSubPage) {
                 TopAppBar(
                     title = { Text(if (currentTab == Tab.书架) "书库" else currentTab.label) },
                     actions = {
@@ -452,7 +463,7 @@ private fun BookshelfScreen() {
             }
         },
         floatingActionButton = {
-            if (currentTab == Tab.书架) {
+            if (!fullscreenSubPage && currentTab == Tab.书架) {
                 if (bookScope == BookScope.本地) {
                     FloatingActionButton(
                         onClick = {
@@ -484,7 +495,9 @@ private fun BookshelfScreen() {
             }
         },
         bottomBar = {
-            BottomNavBar(current = currentTab, onSelect = { currentTab = it })
+            if (!fullscreenSubPage) {
+                BottomNavBar(current = currentTab, onSelect = { currentTab = it })
+            }
         },
     ) { padding ->
         Column(
@@ -551,7 +564,17 @@ private fun BookshelfScreen() {
                         )
                     }
                 }
-                Tab.设置 -> SettingsPage(cloudSync, uploadQueue, remoteLoading)
+                Tab.设置 -> SettingsPage(
+                    cloudSync = cloudSync,
+                    uploadQueue = uploadQueue,
+                    cloudLoading = remoteLoading,
+                    showSyncLogPage = showSyncLogPage,
+                    onSyncLogChange = { showSyncLogPage = it },
+                    showZLibrarySettings = showZLibrarySettings,
+                    onZLibraryChange = { showZLibrarySettings = it },
+                    showServerSettings = showServerSettings,
+                    onServerSettingsChange = { showServerSettings = it },
+                )
             }
         }
     }
@@ -1358,7 +1381,17 @@ private fun BookshelfContent(
 }
 
 @Composable
-private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, cloudLoading: Boolean) {
+private fun SettingsPage(
+    cloudSync: CloudSync,
+    uploadQueue: BookUploadQueue,
+    cloudLoading: Boolean,
+    showSyncLogPage: Boolean,
+    onSyncLogChange: (Boolean) -> Unit,
+    showZLibrarySettings: Boolean,
+    onZLibraryChange: (Boolean) -> Unit,
+    showServerSettings: Boolean,
+    onServerSettingsChange: (Boolean) -> Unit,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs by ReaderSettings.flow(context).collectAsState(
@@ -1413,25 +1446,18 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
         }
     }
 
-    // 是否进入「同步记录」二级页面
-    var showSyncLogPage by rememberSaveable { mutableStateOf(false) }
-    // 是否进入「Z-Library 书源设置」二级页面
-    var showZLibrarySettings by rememberSaveable { mutableStateOf(false) }
-    // 是否进入「服务器配置」三级页面
-    var showServerSettings by rememberSaveable { mutableStateOf(false) }
-
     if (showSyncLogPage) {
-        SyncLogPage(onBack = { showSyncLogPage = false })
+        SyncLogPage(onBack = { onSyncLogChange(false) })
         return
     }
     if (showServerSettings) {
-        ServerSettingsScreen(onBack = { showServerSettings = false })
+        ServerSettingsScreen(onBack = { onServerSettingsChange(false) })
         return
     }
     if (showZLibrarySettings) {
         ZLibrarySettingsScreen(
-            onBack = { showZLibrarySettings = false },
-            onOpenServerSettings = { showServerSettings = true },
+            onBack = { onZLibraryChange(false) },
+            onOpenServerSettings = { onServerSettingsChange(true) },
         )
         return
     }
@@ -1466,7 +1492,7 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             }
             Spacer(Modifier.height(8.dp))
             // 同步记录入口：点击进入独立页面
-            TextButton(onClick = { showSyncLogPage = true }) {
+            TextButton(onClick = { onSyncLogChange(true) }) {
                 Text("查看最近 20 次同步记录")
             }
         }
@@ -1485,7 +1511,7 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { showZLibrarySettings = true }
+                    .clickable { onZLibraryChange(true) }
                     .padding(vertical = 12.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

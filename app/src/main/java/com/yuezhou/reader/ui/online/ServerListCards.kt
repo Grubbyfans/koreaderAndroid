@@ -235,10 +235,11 @@ private fun statusSummary(
         return StatusText("已禁用", YuezhouColors.TextSecondary)
     }
     val probe = result?.let { runCatching { ProbeStatus.valueOf(it.status) }.getOrNull() }
+    val latencyText = "${result?.latencyMs ?: 0}ms"
     val base = when (probe) {
         null -> "未检测"
         ProbeStatus.CHECKING -> "检测中"
-        ProbeStatus.AVAILABLE -> "可用 · ${result?.latencyMs ?: 0}ms"
+        ProbeStatus.AVAILABLE -> "可用 · $latencyText"
         ProbeStatus.TIMEOUT -> "连接超时"
         ProbeStatus.NETWORK_ERROR, ProbeStatus.TLS_ERROR, ProbeStatus.CANCELLED -> "连接失败"
         ProbeStatus.API_INCOMPATIBLE -> "接口异常"
