@@ -89,6 +89,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.LinearEasing
@@ -170,6 +171,20 @@ class MainActivity : ComponentActivity() {
 
 }
 
+/**
+ * 主导航状态用名称字符串保存：Activity 重建或"不保留活动"下仍恢复原页面，
+ * 且不受枚举增删顺序影响；无法识别的旧值安全回退到默认页。
+ */
+private val TabSaver = Saver<Tab, String>(
+    save = { it.name },
+    restore = { runCatching { Tab.valueOf(it) }.getOrDefault(Tab.书架) },
+)
+
+private val BookScopeSaver = Saver<BookScope, String>(
+    save = { it.name },
+    restore = { runCatching { BookScope.valueOf(it) }.getOrDefault(BookScope.本地) },
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BookshelfScreen() {
@@ -181,10 +196,9 @@ private fun BookshelfScreen() {
     var status by remember { mutableStateOf<String?>(null) }
     // 刷新触发计数：+1 触发重新加载书库
     var refreshKey by remember { mutableStateOf(0) }
-    // 当前选中的底部导航 tab
-    var currentTab by remember { mutableStateOf(Tab.书架) }
-    // 书库范围：本地 / 云端
-    var bookScope by remember { mutableStateOf(BookScope.本地) }
+    // 主导航状态须跨 Activity 重建/从桌面返回保留，否则会掉回默认的「书架/本地」。
+    var currentTab by rememberSaveable(stateSaver = TabSaver) { mutableStateOf(Tab.书架) }
+    var bookScope by rememberSaveable(stateSaver = BookScopeSaver) { mutableStateOf(BookScope.本地) }
     // 管理态（多选删除）：非空表示进入管理态，集合为已勾选的 bookId
     var selecting by remember { mutableStateOf<Set<String>?>(null) }
     // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
@@ -293,6 +307,14 @@ private fun BookshelfScreen() {
         books = store.snapshot().books
         hiddenBooks = store.hiddenBookIds()
         loading = false
+    }
+
+    // 在线下载导入成功后即时刷新书库：书架是一次性快照，过去只靠 ON_RESUME 重载，
+    // 会出现「显示已导入，切到书架却看不到，切桌面回来才出现」。StateFlow 保证后台
+    // 完成的导入回到前台后仍能补上，版本号 > 0 才刷新以避免初始空转。
+    val libraryVersion by onlineVm.downloadManager.libraryVersion.collectAsStateWithLifecycle()
+    LaunchedEffect(libraryVersion) {
+        if (libraryVersion > 0L) refreshKey++
     }
 
     // 从阅读器返回书架（ON_RESUME）时刷新书库，让阅读进度/最近阅读排序即时更新

@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -51,6 +52,7 @@ class BookDownloadManager(
     private val repository: OnlineDownloadRepository = OnlineDownloadRepository(AppDatabase.get(context)),
     private val notifier: DownloadNotifier = object : DownloadNotifier {},
     private val isBookOpen: (String) -> Boolean = { false },
+    private val refreshSignal: LibraryRefreshSignal = LibraryRefreshSignal(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val semaphore = Semaphore(2)
@@ -61,6 +63,9 @@ class BookDownloadManager(
     private val coordinator = OnlineImportCoordinator(context)
     val tasks: Flow<List<OnlineDownloadTask>> = repository.observeAll()
     val activeRemoteIds: Flow<Set<String>> = repository.observeActiveRemoteIds()
+
+    /** 导入成功后版本号自增，供 UI 即时刷新书架快照（StateFlow 保证后台完成不丢信号）。 */
+    val libraryVersion: StateFlow<Long> get() = refreshSignal.version
 
     /** 应用启动时调用：把中断的任务标记为失败，不自动消耗额度。 */
     suspend fun recoverInterrupted(): Int = withContext(Dispatchers.IO) {
@@ -237,6 +242,8 @@ class BookDownloadManager(
                                 updatedAt = System.currentTimeMillis(),
                             )
                             repository.save(task)
+                            // 书籍已登记进书库，通知 UI 立即重载书架快照。
+                            refreshSignal.notifyImportSucceeded()
                         }
                         is OnlineImportResult.Conflict -> {
                             task = task.copy(

@@ -107,3 +107,23 @@
 - **底部导航栏高度**：`BottomNavBar` 原使用 `WindowInsets.safeDrawing`，会把状态栏安全区计入底部栏高度，导致明显偏高；改为 `WindowInsets.navigationBars`，真机恢复常规高度。
 - **Z-Library 布局**：网格从 2 列改为 3 列，与本地/云端书库一致；真机热门书单每行显示 3 本，提示文字与封面正常。
 - 上述修改后全量 **258 项测试通过、0 失败**，测试版 APK 已覆盖安装并真机验证。
+
+## 9. 真机回归补充：书架刷新与页面状态（2026-11-25）
+
+### 问题 A：下载显示「已导入」，切到本地书库不显示，切桌面回来才显示
+
+- **根因**：书架 `books` 是 `LaunchedEffect(refreshKey)` 的一次性快照，只在本地导入/删除/扫描手动 `refreshKey++` 或 `ON_RESUME`（切桌面回来）时重载；切 Tab 的 `LaunchedEffect(currentTab, bookScope)` 只处理云端加载。在线下载→校验→导入这条链路在 `BookDownloadManager` 的独立协程里完成，**从未通知 UI**，因此必须靠 `ON_RESUME` 兜底才看得到新书。
+- **修复**：新增 `LibraryRefreshSignal`（`StateFlow<Long>` 版本号，replay=1 保证后台完成的导入回到前台不丢信号）；`BookDownloadManager` 在 `OnlineImportResult.Success`（含同名覆盖）后 `notifyImportSucceeded()` 并暴露 `libraryVersion`；`MainActivity` 观察该信号，版本号 > 0 时 `refreshKey++` 重载书架快照。不改 `LibraryStore`、状态机与 KOReader 协议。
+- **验证**：真机下载新书「明朝那些事儿（图文增补版）」→ 不切桌面，直接切「本地」→ 书架立即出现该书（与原有 4 本并列）。
+
+### 问题 B：无论在哪页，切桌面回来都跳回本地书库
+
+- **根因**：`currentTab` / `bookScope` 用 `remember { mutableStateOf }`，Activity 重建时不保存；`MainActivity` 为默认 `standard` launchMode。真机日志（`PID` 前后不变 15282，但出现 `realStartActivityLocked` / `Displayed +37ms` / task 内 `numActivities=6`）表明从桌面回来时在**同一进程新建了 MainActivity 实例**，新实例的导航状态是默认的「书架 / 本地」。
+- **修复**：两处防御 —— ① `currentTab` / `bookScope` 改为 `rememberSaveable` 并配显式 `Saver`（存枚举 name、非法值安全回退），覆盖 Activity 重建/「不保留活动」；② `AndroidManifest.xml` 给 `MainActivity` 加 `android:launchMode="singleTop"`，避免从桌面重复启动堆叠新实例，配合已有的 `onNewIntent`（仅转发外部 EPUB，MAIN intent 不触发）。
+- **验证**：设置页 → Home → 回来仍停在设置页（可见「书籍同步/立即同步/书源设置」）；云端 Z-Library 页 → Home → 回来仍停在原页（云端高亮、书源、热门书单、搜索词与额度 4/10 均保留）。
+
+### 本次验证与产物
+
+- `./build-local.sh test :app:assembleTtsTestDebug`：**261 项测试通过、0 失败**（新增 `LibraryRefreshSignalTest` 3 项）。
+- 修复版已覆盖安装（签名固定，数据保留），真机无崩溃日志。
+- 验证用真实下载产生了一本新书（38.2 MB）并计入额度（3/10 → 4/10），如不需要可在书架删除。
