@@ -1,0 +1,16 @@
+docs/Z-Library服务器发现-阶段A核对报告与实施计划.md
+  h_7f20b2a03eb3b6 13,70,83,85,87
+docs/静读在线书库统一化与多书源扩展技术方案.md
+  h_7f20b2a03eb3b6 371
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "372f370dbb14a3da1405d9007c801ae63f7a41e4",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
