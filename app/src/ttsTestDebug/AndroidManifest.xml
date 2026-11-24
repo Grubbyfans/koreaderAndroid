@@ -5,6 +5,12 @@
     <application
         android:name=".tts.ReaderTtsApplication"
         tools:replace="android:name">
+        <activity
+            android:name=".webprobe.WebViewStageTwoActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:process=":webprobe"
+            android:theme="@style/Theme.YuezhouReader" />
         <!-- 阶段 B 试音入口：通过 ADB 显式启动 -->
         <activity
             android:name=".tts.KokoroTrialActivity"
