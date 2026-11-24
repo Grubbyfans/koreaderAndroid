@@ -17,6 +17,14 @@
             android:name=".tts.StageDActivity"
             android:exported="true"
             android:theme="@style/Theme.YuezhouReader" />
+
+        <!-- 临时 WebView 可行性探针：仅本变体存在，ADB 显式启动，未接入应用内导航 -->
+        <activity
+            android:name=".webprobe.WebViewProbeActivity"
+            android:exported="true"
+            android:label="WebView 探针"
+            android:theme="@style/Theme.YuezhouReader"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density" />
     </application>
 
 </manifest>
