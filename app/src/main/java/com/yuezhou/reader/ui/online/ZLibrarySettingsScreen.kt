@@ -3,6 +3,7 @@ package com.yuezhou.reader.ui.online
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,16 +14,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +37,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
 import com.yuezhou.reader.reader.online.zlibrary.ZLibraryBookProvider
 import kotlinx.coroutines.launch
@@ -129,6 +132,7 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = YuezhouColors.Background,
         topBar = {
             TopAppBar(
                 title = { Text("Z-Library 设置") },
@@ -137,6 +141,10 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = YuezhouColors.Surface,
+                    titleContentColor = YuezhouColors.TextPrimary,
+                ),
             )
         },
     ) { padding ->
@@ -147,9 +155,11 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
                 .padding(padding)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            Card(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
+                color = YuezhouColors.Surface,
+                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("服务器", style = MaterialTheme.typography.titleMedium)
@@ -183,9 +193,11 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(12.dp))
 
-            Card(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
+                color = YuezhouColors.Surface,
+                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("默认偏好", style = MaterialTheme.typography.titleMedium)
@@ -215,9 +227,11 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(12.dp))
 
-            Card(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
+                color = YuezhouColors.Surface,
+                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("配置管理", style = MaterialTheme.typography.titleMedium)
@@ -266,9 +280,11 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(12.dp))
 
-            Card(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
+                color = YuezhouColors.Surface,
+                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("账号", style = MaterialTheme.typography.titleMedium)
