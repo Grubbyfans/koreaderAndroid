@@ -54,6 +54,8 @@ data class ZLibraryConfig(
         val login: Endpoint = Endpoint("/rpc.php", "POST"),
         val loginFallback: Endpoint = Endpoint("/eapi/user/login", "POST"),
         val domains: Endpoint = Endpoint("/eapi/info/domains/singlelogin"),
+        /** 无认证健康探测端点：须返回可解析的预期 JSON 结构。 */
+        val health: Endpoint = Endpoint("/eapi/info/domains/singlelogin"),
     )
 
     @Serializable
@@ -187,6 +189,7 @@ object ZLibraryConfigValidator {
             "login" to config.endpoints.login,
             "loginFallback" to config.endpoints.loginFallback,
             "domains" to config.endpoints.domains,
+            "health" to config.endpoints.health,
         ).forEach { (name, endpoint) -> validateEndpoint(name, endpoint)?.let(::add) }
 
         if (!LANGUAGE.matches(config.preferences.defaultLanguage)) add("默认语言格式不正确")
