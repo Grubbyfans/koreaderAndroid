@@ -48,7 +48,12 @@ class ZLibraryApi(
 
     private val json = Json { ignoreUnknownKeys = true }
     private val allowedHosts: Set<String> = config.servers.baseUrls.mapNotNull { runCatching { URL(it).host }.getOrNull() }.toSet()
-    private val baseUrl: String get() = config.servers.baseUrls.first().trimEnd('/')
+    /** 当前生效地址：由配置仓库同步为自动选中项或手动选中项；未选择时给出明确错误而非下标越界。 */
+    private val baseUrl: String get() = config.servers.baseUrls.firstOrNull()?.trimEnd('/')
+        ?: throw com.yuezhou.reader.core.online.model.ProviderException(
+            com.yuezhou.reader.core.online.model.ProviderErrorCode.NOT_CONFIGURED,
+            if (config.servers.mode.equals("manual", ignoreCase = true)) "尚未手动选择服务器" else "暂无可用的 Z-Library 服务器",
+        )
 
     suspend fun login(username: String, password: String): Result<AuthSession> = withContext(Dispatchers.IO) {
         runCatching {

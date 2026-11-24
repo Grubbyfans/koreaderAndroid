@@ -25,12 +25,11 @@ class ServerDiscoveryTest {
     private fun config(
         candidates: List<ServerCandidate>,
         mode: ServerMode = ServerMode.AUTO,
-        manual: String = "",
-        enabledOverride: Boolean = true,
+        manualSelectedId: String? = null,
     ) = ZLibraryConfig.DEFAULT.copy(
         servers = ZLibraryConfig.DEFAULT.servers.copy(
             mode = mode.wire,
-            manualBaseUrl = manual,
+            manualSelectedServerId = manualSelectedId,
             candidates = candidates,
         ),
     )
@@ -118,13 +117,37 @@ class ServerDiscoveryTest {
     }
 
     @Test
-    fun `手动模式只返回固定地址且不探测`() = runBlocking {
-        val cfg = config(listOf(candidate("a", 1)), mode = ServerMode.MANUAL, manual = "https://manual.example.com")
+    fun `手动模式只返回选中候选且不探测`() = runBlocking {
+        val selected = candidate("a", 1)
+        val cfg = config(listOf(selected, candidate("b", 2)), mode = ServerMode.MANUAL, manualSelectedId = selected.id)
         val decision = ServerDiscovery().resolve(cfg, DiscoveryState(), probe = { _, _ ->
             error("手动模式不应探测")
         })
-        assertEquals("https://manual.example.com", decision.selectedBaseUrl)
+        assertEquals("https://a.example.com", decision.selectedBaseUrl)
         assertTrue(decision.results.isEmpty())
+    }
+
+    @Test
+    fun `手动模式主动检测更新结果但不改变选择`() = runBlocking {
+        val selected = candidate("a", 1)
+        val other = candidate("b", 2)
+        val cfg = config(listOf(selected, other), mode = ServerMode.MANUAL, manualSelectedId = selected.id)
+        val decision = ServerDiscovery().resolve(cfg, DiscoveryState(), probe = { _, id ->
+            ProbeResult(id, if (id == "b") ProbeStatus.AVAILABLE.name else ProbeStatus.TIMEOUT.name, 50, 0)
+        }, force = true)
+        // 选中项仍是 a（即使 b 探测可用），仅更新两个结果。
+        assertEquals("https://a.example.com", decision.selectedBaseUrl)
+        assertEquals(2, decision.results.size)
+    }
+
+    @Test
+    fun `手动模式选中项被禁用时无可用选择`() = runBlocking {
+        val selected = candidate("a", 1, enabled = false)
+        val cfg = config(listOf(selected), mode = ServerMode.MANUAL, manualSelectedId = selected.id)
+        val decision = ServerDiscovery().resolve(cfg, DiscoveryState(), probe = { _, _ ->
+            error("禁用项不应被探测")
+        })
+        assertNull(decision.selectedBaseUrl)
     }
 
     @Test
