@@ -1,0 +1,14 @@
+docs/阶段A-源码分析与架构设计报告.md
+  h_7f20b2a03eb3b6 1-334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a9174b467c103c246f9f3005aaf0e2b49a73865a",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
