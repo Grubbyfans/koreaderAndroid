@@ -71,6 +71,8 @@ abstract class CloudBookProviderBase(
             items = library.books.map { it.toOnlineBook() },
             nextCursor = null,
             hasMore = false,
+            fromCache = library.fromCache,
+            fetchedAt = library.fetchedAt,
         )
     }
 

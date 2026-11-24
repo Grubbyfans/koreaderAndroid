@@ -17,4 +17,8 @@ data class BookPage(
     val nextCursor: String? = null,
     val hasMore: Boolean = false,
     val totalCount: Int? = null,
+    /** 是否来自本地缓存（云存储书源沿用现有 CloudCache 语义）。 */
+    val fromCache: Boolean = false,
+    /** 最后成功获取时间（epoch millis）。 */
+    val fetchedAt: Long = 0L,
 )

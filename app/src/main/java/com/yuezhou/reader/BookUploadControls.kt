@@ -57,9 +57,14 @@ internal class BookUploadQueue(private val sync: CloudSync, private val scope: C
         val byId = books.associate { it.bookId to Task(it.title) }
         tasks = byId.values.toList()
         runTask {
-            sync.pushLocal(selection.backendId, books, isStopped = { byId.getValue(it).stopRequested.value }) { id, progress ->
-                byId.getValue(id).progress.value = progress
-            }.message
+            sync.pushLocal(
+                backendId = selection.backendId,
+                books = books,
+                isStopped = { byId.getValue(it).stopRequested.value },
+                onProgress = { id, progress ->
+                    byId.getValue(id).progress.value = progress
+                },
+            ).message
         }
     }
 

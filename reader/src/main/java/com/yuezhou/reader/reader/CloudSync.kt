@@ -667,9 +667,9 @@ class CloudSync(private val context: Context) {
         }
     }
 
-    suspend fun deleteRemoteBook(bookId: String): SyncOutcome = withContext(Dispatchers.IO) {
+    suspend fun deleteRemoteBook(bookId: String, forced: BackendKind? = null): SyncOutcome = withContext(Dispatchers.IO) {
         try {
-            val backend = backend() ?: error("尚未配置云后端")
+            val backend = backend(forced = forced) ?: error("尚未配置云后端")
             backend.ensureAuthorized()
             try {
                 CloudService(backend).deleteBook(bookId)

@@ -122,6 +122,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yuezhou.reader.ui.online.OnlineLibraryScreen
+import com.yuezhou.reader.ui.online.OnlineLibraryViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -195,8 +198,10 @@ private fun BookshelfScreen() {
     }
     val removedBooks = books.filter { it.bookId in hiddenBooks }
     val cloudSync = remember { CloudSync(context) }
+    // 在线书库统一入口：书源状态由 ViewModel 独立持有，Activity 只保留详情/下载等既有状态。
+    val onlineVm: OnlineLibraryViewModel = viewModel()
 
-    // —— 云端书库状态 ——
+    // —— 云端书库状态（由 onlineVm 的当前书源状态同步，供既有详情/下载弹窗复用）——
     var remoteBooks by remember { mutableStateOf<List<CloudSync.RemoteBook>>(emptyList()) }
     var remoteLoading by remember { mutableStateOf(false) }
     // 仅「主动点刷新按钮」时置 true，用于显示顶部「更新书库中…」进度条；
@@ -298,66 +303,40 @@ private fun BookshelfScreen() {
 
     val uploadQueue = remember(cloudSync, scope) { BookUploadQueue(cloudSync, scope) }
 
-    // 云端书库：进入云端 tab 时加载（带缓存，短时间复用；显式刷新走 force）
+    // 云端书库：进入云端 tab 时加载（书源状态由 ViewModel 缓存；显式刷新走 force）
     fun loadRemote(force: Boolean = false) {
-        scope.launch {
-            remoteLoading = true
-            remoteError = null
-            try {
-                val lib = cloudSync.listBooks(force)
-                remoteBooks = lib.books
-                remoteBackendLabel = lib.backendLabel
-                remoteFetchedAt = lib.fetchedAt
-                remoteFromCache = lib.fromCache
-                // 命中缓存：列表已秒显，这里的「发现外部新书」放后台独立执行，
-                // 不阻塞 remoteLoading，避免切 tab 时总显示「更新书库中…」。
-                if (lib.fromCache) {
-                    scope.launch {
-                        val changed = runCatching { cloudSync.discoverExternalBooks() }.getOrDefault(0)
-                        if (changed > 0) {
-                            runCatching {
-                                val fresh = cloudSync.listBooks(force = true)
-                                remoteBooks = fresh.books
-                                remoteBackendLabel = fresh.backendLabel
-                                remoteFetchedAt = fresh.fetchedAt
-                                remoteFromCache = false
-                                snackbarHostState.showSnackbar("发现 ${changed} 本新书")
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                remoteError = e.message ?: "云端书库加载失败"
-                remoteBooks = emptyList()
-            } finally {
-                remoteLoading = false
-            }
-        }
+        scope.launch { onlineVm.loadSelected(force) }
     }
 
-    // 主动更新书库（方案 §10）：强制刷新列表 + 枚举 books/ 登记外部上传 EPUB
+    // 当前书源状态 → 既有云端 UI/弹窗状态（避免重构原有组件）
+    val onlineState = onlineVm.selectedState
+    LaunchedEffect(
+        onlineVm.selectedProviderId,
+        onlineState.items,
+        onlineState.loading,
+        onlineState.refreshing,
+        onlineState.error,
+        onlineState.backendLabel,
+        onlineState.fetchedAt,
+        onlineState.fromCache,
+    ) {
+        remoteBooks = onlineVm.legacyBooks(onlineState.items)
+        remoteLoading = onlineState.loading
+        remoteRefreshing = onlineState.refreshing
+        remoteError = onlineState.error
+        remoteBackendLabel = onlineState.backendLabel.ifBlank { null }
+        remoteFetchedAt = onlineState.fetchedAt
+        remoteFromCache = onlineState.fromCache
+    }
+
+    // 主动更新书库：登记外部书籍 + 强制刷新当前书源
     fun refreshRemoteLibrary() {
         if (uploadQueue.busy || remoteLoading) return
         scope.launch {
-            remoteLoading = true
-            remoteRefreshing = true
-            remoteError = null
-            try {
-                val msg = cloudSync.refreshLibrary()
-                // 主动更新后再拉最新列表展示
-                val lib = cloudSync.listBooks(force = true)
-                remoteBooks = lib.books
-                remoteBackendLabel = lib.backendLabel
-                remoteFetchedAt = lib.fetchedAt
-                remoteFromCache = false
-                status = msg
-                snackbarHostState.showSnackbar(msg)
-            } catch (e: Exception) {
-                remoteError = e.message ?: "更新书库失败"
-                snackbarHostState.showSnackbar("更新书库失败：${e.message ?: "未知错误"}")
-            } finally {
-                remoteLoading = false
-                remoteRefreshing = false
+            val (_, message) = onlineVm.refreshSelected()
+            if (!message.isNullOrBlank()) {
+                status = message
+                snackbarHostState.showSnackbar(message)
             }
         }
     }
@@ -563,16 +542,12 @@ private fun BookshelfScreen() {
                                 },
                             )
                         }
-                        BookScope.云端 -> CloudBookshelfContent(
-                            books = remoteBooks,
-                            loading = remoteLoading,
-                            showRefreshBar = remoteRefreshing,
-                            error = remoteError,
-                            backendLabel = remoteBackendLabel,
-                            fetchedAt = remoteFetchedAt,
-                            fromCache = remoteFromCache,
+                        BookScope.云端 -> OnlineLibraryScreen(
+                            vm = onlineVm,
                             onRefresh = { refreshRemoteLibrary() },
                             onOpenDetail = { detailBook = it },
+                            onOpenSettings = { currentTab = Tab.设置 },
+                            onShowDownloads = { downloadTasksOpen = true },
                         )
                     }
                 }
@@ -664,7 +639,7 @@ private fun BookshelfScreen() {
                         deletingCloudBook = true
                         scope.launch {
                             try {
-                                val result = cloudSync.deleteRemoteBook(detail.bookId)
+                                val result = cloudSync.deleteRemoteBook(detail.bookId, forced = onlineVm.selectedBackendKind())
                                 confirmCloudDelete = false
                                 if (result.success) {
                                     detailBook = null
@@ -747,20 +722,25 @@ private fun BookshelfScreen() {
                     DownloadForegroundService.start(context, detail.fileName)
                     // 用 lifecycleScope 而非 rememberCoroutineScope：切后台/锁屏不取消，下载持续到 Activity 销毁
                     downloadJob = lifecycleOwner.lifecycleScope.launch {
-                        val result = try {
-                            cloudSync.downloadBook(detail, ReaderActivity::isBookOpen) { received, total, phase ->
-                                downloadTask = downloadTask?.copy(
-                                    received = received,
-                                    total = total,
-                                    phase = when (phase) {
-                                        com.yuezhou.reader.reader.CloudSync.DownloadPhase.Transferring -> DownloadPhase.Transferring
-                                        com.yuezhou.reader.reader.CloudSync.DownloadPhase.Verifying -> DownloadPhase.Verifying
-                                        com.yuezhou.reader.reader.CloudSync.DownloadPhase.Extracting -> DownloadPhase.Extracting
-                                        com.yuezhou.reader.reader.CloudSync.DownloadPhase.Publishing -> DownloadPhase.Publishing
+                            val result = try {
+                                cloudSync.downloadBook(
+                                    book = detail,
+                                    isOpen = ReaderActivity::isBookOpen,
+                                    forced = onlineVm.selectedBackendKind(),
+                                    onProgress = { received, total, phase ->
+                                        downloadTask = downloadTask?.copy(
+                                            received = received,
+                                            total = total,
+                                            phase = when (phase) {
+                                                com.yuezhou.reader.reader.CloudSync.DownloadPhase.Transferring -> DownloadPhase.Transferring
+                                                com.yuezhou.reader.reader.CloudSync.DownloadPhase.Verifying -> DownloadPhase.Verifying
+                                                com.yuezhou.reader.reader.CloudSync.DownloadPhase.Extracting -> DownloadPhase.Extracting
+                                                com.yuezhou.reader.reader.CloudSync.DownloadPhase.Publishing -> DownloadPhase.Publishing
+                                            },
+                                        )
+                                        DownloadForegroundService.updateProgress(context, detail.fileName, received, total)
                                     },
                                 )
-                                DownloadForegroundService.updateProgress(context, detail.fileName, received, total)
-                            }
                         } catch (e: CancellationException) {
                             downloadTask = null
                             downloadJob = null
@@ -1150,7 +1130,7 @@ private fun BookScopeSwitch(current: BookScope, onSelect: (BookScope) -> Unit) {
 
 /** 云端书库内容：后端名 + 网格 + 空/错误态。 */
 @Composable
-private fun CloudBookshelfContent(
+internal fun CloudBookshelfContent(
     books: List<CloudSync.RemoteBook>,
     loading: Boolean,
     showRefreshBar: Boolean,
