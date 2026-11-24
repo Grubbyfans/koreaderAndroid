@@ -114,9 +114,13 @@ import com.yuezhou.reader.speech.TtsEngine
 import com.yuezhou.reader.speech.TtsVoice
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 沉浸式阅读界面：点击正文呼出/收起面板。
@@ -249,7 +253,7 @@ private fun ReaderScreen(
     var syncLoading by remember { mutableStateOf(false) }
     var syncBusy by remember { mutableStateOf(false) }
     var undoPosition by remember(bookId) { mutableStateOf<Pair<String, Double?>?>(null) }
-    var pendingJump by remember { mutableStateOf<Pair<String, kotlinx.coroutines.CompletableDeferred<Boolean>>?>(null) }
+    var pendingJump by remember { mutableStateOf<Pair<String, CompletableDeferred<ReaderEvent.JumpVerified>>?>(null) }
 
     suspend fun flushProgress() {
         saveJob?.cancelAndJoin()
@@ -262,26 +266,38 @@ private fun ReaderScreen(
     var autoPulled by remember { mutableStateOf(false) }
     var autoSyncBusy by remember { mutableStateOf(false) }
     val syncLogStore = remember { SyncLogStore(context) }
-    // 缓存最近一次定位对应的 xpointer，供退出时上传（避免退出时 WebView 已不可用导致转换失败）
-    var lastXPointer by remember { mutableStateOf<String?>(null) }
+    var positionConversion by remember { mutableStateOf<Deferred<String?>?>(null) }
+
+    fun updatePosition(position: Pair<String, Double?>, wv: ReaderWebView?, xpointer: String? = null) {
+        positionConversion?.cancel()
+        lastPosition = position
+        positionConversion = if (xpointer != null) {
+            CompletableDeferred<String?>(xpointer)
+        } else {
+            wv?.let { scope.async { it.cfiToXPointer(position.first) } }
+        }
+    }
 
     suspend fun jumpAndSave(
         id: String,
         wv: ReaderWebView,
         previous: Pair<String, Double?>,
         target: Pair<String, Double?>,
+        targetXPointer: String? = null,
     ): Boolean {
+        if (pendingJump != null || leaving) return false
         val requestId = java.util.UUID.randomUUID().toString()
-        val result = kotlinx.coroutines.CompletableDeferred<Boolean>()
-        saveJob?.cancel()
+        val result = CompletableDeferred<ReaderEvent.JumpVerified>()
         pendingJump = requestId to result
         try {
+            saveJob?.cancelAndJoin()
             wv.verifyJump(requestId, target.first, previous.first)
-            val verified = kotlinx.coroutines.withTimeoutOrNull(8_000) { result.await() }
-            if (verified == null) wv.goToCfi(previous.first)
-            if (verified != true) return false
-            store.saveProgress(id, target.first, target.second)
-            lastPosition = target
+            val jump = withTimeoutOrNull(8_000) { result.await() }
+            if (jump == null && !leaving) wv.goToCfi(previous.first)
+            if (jump?.verified != true || leaving) return false
+            val position = target.first to (jump.fraction ?: target.second)
+            updatePosition(position, wv, targetXPointer)
+            store.saveProgress(id, position.first, position.second)
             return true
         } finally {
             pendingJump = null
@@ -298,18 +314,19 @@ private fun ReaderScreen(
         autoPulled = true
         scope.launch {
             try {
-                val remote = CloudSync(context).fetchRemoteProgressLocation(id)
+                val remote = CloudSync(context).fetchRemoteProgress(id)
                 if (remote == null) {
                     syncLogStore.append("pull", title, false, "云端暂无进度")
                     return@launch
                 }
+                if (leaving) return@launch
+                val cfi = wv.xPointerToCfi(remote.xpointer)
                 val previous = lastPosition
                 if (previous == null) {
                     syncLogStore.append("pull", title, false, "本机尚未定位")
                     return@launch
                 }
-                val cfi = wv.xPointerToCfi(remote)
-                val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to null)
+                val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to remote.percent, remote.xpointer)
                 syncLogStore.append(
                     "pull", title, applied,
                     if (applied) "已覆盖本地进度" else "云端落点无法确认，保留本地",
@@ -322,23 +339,29 @@ private fun ReaderScreen(
         }
     }
 
+    /** 冻结同一次定位的位置和百分比，退出前短暂等待尚未完成的锚点转换。 */
+    suspend fun positionForAutoUpload(): Pair<String, Double?>? {
+        val position = lastPosition ?: return null
+        val conversion = positionConversion ?: return null
+        return withTimeoutOrNull(750) {
+            conversion.join()
+            if (conversion.isCancelled || lastPosition !== position || pendingJump != null) return@withTimeoutOrNull null
+            conversion.await()?.let { it to position.second }
+        }
+    }
+
     /** 自动上传本机进度覆盖云端（自动同步开启时，退出/切出时调用）。 */
-    suspend fun autoPushProgress() {
-        Log.d("AutoSync", "autoPushProgress 执行, autoSync=${latestPrefs.autoSync}, bookId=$bookId, lastPosition=$lastPosition, lastXPointer=$lastXPointer")
-        if (!latestPrefs.autoSync) return
+    suspend fun autoPushProgress(position: Pair<String, Double?>?) {
         val id = bookId ?: return
-        val pos = lastPosition ?: return
         if (autoSyncBusy) return
         autoSyncBusy = true
         try {
-            val xpointer = lastXPointer
-            val msg = if (xpointer == null) {
-                "位置尚未转换，已跳过上传"
-            } else {
-                CloudSync(context).uploadLocalProgress(id, xpointer, pos.second) ?: "已覆盖云端进度"
+            if (position == null) {
+                syncLogStore.append("push", title, false, "当前位置尚未确认或转换，已跳过上传")
+                return
             }
-            syncLogStore.append("push", title, xpointer != null, msg)
-            Log.d("AutoSync", "push 完成: $msg")
+            val error = CloudSync(context).uploadLocalProgress(id, position.first, position.second)
+            syncLogStore.append("push", title, error == null, error ?: "已覆盖云端进度")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -398,27 +421,31 @@ private fun ReaderScreen(
     fun leaveReader() {
         if (leaving) return
         leaving = true
-        // 自动同步：上传进度放后台（NonCancellable），不阻塞退出、也不因 Activity 销毁而丢失。
-        // 进度 flush（本地写，毫秒级）先同步完成，再退出。
+        // 先在 WebView 仍可用时确认上传位置，网络请求放在退出之后。
         appScope.launch {
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                 flushProgress()
-                autoPushProgress()
+                val autoSync = latestPrefs.autoSync
+                val position = if (autoSync) positionForAutoUpload() else null
+                onBack()
+                if (autoSync) autoPushProgress(position)
             }
         }
-        onBack()
     }
 
-    // 打开进度同步面板：读本机 + 云端进度对照
     fun openSyncDialog() {
-        val id = bookId ?: return
-        scope.launch {
-            syncLoading = true
-            syncDialogOpen = true
-            syncInfo = null
-            // 打开前先 flush 当前进度，保证「本机位置」是最新的
-            flushProgress()
+        if (bookId == null || syncDialogOpen) return
+        syncLoading = true
+        syncInfo = null
+        syncDialogOpen = true
+    }
+
+    LaunchedEffect(syncDialogOpen, bookId) {
+        val id = bookId ?: return@LaunchedEffect
+        if (!syncDialogOpen) return@LaunchedEffect
+        try {
             syncInfo = CloudSync(context).progressInfo(id)
+        } finally {
             syncLoading = false
         }
     }
@@ -434,7 +461,7 @@ private fun ReaderScreen(
         scope.launch {
             try {
                 val cfi = wv.xPointerToCfi(remote)
-                val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to info.remotePercent)
+                val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to info.remotePercent, remote)
                 if (applied) undoPosition = previous
                 status = if (applied) "已应用云端进度，可在进度同步中撤销" else "无法确认云端落点，已保留本机进度"
                 syncDialogOpen = false
@@ -578,7 +605,7 @@ private fun ReaderScreen(
                 appScope.launch {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                         flushProgress()
-                        autoPushProgress()
+                        if (latestPrefs.autoSync && !leaving) autoPushProgress(positionForAutoUpload())
                     }
                 }
             }
@@ -605,7 +632,7 @@ private fun ReaderScreen(
                 webView?.requestToc()
             }
             is ReaderEvent.JumpVerified -> {
-                pendingJump?.takeIf { it.first == event.requestId }?.second?.complete(event.verified)
+                pendingJump?.takeIf { it.first == event.requestId }?.second?.complete(event)
             }
             is ReaderEvent.Relocated -> {
                 currentCfi = event.cfi
@@ -614,22 +641,14 @@ private fun ReaderScreen(
                 currentTocId = event.tocId
                 currentTocHref = event.tocHref
                 val cfi = event.cfi
-                val fraction = event.fraction
+                val fraction = event.fraction?.toDouble()?.takeIf { it in 0.0..1.0 }
                 if (cfi != null && bookId != null && pendingJump == null && !leaving) {
-                    lastPosition = cfi to fraction?.toDouble()
+                    updatePosition(cfi to fraction, webView)
                     // 去抖：300ms 内的连续翻页合并成一次写
                     saveJob?.cancel()
                     saveJob = scope.launch {
                         delay(300)
-                        store.saveProgress(bookId, cfi, fraction?.toDouble())
-                    }
-                    // 缓存最新定位对应的 xpointer，供退出/切出时上传（此时 WebView 仍就绪，转换可靠）
-                    val wvForConvert = webView
-                    if (wvForConvert != null) {
-                        scope.launch {
-                            val xp = wvForConvert.cfiToXPointer(cfi)
-                            if (xp != null) lastXPointer = xp
-                        }
+                        store.saveProgress(bookId, cfi, fraction)
                     }
                     // 自动同步：首次定位到本地位置后，拉取云端进度覆盖本地（仅一次）
                     Log.d("AutoSync", "Relocated 触发, cfi=$cfi, autoSync=${latestPrefs.autoSync}")
@@ -919,8 +938,9 @@ private fun ReaderScreen(
         if (syncDialogOpen) {
             ProgressSyncDialog(
                 info = syncInfo,
+                localPosition = lastPosition,
                 loading = syncLoading,
-                busy = syncBusy,
+                busy = syncBusy || pendingJump != null,
                 onUpload = { uploadLocalProgress() },
                 onApply = { applyRemoteProgress() },
                 onUndo = if (undoPosition != null) ::undoRemoteProgress else null,
@@ -935,6 +955,7 @@ private fun ReaderScreen(
 @Composable
 private fun ProgressSyncDialog(
     info: CloudSync.ProgressInfo?,
+    localPosition: Pair<String, Double?>?,
     loading: Boolean,
     busy: Boolean,
     onUpload: () -> Unit,
@@ -960,13 +981,16 @@ private fun ProgressSyncDialog(
                         Text("后端：$it", style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(8.dp))
                     }
+                    val local = localPosition ?: info.localLocation?.let { it to info.localPercent }
                     Text(
-                        "本机进度：${formatPercent(info.localPercent)}",
+                        "本机进度：${formatSyncProgress(local?.first, local?.second)}",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(4.dp))
+                    val cloudProgress = info.remoteError?.let { "读取失败（$it）" }
+                        ?: formatSyncProgress(info.remoteLocation, info.remotePercent)
                     Text(
-                        "云端进度：${formatPercent(info.remotePercent)}",
+                        "云端进度：$cloudProgress",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     info.remoteUpdatedAt?.let {
@@ -1000,14 +1024,14 @@ private fun ProgressSyncDialog(
             }
             TextButton(
                 onClick = onApply,
-                enabled = !busy && !loading && info?.remoteLocation != null,
+                enabled = !busy && !loading && localPosition != null && info?.remoteLocation != null,
             ) { Text("应用云端进度") }
         },
         dismissButton = {
             Row {
                 TextButton(
                     onClick = onUpload,
-                    enabled = !busy && !loading && info?.localLocation != null,
+                    enabled = !busy && !loading && localPosition != null,
                 ) { Text("上传本机进度") }
                 TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
             }
@@ -1015,8 +1039,11 @@ private fun ProgressSyncDialog(
     )
 }
 
-private fun formatPercent(p: Double?): String =
-    if (p == null) "无" else "${(p * 100).toInt()}%"
+private fun formatSyncProgress(location: String?, percent: Double?): String = when {
+    location == null -> "暂无进度"
+    percent == null -> "已保存位置"
+    else -> "${(percent * 100).toInt()}%"
+}
 
 private fun formatTime(millis: Long): String {
     val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())

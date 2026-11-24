@@ -126,13 +126,10 @@ class CloudService(private val backend: CloudBackend) {
     /** 同步阅读进度（上传）。 */
     suspend fun uploadProgress(bookId: String, progress: ProgressPayload) {
         val path = "progress/$bookId.json"
-        val remote = readProgress(path)
+        val remote = downloadProgress(bookId)
 
-        var revision = 0L
         if (remote != null) {
-            val decoded = com.yuezhou.reader.core.protocol.ProgressRecords.decode(remote)
-            if (decoded.bookId != bookId) throw CloudException(ErrorCode.CONFLICT, "云端进度书名不匹配")
-            revision = decoded.revision
+            if (remote.bookId != bookId) throw CloudException(ErrorCode.CONFLICT, "云端进度书名不匹配")
         } else {
             // 远端尚无进度记录：确保 progress/ 目录存在再写，避免某些后端对「父目录缺失」返回 CONFLICT。
             ensureProgressDir()
@@ -143,8 +140,8 @@ class CloudService(private val backend: CloudBackend) {
             title = bookId,
             size = progress.size,
             xpointer = progress.xpointer,
-            percent = progress.percent,
-            revision = revision + 1,
+            percent = progress.percent ?: remote?.takeIf { it.xpointer == progress.xpointer }?.percent,
+            revision = (remote?.revision ?: 0L) + 1,
             writeId = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16),
             deviceId = progress.deviceId,
             updatedAt = OffsetDateTime.now().truncatedTo(ChronoUnit.SECONDS).toString(),

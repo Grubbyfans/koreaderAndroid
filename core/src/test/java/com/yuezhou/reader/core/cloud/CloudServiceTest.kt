@@ -131,12 +131,25 @@ class CloudServiceTest {
     fun `uploadProgress 再次上传递增 revision`() = runTest {
         val backend = FakeBackend()
         val svc = CloudService(backend)
-        svc.uploadProgress("测试书", ProgressPayload(xpointer = "/body/text().0", deviceId = "dev1"))
+        svc.uploadProgress("测试书", ProgressPayload(xpointer = "/body/text().0", percent = 0.315, deviceId = "dev1"))
         svc.uploadProgress("测试书", ProgressPayload(xpointer = "/body/text().5", deviceId = "dev1"))
         val raw = backend.text("progress/测试书.json")!!
         val decoded = com.yuezhou.reader.core.protocol.ProgressRecords.decode(raw)
         assertEquals(2L, decoded.revision)
         assertEquals("/body/text().5", decoded.xpointer)
+        assertNull(decoded.percent)
+    }
+
+    @Test
+    fun `uploadProgress 同一位置上传保留已有百分比并接受后续有效百分比`() = runTest {
+        val svc = CloudService(FakeBackend())
+        val position = ProgressPayload(xpointer = "/body/DocFragment[691]/body/div", deviceId = "dev1")
+        svc.uploadProgress("测试书", position.copy(percent = 0.315))
+        svc.uploadProgress("测试书", position.copy(deviceId = "dev2"))
+        assertEquals(0.315, svc.downloadProgress("测试书")?.percent)
+
+        svc.uploadProgress("测试书", position.copy(percent = 0.32))
+        assertEquals(0.32, svc.downloadProgress("测试书")?.percent)
     }
 
     @Test

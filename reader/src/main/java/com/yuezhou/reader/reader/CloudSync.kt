@@ -12,6 +12,7 @@ import com.yuezhou.reader.core.cloud.BackendKind
 import com.yuezhou.reader.core.cloud.baidu.BaiduBackend
 import com.yuezhou.reader.core.cloud.webdav.WebDavBackend
 import com.yuezhou.reader.core.protocol.BookNames
+import com.yuezhou.reader.core.protocol.CloudProgress
 import com.yuezhou.reader.core.protocol.LibraryCatalog
 import android.util.Log
 import kotlinx.coroutines.CancellationException
@@ -674,7 +675,7 @@ class CloudSync(private val context: Context) {
         }
     }
 
-    // region 进度同步（对齐方案 §5.6，锚点暂以 CFI 直传，XPointer 桥接待专项）
+    // region 进度同步（对齐方案 §5.6）
 
     /** 进度同步的信息展示：本机与云端的对照。 */
     data class ProgressInfo(
@@ -682,7 +683,7 @@ class CloudSync(private val context: Context) {
         val localLocation: String?,
         /** 本机进度百分比 0..1。 */
         val localPercent: Double?,
-        /** 云端位置（当前直传 CFI），无则 null。 */
+        /** 云端位置（XPointer），无则 null。 */
         val remoteLocation: String?,
         /** 云端进度百分比 0..1。 */
         val remotePercent: Double?,
@@ -692,6 +693,7 @@ class CloudSync(private val context: Context) {
         val remoteDeviceId: String?,
         /** 当前生效后端显示名。 */
         val backendLabel: String?,
+        val remoteError: String?,
     )
 
     /**
@@ -699,28 +701,29 @@ class CloudSync(private val context: Context) {
      * 不扫描书库，只读该书的本地进度与云端 `progress/<bookId>.json`。
      */
     suspend fun progressInfo(bookId: String): ProgressInfo = withContext(Dispatchers.IO) {
-        val local = LibraryStore(context).snapshot().books.firstOrNull { it.bookId == bookId }
-        val localLocation = local?.location
-        val localPercent = local?.percent
-
-        val backend = backend()
-        val remote = if (backend != null) {
-            try {
-                backend.ensureAuthorized()
-                CloudService(backend).downloadProgress(bookId)
-            } catch (e: Exception) {
-                null
-            }
-        } else null
+        val local = LibraryStore(context).savedProgress(bookId)
+        var backendLabel: String? = null
+        var remoteError: String? = null
+        val remote = try {
+            val backend = requireProgressBackend()
+            backendLabel = backendLabelOf(backend)
+            readRemoteProgress(backend, bookId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            remoteError = e.message ?: "无法读取云端进度"
+            null
+        }
 
         ProgressInfo(
-            localLocation = localLocation,
-            localPercent = localPercent,
+            localLocation = local?.first,
+            localPercent = local?.second,
             remoteLocation = remote?.xpointer,
             remotePercent = remote?.percent,
             remoteUpdatedAt = remote?.let { parseUpdatedAt(it.updatedAt) },
             remoteDeviceId = remote?.deviceId,
-            backendLabel = backend?.let { backendLabelOf(it) },
+            backendLabel = backendLabel,
+            remoteError = remoteError,
         )
     }
 
@@ -748,23 +751,23 @@ class CloudSync(private val context: Context) {
                 ),
             )
             null
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             e.message ?: "上传进度失败"
         }
     }
 
-    /**
-     * 应用云端进度：返回云端位置（当前直传 CFI）供 UI 跳转；无云端进度返回 null。
-     * 不修改本地状态，跳转确认由 UI 完成后再提交。
-     */
-    suspend fun fetchRemoteProgressLocation(bookId: String): String? = withContext(Dispatchers.IO) {
-        val backend = backend() ?: return@withContext null
-        try {
-            backend.ensureAuthorized()
-            CloudService(backend).downloadProgress(bookId)?.xpointer
-        } catch (e: Exception) {
-            null
-        }
+    suspend fun fetchRemoteProgress(bookId: String): CloudProgress? = withContext(Dispatchers.IO) {
+        readRemoteProgress(requireProgressBackend(), bookId)
+    }
+
+    private suspend fun requireProgressBackend(): CloudBackend =
+        checkNotNull(backend()) { "尚未配置云后端" }
+
+    private suspend fun readRemoteProgress(backend: CloudBackend, bookId: String): CloudProgress? {
+        backend.ensureAuthorized()
+        return CloudService(backend).downloadProgress(bookId)
     }
 
     private fun parseUpdatedAt(s: String): Long? = try {

@@ -437,7 +437,11 @@ class ReaderWebView(context: Context) : WebView(context) {
             }
             "jumpVerified" -> {
                 val obj = parseJson(data)
-                ReaderEvent.JumpVerified(obj["requestId"] as? String ?: "", obj["verified"] == true)
+                ReaderEvent.JumpVerified(
+                    requestId = obj["requestId"] as? String ?: "",
+                    verified = obj["verified"] == true,
+                    fraction = (obj["fraction"] as? Number)?.toDouble(),
+                )
             }
             "relocate" -> {
                 val obj = parseJson(data)

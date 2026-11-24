@@ -68,19 +68,23 @@ window.__reader = {
 
     async verifyJump(requestId, cfi, restoreCfi) {
         let verified = false
+        let fraction = null
         try {
             const target = await view.goTo(cfi)
-            const visible = view.lastLocation?.range
+            const location = view.lastLocation
+            const visible = location?.range
             const contents = view.renderer?.getContents?.().find(item => item.index === target?.index)
             if (contents && visible && typeof target.anchor === 'function') {
                 const range = target.anchor(contents.doc)
                 verified = !!range && visible.isPointInRange(range.startContainer, range.startOffset)
+                if (verified && Number.isFinite(location.fraction))
+                    fraction = Math.max(0, Math.min(1, location.fraction))
             }
         } catch {
             // Navigation and DOM-range failures are reported as an unverified jump.
         }
         if (!verified && restoreCfi) await view.goTo(restoreCfi).catch(() => {})
-        post('jumpVerified', { requestId, verified })
+        post('jumpVerified', { requestId, verified, fraction })
     },
 
     // 下一页 / 上一页

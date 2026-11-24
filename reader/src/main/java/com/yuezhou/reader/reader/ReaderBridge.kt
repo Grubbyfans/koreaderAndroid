@@ -4,7 +4,7 @@ package com.yuezhou.reader.reader
  * 阅读器桥接事件：由 WebView 内的 foliate-js 回传，供 Kotlin 层消费。
  */
 sealed interface ReaderEvent {
-    data class JumpVerified(val requestId: String, val verified: Boolean) : ReaderEvent
+    data class JumpVerified(val requestId: String, val verified: Boolean, val fraction: Double?) : ReaderEvent
     /** 书籍已打开。 */
     data class BookOpened(val sections: Int, val title: String) : ReaderEvent
     /** 位置变化（翻页/跳转），携带 CFI。 */

@@ -278,8 +278,11 @@ class LibraryStore(private val context: Context) {
     }
 
     /** 读取某本书保存的位置（CFI/XPointer）。无进度返回 null。 */
-    suspend fun savedLocation(bookId: String): String? = withContext(Dispatchers.IO) {
-        readProgress(bookId)?.second
+    suspend fun savedLocation(bookId: String): String? = savedProgress(bookId)?.first
+
+    suspend fun savedProgress(bookId: String): Pair<String, Double?>? = withContext(Dispatchers.IO) {
+        val progress = readProgress(bookId) ?: return@withContext null
+        progress.second?.let { it to progress.first }
     }
 
     data class BookDeletion(val removed: List<String>, val failures: Map<String, String>)
