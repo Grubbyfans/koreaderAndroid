@@ -14,8 +14,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -31,15 +34,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.download.DownloadStatus
 import com.yuezhou.reader.core.online.download.OnlineDownloadTask
+import com.yuezhou.reader.reader.online.upload.CloudUploadBridge
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 private enum class DownloadFilter(val label: String) {
     ALL("全部"), ACTIVE("下载中"), DONE("已完成"), FAILED("失败"),
@@ -57,6 +66,15 @@ fun DownloadManagerScreen(
     val tasks by vm.downloadManager.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
     var filter by remember { mutableStateOf(DownloadFilter.ALL) }
     var confirmTask by remember { mutableStateOf<OnlineDownloadTask?>(null) }
+
+    // 阶段 F：手动上传只允许从已完成任务发起；两个云端分别选择、分别记结果。
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var uploadTask by remember { mutableStateOf<OnlineDownloadTask?>(null) }
+    var uploadTargets by remember { mutableStateOf(CloudUploadBridge.Target.entries.toSet()) }
+    var uploading by remember { mutableStateOf(false) }
+    var uploadReport by remember { mutableStateOf<CloudUploadBridge.Report?>(null) }
+    var uploadError by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         containerColor = YuezhouColors.Background,
@@ -141,6 +159,14 @@ fun DownloadManagerScreen(
                                 }
                             },
                             onRead = task.localBookId?.let { id -> { onOpenBook(id) } },
+                            onUpload = task.localBookId?.let {
+                                {
+                                    uploadError = null
+                                    uploadReport = null
+                                    uploadTargets = CloudUploadBridge.Target.entries.toSet()
+                                    uploadTask = task
+                                }
+                            },
                         )
                     }
                     item {
@@ -172,6 +198,104 @@ fun DownloadManagerScreen(
             },
         )
     }
+
+    val pendingUpload = uploadTask
+    if (pendingUpload != null && !uploading && uploadReport == null && uploadError == null) {
+        AlertDialog(
+            onDismissRequest = { uploadTask = null },
+            title = { Text("上传云端") },
+            text = {
+                Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    Text("「${pendingUpload.fileName}」将上传所选云端；不覆盖本地书籍，也不修改阅读进度。")
+                    CloudUploadBridge.Target.entries.forEach { target ->
+                        val checked = target in uploadTargets
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .toggleable(value = checked, role = Role.Checkbox) { enabled ->
+                                    uploadTargets = if (enabled) uploadTargets + target else uploadTargets - target
+                                }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+                        ) {
+                            Checkbox(checked = checked, onCheckedChange = null)
+                            Text(target.label)
+                        }
+                    }
+                    Text("未配置的云端会跳过，另一侧照常上传。", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = uploadTargets.isNotEmpty(),
+                    onClick = {
+                        val bookId = pendingUpload.localBookId ?: return@TextButton
+                        val selected = uploadTargets
+                        uploadTask = null
+                        uploading = true
+                        scope.launch {
+                            try {
+                                uploadReport = CloudUploadBridge.from(context, bookId).upload(selected.toList())
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                uploadError = e.message ?: "上传失败"
+                            } finally {
+                                uploading = false
+                            }
+                        }
+                    },
+                ) { Text("开始上传") }
+            },
+            dismissButton = { TextButton(onClick = { uploadTask = null }) { Text("取消") } },
+        )
+    }
+
+    if (uploading) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("上传云端") },
+            text = {
+                Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator()
+                    Text("正在上传，请勿关闭应用。")
+                }
+            },
+            confirmButton = {},
+        )
+    }
+
+    uploadReport?.let { report ->
+        AlertDialog(
+            onDismissRequest = { uploadReport = null },
+            title = { Text(if (report.success) "上传完成" else "上传未完成") },
+            text = {
+                Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    report.results.forEach { result ->
+                        Text("${result.target.label}：${uploadStatusLabel(result.status)}")
+                        Text(result.message, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { uploadReport = null }) { Text("关闭") } },
+        )
+    }
+
+    uploadError?.let { error ->
+        AlertDialog(
+            onDismissRequest = { uploadError = null },
+            title = { Text("上传失败") },
+            text = { Text(error) },
+            confirmButton = { TextButton(onClick = { uploadError = null }) { Text("关闭") } },
+        )
+    }
+}
+
+private fun uploadStatusLabel(status: CloudUploadBridge.Status): String = when (status) {
+    CloudUploadBridge.Status.UPLOADED -> "已上传"
+    CloudUploadBridge.Status.FAILED -> "失败"
+    CloudUploadBridge.Status.SKIPPED -> "已跳过"
 }
 
 @Composable
@@ -180,6 +304,7 @@ private fun DownloadTaskRow(
     onCancel: () -> Unit,
     onRetry: () -> Unit,
     onRead: (() -> Unit)?,
+    onUpload: (() -> Unit)?,
 ) {
     Column(
         modifier = Modifier
@@ -220,6 +345,11 @@ private fun DownloadTaskRow(
             }
             onRead?.let {
                 TextButton(onClick = it) { Text("阅读") }
+            }
+            if (task.status == DownloadStatus.COMPLETED) {
+                onUpload?.let {
+                    TextButton(onClick = it) { Text("上传云端") }
+                }
             }
         }
     }
