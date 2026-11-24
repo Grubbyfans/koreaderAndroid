@@ -1,0 +1,16 @@
+app/src/main/java/com/yuezhou/reader/ui/online/ZLibrarySettingsScreen.kt
+  h_7f20b2a03eb3b6 7,35,39,43,45-47,66,163,165-167,172-177,180-184,186-188,191-195,263,275,396-418
+reader/src/main/java/com/yuezhou/reader/reader/online/config/ServerConfigController.kt
+  h_7f20b2a03eb3b6 64-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "706119e4ed6710f9fbcb295f816d2f9ded7f7944",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
