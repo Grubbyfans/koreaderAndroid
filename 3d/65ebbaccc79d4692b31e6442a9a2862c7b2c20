@@ -1,0 +1,26 @@
+app/src/main/java/com/yuezhou/reader/BookUploadControls.kt
+  h_7f20b2a03eb3b6 60-67
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  h_7f20b2a03eb3b6 125-127,201-202,204,306,308-329,332,336-339,545-546,549-550,642,725-741,1133
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryScreen.kt
+  h_7f20b2a03eb3b6 1-74
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryViewModel.kt
+  h_7f20b2a03eb3b6 1-144
+core/src/main/java/com/yuezhou/reader/core/online/model/SearchQuery.kt
+  h_7f20b2a03eb3b6 20-23
+reader/src/main/java/com/yuezhou/reader/reader/CloudSync.kt
+  h_7f20b2a03eb3b6 670,672
+reader/src/main/java/com/yuezhou/reader/reader/online/cloud/CloudBookProviderBase.kt
+  h_7f20b2a03eb3b6 74-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3d65ebbaccc79d4692b31e6442a9a2862c7b2c20",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
