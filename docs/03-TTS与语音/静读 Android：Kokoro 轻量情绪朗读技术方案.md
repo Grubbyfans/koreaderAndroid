@@ -376,7 +376,7 @@ existingTtsQueue.enqueue(planned)
 4. 输出问题清单、现有接口复用建议和风险清单；不改变正式朗读行为。
 5. 运行项目已有测试、类型/静态检查与 Android debug 构建，报告环境限制。
 
-**交付**：`docs/tts-emotion-phase-a-audit.md` + 基线结果 + 建议代码落点。等待用户确认。
+**交付**：`docs/03-TTS与语音/tts-emotion-phase-a-audit.md` + 基线结果 + 建议代码落点。等待用户确认。
 
 ### 阶段 B：文本与规则模块
 
@@ -444,7 +444,7 @@ existingTtsQueue.enqueue(planned)
 2. 检查模型资源、中文 sid、speed、silenceScale、maxNumSentences、Sherpa-ONNX 版本及应用/引擎双重分句问题。
 3. 在不改变朗读效果的前提下，增加可开关的诊断日志和本地 WAV 导出能力（仅 debug 模式），记录实际模型输入、生成耗时、RTF、静音与播放间隔。
 4. 准备至少 20 条基线样本和可复现测试步骤。
-5. 输出 docs/tts-emotion-phase-a-audit.md，列出发现、证据、风险、推荐代码落点、后续阶段预估。
+5. 输出 docs/03-TTS与语音/tts-emotion-phase-a-audit.md，列出发现、证据、风险、推荐代码落点、后续阶段预估。
 6. 运行已有测试、静态检查和 debug 构建，报告结果。
 
 完成阶段 A 后停止，不要进入阶段 B，不要自行引入模型或修改正式版包名、应用数据。

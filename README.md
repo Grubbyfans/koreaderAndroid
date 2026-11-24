@@ -2,9 +2,10 @@
 
 独立的 Android 阅读 App，通过百度网盘或 WebDAV 与 KOReader 上的 BaiduPanSync 插件共享 EPUB 书籍、书库列表、封面和阅读进度。
 
-- 技术方案：[Android阅读App_技术方案.md](Android阅读App_技术方案.md)
-- 云端对接流程：[docs/cloud-integration.md](docs/cloud-integration.md)（WebDAV / 百度网盘）
-- 同步冲突模型：[docs/sync-model.md](docs/sync-model.md)（冲突检测 / 裁决 / 待发布恢复）
+- 文档索引：[docs/README.md](docs/README.md)（按功能分类的全部文档导航）
+- 技术方案：[Android阅读App_技术方案.md](docs/00-项目总览/Android阅读App_技术方案.md)
+- 云端对接流程：[cloud-integration.md](docs/02-架构与协议/cloud-integration.md)（WebDAV / 百度网盘）
+- 同步冲突模型：[sync-model.md](docs/02-架构与协议/sync-model.md)（冲突检测 / 裁决 / 待发布恢复）
 - 兼容基线：BaiduPanSync 0.10.8/0.10.9 现行 `schemaVersion=2` 云端协议（见方案 §4）
 - 应用名：静读；包名：`com.yuezhou.reader`。默认打包「静读测试版」，包名为 `com.yuezhou.reader.tts.test`。
 - 首版范围与实施阶段：见方案 §1.2、§16（P0→P6）
@@ -19,7 +20,7 @@
 | `speech/` | 本地 TTS、后台服务、媒体控制 |
 | `reader-web/` | TypeScript、foliate-js、CFI/XPointer 与测试 |
 | `protocol-fixtures/` | 脱敏云端 JSON、位置测试 EPUB 与锚点 |
-| `docs/` | 架构、协议、验收、构建说明 |
+| `docs/` | 按功能分类的项目文档（总览 / 工程与构建 / 架构与协议 / TTS 与语音 / 在线书库统一化 / Z-Library 服务器管理），入口见 `docs/README.md` |
 
 模块依赖单向：`app → core/reader/speech`，`reader/speech → core`，模块间不互相依赖 Activity。
 
@@ -30,7 +31,7 @@ Gradle 9.7.0 · AGP 9.3.1 · Kotlin 2.4.20 · Compose BOM 2026.09.00 · JDK 25�
 
 ## 构建
 
-默认构建「静读测试版」。正式版任务、签名和真机安装步骤见[打包文档](docs/BUILD.md)。
+默认构建「静读测试版」。正式版任务、签名和真机安装步骤见[打包文档](docs/01-工程与构建/BUILD.md)。
 
 ```bash
 ./gradlew :app:assembleTtsTestDebug

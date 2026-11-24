@@ -112,7 +112,7 @@ android-reader/
   speech/                     # 本地 TTS、后台服务、媒体控制
   reader-web/                 # TypeScript、foliate-js、CFI/XPointer、测试
   protocol-fixtures/          # 脱敏云端 JSON、位置测试 EPUB 和锚点
-  docs/                       # 架构、协议、验收、构建说明
+  docs/                       # 分类文档：项目总览/工程与构建/架构与协议/TTS/在线书库/服务器管理
   gradle/libs.versions.toml
   gradlew
   README.md

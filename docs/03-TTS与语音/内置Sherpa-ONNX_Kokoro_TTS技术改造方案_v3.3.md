@@ -1,8 +1,8 @@
-# 内置 Sherpa-ONNX 运行时 + 用户导入 Kokoro 模型 离线 TTS 技术改造方案（v3.1）
+# 内置 Sherpa-ONNX 运行时 + 用户导入 Kokoro 模型 离线 TTS 技术改造方案（v3.3）
 
-版本：3.1  
+版本：3.3  
 日期：2026-11-23  
-状态：设计基线（已合并两轮独立可行性分析、源码复核与官方资料核验）；**本版不涉及代码改动**  
+状态：实施基线（在 v3.2 基础上增加独立测试版构建与安装隔离；**本版不涉及代码改动**）  
 基线：v1.0 原方案 + v2.0 修订稿 + 第二轮工程核对结论  
 目标机型：三星 Galaxy S25+（arm64、12 GB RAM、Android 15/16）
 
@@ -26,6 +26,17 @@
 | 模块依赖 | 未提 | 明确 `app → reader/speech`、`speech/reader → core`，`:speech` 不可直接依赖 Room |
 | `fileGeneration` | size + mtime | 纠正：`LibraryStore.Entry` 只有 `size/lastReadAt`，没有文件 mtime；需在导入时记录 mtime 或内容哈希 |
 | 产品决策 | 列 6 个待确认 | 本版直接拍板，仅保留 3 个需业务确认项 |
+
+
+### 0.3 v3.2 工程评估补强（本版新增）
+
+1. **CFI 精确起点**：整章稳定分段仍保留，但 `startIndex` 升级为节点索引 + 节点内字符偏移；以原始 CFI/锚点为恢复权威，`segmentIndex` 仅为加速缓存。
+2. **播放边界**：单个 `AudioTrack` 的 notification marker 不可同时维护多个独立句子 marker；统一使用累计帧边界、单个活动 marker 和播放头校验，严禁将 `write()` 当作播放完成。
+3. **语速唯一责任**：Kokoro 首版由模型合成 speed 参数控制；不同时修改 `AudioTrack` playback rate。切换语速失效旧 PCM 并重合成未完成句。
+4. **先试音再导入器**：阶段 B 使用开发期私有目录模型，不依赖完整 SAF 导入器；正式 ZIP / tar.bz2 安全导入放到 E。
+5. **服务独立启动**：进度持久化依赖由 Application 级容器构造，不得依赖 Activity 先初始化。
+6. **native 生命周期**：generation 只隔离回调，不代表取消推理；串行推理、延迟释放、限制积压。
+7. **实测优先**：SDK API、模型文件名、许可、INT8 与 FP32 表现均需在阶段 A/B 核验；本文的代码是设计接口，不保证与某个版本 AAR API 完全一致。
 
 ### 0.2 仍然保留的 v2 结论
 
@@ -181,7 +192,7 @@
 - Sherpa-ONNX runtime：Apache-2.0。
 - Kokoro-82M-v1.1-zh 模型卡：Apache-2.0（以发布页为准）。
 - `espeak-ng-data` 属 GPLv3 谱系数据：不内置 APK、仅用户导入时风险较低；若未来分发模型包需法务确认。
-- 更新 `docs/third-party-notices.md`：AAR 版本与 SHA-256、模型来源、许可证、音色归属；若引入 Commons Compress 需补充 Apache-2.0 声明。
+- 更新 `docs/01-工程与构建/third-party-notices.md`：AAR 版本与 SHA-256、模型来源、许可证、音色归属；若引入 Commons Compress 需补充 Apache-2.0 声明。
 
 ### 3.5 未实测项（阶段 A/B 门槛）
 
@@ -262,7 +273,7 @@ sealed interface SpeechPlaybackEvent {
 - `charOffset`：
   - 系统 TTS：沿用 `onRangeStart` 字级偏移；
   - Kokoro：恒为 0，表示句起点，禁止伪造；
-  - 恢复时只使用 `segmentIndex`，字级偏移仅系统引擎使用。
+  - 恢复时优先用持久化的原文 CFI/稳定锚点映射到整章句子；`segmentIndex` 仅在书籍代次、章节与分段算法版本均匹配时作快速定位；字级偏移仅系统引擎使用。
 - `Buffering`：MediaSession 置 `STATE_BUFFERING`，不推进游标。
 - `Failed`：保留位置，停止队列，上报；不静默切换引擎。
 - `SessionToken`：每次 seek、上一句/下一句、切章、切模型、停止、重启队列都递增 `generation`；旧 token 的迟到回调一律丢弃。
@@ -282,9 +293,9 @@ sealed interface SpeechPlaybackEvent {
 - 模式：`MODE_STREAM`；`WRITE_BLOCKING` 在后台线程；不得阻塞主线程。
 - 完成判定：
   - `write()` 完成 ≠ 播放完成；
-  - 每句播放前设置 `setNotificationMarkerPosition(totalFrames)`，监听 marker；
-  - 辅以 `getPlaybackHeadPosition()` / `getTimestamp()` 校验 32 位回绕与设备延迟；
-  - marker 到达后才发 `SegmentCompleted`。
+  - 采用**单 AudioTrack + 句子累计帧边界表**；任意时刻仅设置下一个尚未完成边界的 marker（该 API 只有一个活动 marker），到达后更新下一边界；
+  - 辅以 `getPlaybackHeadPosition()` / `getTimestamp()` 校验播放头、32 位回绕、暂停与路由变化；marker 丢失时只能在同一代次且播放头确认越界后补发完成事件；
+  - `SegmentCompleted` 必须恰好一次，且仅在播放时间线越过该句最后一帧后发出；不宣称蓝牙设备物理出声已完成。
 - 暂停：`pause()` 保留帧位与缓冲，不清空；恢复用 `play()`。
 - 停止/跳句：先失效代次，再 `pause → flush → stop`；必要时重建 track，保证 flush 语义。
 - 缓冲耗尽：`Buffering`，不推进游标。
@@ -301,13 +312,15 @@ sealed interface SpeechPlaybackEvent {
 
 ## 7. 调度与文本索引
 
-### 7.1 稳定的分段基准（新增要求）
+### 7.1 稳定的分段基准与精确 CFI 起点（v3.2 修订）
 
 - 问题：`requestChapterText(currentCfi)` 从当前阅读位置开始，`segmentIndex` 只在该起点下有效。
-- 决策：`chapterText` 请求改为**返回整章文本 + `startIndex`**（当前阅读位置对应的首个节点索引）；片段一律基于整章文本生成，索引稳定。
-- 朗读起点：用 `startIndex` 映射到包含该节点的片段索引；恢复时使用同一整章基准的 `segmentIndex`。
-- 兼容性：事件新增字段，不改变已有字段语义；后台 `EpubSpeechChapterSource` 本来就是整章解析，无需改动。
-- 若产品不希望整章传输，则替代方案是在位置记录中保存文本起点 CFI/锚点，起点不匹配时放弃 `segmentIndex`；本方案优先整章方案，简单且可测。
+- 决策：`chapterText` 请求改为**返回整章文本 + `startPosition`**，其中 `startPosition` 至少包含原始 `startCfi`、`nodeIndex` 与 `charOffsetInNode`；片段一律基于整章文本生成，索引稳定。
+- 朗读起点：先解析 CFI 对应文本节点与节点内偏移，再经 `charToSource` 映射定位包含该字符的片段；不得仅用 `nodeIndex` 从整段开头朗读。
+- 持久化恢复：保存稳定原文锚点（如 CFI）及分段算法版本；仅当 `bookId/fileGeneration/chapterIndex/plannerVersion` 匹配时，才允许使用缓存的 `segmentIndex`。否则以锚点重新映射；锚点失效时回退章节起点并告知用户。
+- `SpeechPositionStore` 的锚点扩展需核验当前 Room schema；如需新增列，应执行正式 Room 迁移并更新版本，**不能继续宣称无条件不做 4→5 迁移**。
+- 兼容性：事件保留旧字段并新增 `startPosition`，对旧消费者提供适配；后台 `EpubSpeechChapterSource` 的锚点与 WebView CFI 不是同一坐标系，跨章仅承诺继续读，不得把 `chapter:para` 冒充 CFI。
+- 若产品不希望整章传输，可用原文 CFI + 稳定节点标识重建计划；首版仍采用整章方案，但应限制桥接数据大小并验证长章节性能。
 
 ### 7.2 有界流水线
 
@@ -323,7 +336,8 @@ sealed interface SpeechPlaybackEvent {
 
 - 推理并发默认 1；最多缓存当前句 + 后续 2 句；PCM 上限建议 24 MiB。
 - 首句优先：不等整章合成。
-- 合成分块：计划片段仍按 256 字上限；送引擎时可二次切到 60–120 字，以降低首声延迟与长句阻塞（不改变原文锚点与句级高亮）。
+- 合成分块：计划片段仍按 256 字上限；送引擎时可二次切到 60–120 字，以降低首声延迟与长句阻塞（不改变原文锚点与句级高亮）。多个合成块必须聚合到原始句子的唯一完成事件；不得提前推进。
+- 缓存同时限制句数（当前 + 2）、PCM 总字节数（初值 24 MiB）和音频时长；缓存满时暂停预合成，不得阻塞 AudioTrack 写线程。
 - 跨章：仅在 `SegmentCompleted(本章最后一句)` 时触发，复用 `prefetchNextChapter()`。
 
 ### 7.3 控制语义矩阵
@@ -337,6 +351,22 @@ sealed interface SpeechPlaybackEvent {
 | 停止 | 清空队列、释放音频、持久化当前未完成句起点 |
 | 切音色/模型 | 暂停、失效旧队列、重合成当前未完成句 |
 | 切章/应用云端进度 | 暂停、作废旧计划与旧回调、按整章基准重建 |
+
+
+### 7.5 语速控制的唯一责任层（v3.2）
+
+- **首版选定合成层控制**：在 `KokoroSpeechEngine` 使用所选 SDK/模型实际支持的 speed 参数；阶段 A 核实参数范围与是否影响音高，阶段 B 测试 0.8×、1.0×、1.2×、1.5×。
+- `PcmAudioPlayer` 始终按模型输出采样率正常播放，首版不调用 `setPlaybackParams()` 叠加变速。
+- 用户播放中调整语速：先暂停当前句，递增 generation，清除旧预生成 PCM，按新速度重新合成**当前未完成句**；允许重读当前句，不允许跳句。
+- 系统 TTS 路径继续使用原有 `setSpeechRate()`；UI 统一速率值，但各引擎分别映射并显示实际可用范围。
+
+### 7.6 native 推理、取消与资源释放（v3.2）
+
+- 推理 worker 单并发，`OfflineTts` 实例的生成、切换、释放在同一串行执行域内进行；若 SDK 明确保证线程安全，后续才可优化。
+- generation/token 只让过期结果**不入队、不回写**；不能假设协程 `cancel()` 能立即终止 JNI/native 计算。
+- 停止或切模型时先停止接收新任务、取消排队任务，等待当前 native 调用安全返回后再释放模型；超时只报告/隔离，不在仍执行的 native 调用上强行 free。
+- 重复点击上一句/下一句应合并待处理请求，最多保留一个最新 seek 意图；禁止形成无限待推理队列。
+- 对已完成但过期的 PCM 立即释放引用；测试快速切书、连续切模型、服务销毁和低内存回收。
 
 ### 7.4 看门狗替换
 
@@ -369,7 +399,7 @@ files/tts-models/
 
 导入源是**资源总和的压缩包**：至少包含 `model.onnx`、`voices.bin`、`tokens.txt`、`espeak-ng-data/`、两份 lexicon。压缩包内允许存在单一顶层目录（例如 `kokoro-multi-lang-v1_1/`），导入时自动归一化到该目录。
 
-### 8.2 导入流程
+### 8.2 正式导入流程（阶段 E；阶段 B 不依赖此流程）
 
 1. SAF 选择压缩包（`.zip` 必需；`.tar.bz2` 作为官方包的兼容格式，二者用魔数识别而非扩展名）。
 2. 流式复制到 staging；限制总大小、条目数、单文件大小与解压后总大小，防压缩炸弹。
@@ -390,6 +420,15 @@ files/tts-models/
 - 同时支持导入 fp32 模型，作为对照与一键回退。
 - 无论精度，均启用 §6 音频健康检查；int8 失败重试一次后仍异常，提示切换 fp32。
 - 中文音色只展示 `zf_*`/`zm_*`；音色需试听后确定默认值，不在方案中写死 sid。
+
+---
+
+### 8.4 阶段 B 开发期模型准备（v3.2）
+
+- 开发者先从可信官方发布源下载完整模型资源包，在电脑上核验发布来源与文件清单；通过 `adb push` 或 Android Studio 调试流程复制到应用私有目录，必要时使用 debug-only 导入入口。
+- 不在 Release 中保留调试文件路径、任意目录读取权限或绕过校验开关。
+- 仅做模型初始化、固定中文试音、INT8/FP32 性能对照；不需要提前完成 ZIP/tar.bz2 解析、SAF UI、原子切换和删除保护。
+- 阶段 B 失败时优先调整 SDK/模型选择，而不是投入正式模型管理器开发。
 
 ---
 
@@ -418,12 +457,22 @@ files/tts-models/
 
 ---
 
+### 9.1 Application 级依赖装配与服务独立启动（v3.2）
+
+- 在 `Application.onCreate()` 或应用级容器中构造 `SpeechProgressSink` 的实现/工厂，依赖 `applicationContext` 获取 Room，不依赖 `ReaderActivity`、WebView 或 Activity 的生命周期。
+- `SpeechService.onCreate()` 从应用级容器获取 sink；如果容器/数据库不可用，报告可诊断错误，不静默假装保存成功。
+- `SpeechPlanStore` 仍可为内存计划入口，但进程重建后服务不可假设其存在；需要通过书籍标识、已持久化锚点和 EPUB 重新构建。
+- 强制写入（暂停、停止、切书）应等待数据库提交或明确处理失败；去抖写入不能覆盖更新的会话代次。UI 只订阅快照，不再重复写库。
+- 对服务被系统独立重启、Activity 从未创建、Activity 销毁、数据库写失败分别编写测试。
+
+---
+
 ## 10. 持久化与恢复
 
 ### 10.1 配置归属
 
 - 引擎类型、模型 ID、speaker、语速 → `ReaderSettings`（DataStore），全局偏好。
-- 默认**不新增 Room 字段、不做 4→5 迁移**。
+- 引擎/音色偏好仍不新增 Room 字段；但**精确 CFI 锚点和分段算法版本若当前表中没有可复用字段，则必须增加字段并进行 Room 版本迁移**。迁移前先检查实体与 DAO，不能无条件承诺不迁移。
 - 仅当产品要求「每本书固定音色/模型」时，才新增 `speech_position.engineType/modelId/speakerId` 并迁移。
 
 ### 10.2 位置写入
@@ -431,7 +480,7 @@ files/tts-models/
 - 由 `SpeechService` 通过 `SpeechProgressSink` 写入；Activity 不再负责落库。
 - 触发点：`SegmentStarted`（当前句起点）、暂停、停止、切后台、切书、Activity 销毁不中断。
 - 去抖 800 ms 保留在服务侧；停止/暂停/切书立即强制写入。
-- 恢复只取当前未完成句起点，允许重读一句，绝不跳过。
+- 恢复优先使用当前未完成句的稳定原文锚点（CFI），允许重读一句，绝不跳过；缓存 `segmentIndex` 仅在代次/算法版本匹配时有效。
 
 ### 10.3 fileGeneration
 
@@ -504,6 +553,51 @@ files/tts-models/
 
 ---
 
+### 14.1 独立测试版构建与安装隔离（v3.3，强制要求）
+
+**目标**：现有已安装的正式应用「静读」保持原样；TTS 改造期间生成的安装包显示为 **「静读测试版」**，可以与正式版同时安装、同时使用，且不得覆盖正式版 APK、应用数据、书库、朗读进度、设置或模型。
+
+> **关键约束**：仅修改 `app_name` / `android:label` 不足以实现隔离。Android 根据最终 `applicationId` 识别安装包；测试版必须使用不同于正式版的 `applicationId`。具体正式包名应由 Codex 读取当前仓库 `app/build.gradle.kts` 和合并 Manifest 后确认，**禁止凭文档猜测原包名**。
+
+**推荐实现：Android Gradle product flavors（或与现有构建结构兼容的等效变体）。** 示例仅展示意图，必须与仓库实际 `build.gradle.kts`、AGP DSL 和已有 `buildTypes` 合并，不能直接覆盖配置：
+
+```kotlin
+android {
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("production") {
+            dimension = "distribution"
+            // 保持现有正式 applicationId，不做迁移
+            resValue("string", "app_name", "静读")
+        }
+        create("testing") {
+            dimension = "distribution"
+            applicationIdSuffix = ".tts.test"
+            resValue("string", "app_name", "静读测试版")
+            versionNameSuffix = "-tts-test"
+        }
+    }
+}
+```
+
+- **正式版保护**：`production` 最终 `applicationId` 必须与原有已安装「静读」完全一致；若项目原有 `applicationId` 配置不在 defaultConfig，先核验再设计变体。不得更改正式版 `namespace`、签名、数据迁移或发布配置。`namespace` 不是应用安装身份，不必为了并装而改名。
+- **测试版隔离**：`testing` 最终 `applicationId` 与正式版不同；Android 自动分离应用私有目录、Room、DataStore、SharedPreferences 和内部模型目录。测试版默认创建自己的书库与阅读进度，**不自动复制或读取正式版数据**。
+- **资源与 Manifest**：优先使用变体专属 `app_name` 字符串资源，确保合并后的 `android:label` 确实引用该资源；如果已有 `app_name`，避免 `resValue` 与资源文件重复定义，改用 `src/testing/res/values/strings.xml` 和 `src/production/...` 覆盖或其他一致方案。
+- **Provider / URI 冲突**：检查 `FileProvider` 等 `android:authorities`，应使用 `${applicationId}` 派生唯一 authority；检查 OAuth/SAF 回调、deep link、自定义权限、`<provider>`、`<service>` 和第三方 SDK 中硬编码的原包名。不同应用的共享外部路径、导出文件和缓存文件名也应隔离或避免覆盖。
+- **签名与安装**：测试 APK 可用独立 debug 签名；不依赖与正式版相同的签名来实现并装。禁止执行 `adb install -r` 指向正式包、卸载正式版、`pm clear` 正式包、清理正式版目录或触发正式版数据迁移。
+- **构建任务**：依据最终变体名分别执行 `assembleTestingDebug`（测试版）与 `assembleProductionRelease`（正式版；仅在用户明确要求时构建）。如已有 flavors，则调整命名并在阶段 A 文档记录实际 Gradle 任务。
+- **图标**：建议测试版使用带 `TEST` 标识的变体图标，便于与正式版区分；不是首版阻塞项。安装包文件名建议包含 `testing`，但**文件名本身不能提供安装隔离**。
+- **阶段安排**：在 **阶段 A** 完成构建变体及包名核验，并在 **阶段 B 真机试音前** 安装测试版验证并存；此后所有开发、模型导入和测试默认使用 `testingDebug`，不得以正式包名部署实验版本。
+
+**强制验收**：
+
+1. 设备桌面同时出现「静读」与「静读测试版」两个独立图标，`adb shell pm list packages` 能看到两个不同包名。
+2. 打开测试版、导入 EPUB/模型、修改朗读设置、清除测试版数据及卸载测试版，均不影响正式版的书籍、进度、设置及文件。
+3. 使用 `aapt dump badging` 或 `apkanalyzer manifest application-id` / 合并 Manifest 检查 APK 的实际包名与 label；不要只看 Gradle 源文件。
+4. 正式版构建仍保留原有名称与包名；本次改造不覆盖原有已安装版本。
+
+---
+
 ## 15. 测试矩阵
 
 ### 15.1 纯 Kotlin / JVM
@@ -543,20 +637,30 @@ files/tts-models/
 
 | 阶段 | 工作 | 硬门槛 |
 |---|---|---|
-| A. 依赖与事实核验 | 验证 1.13.4 与 2.0.3 AAR；确认 ABI/类/minSdk/16 KB；模型文件与哈希；版本锁定 | 至少一个版本可解析、打包、满足 TTS API；无合规阻断 |
-| B. 最小试音 | 导入 int8 v1_1、单句合成、AudioTrack 播放；fp32 对照 | 飞行模式中文试音成功；int8 健康检查通过；首声/RTF/内存/杂音记录完整 |
-| C. 基础设施与协调器 | `:core` 端口、状态机双状态、`speech` 测试脚手架、有界队列、代次、健康检查 | 100+ 句、暂停/跳句/停止无错序、无提前进度；单测通过 |
+| A. 依赖与事实核验 | 验证 1.13.4 与 2.0.3 AAR；确认 ABI/类/minSdk/16 KB；模型文件与哈希；版本锁定；**配置独立测试版构建变体** | 至少一个版本可解析、打包、满足 TTS API；无合规阻断 |
+| B. 最小试音 | **先验证「静读测试版」与正式版并存且数据隔离**；开发调试方式放入 int8 v1_1 与 fp32 模型、单句合成、AudioTrack 播放；不开发正式 SAF 导入器 | 飞行模式中文试音成功；int8 健康检查通过；首声/RTF/内存/杂音记录完整 |
+| C. 基础设施与协调器 | `:core` 端口、状态机双状态、`speech` 测试脚手架、有界队列、累计帧边界、代次/native 释放、语速策略、健康检查 | 100+ 句、暂停/跳句/停止无错序、无提前进度；单测通过 |
 | D. 服务集成 | SpeechService、MediaSession、跨章、服务侧落库、唤醒锁 | Activity 销毁/锁屏跨 3 章持续朗读，位置持续落库；跨章无高亮可接受，返回界面能继续读 |
-| E. 文本基准与恢复 | 整章 + startIndex、fileGeneration、设置/诊断/模型管理 | 切书、杀进程、同名覆盖、导入失败回归通过 |
+| E. 文本基准与恢复、正式导入 | 整章 + 精确 CFI 起点、稳定锚点及必要 Room 迁移、fileGeneration、设置/诊断、SAF 模型管理 | 切书、杀进程、同名覆盖、导入失败回归通过 |
 | F. 全量回归 | EPUB、CFI/XPointer、百度/WebDAV、后台与长时性能 | 原功能无回归，真机验收通过 |
 
 - 阶段 B 未证明模型在目标设备可用前，不进入 C–F。
-- 阶段 B 前不改现有整章入队逻辑；先完成 C 的接口与测试，再切换默认引擎。
+- 阶段 B 前不改现有整章入队逻辑；先完成 C 的接口与测试，再切换默认引擎。阶段 B 使用 debug-only 模型部署，完整导入器推迟到 E。
 - 若 int8 v1_1 在 S25+ 上复现钉死/杂音或明显慢于 fp32，则把推荐模型切到 fp32 并记录数据；不回退系统 TTS，除非 fp32 也不可用。
 
 ---
 
+### 16.1 Codex 分阶段执行纪律（v3.2）
+
+**所有阶段默认构建并安装「静读测试版」；禁止覆盖已安装正式版。** 每次只实施用户指定阶段；每阶段提交：变更文件清单、关键接口、Gradle/单测结果、真机需验证项、已知风险和下一阶段阻塞条件。未经用户确认不得提前进入下一阶段。阶段 A 必须以仓库实际源码、AAR 反编译/检查结果与模型包清单为准，不能将本文示例当作已核验 API。
+
+---
+
 ## 17. 验收清单
+
+- [ ] 「静读测试版」与现有「静读」同时安装，最终 `applicationId` 不同，显示名称正确。
+- [ ] 测试版导入、设置、清除数据和卸载均不影响正式版；所有 TTS 开发默认部署测试版。
+
 
 ### 17.1 功能
 
@@ -564,9 +668,12 @@ files/tts-models/
 - [ ] `kokoro-int8-multi-lang-v1_1` 压缩包可导入、试音、朗读；fp32 包同样可导入并一键切换。
 - [ ] 三星设备不依赖 `getEngines()` 即可使用 Kokoro。
 - [ ] 系统 TTS 与 Kokoro 双向切换，旧会话不污染新会话。
-- [ ] 首句、句间、章尾、跨章、上一句/下一句不丢句、不提前推进。
+- [ ] 首句、句间、章尾、跨章、上一句/下一句不丢句、不提前推进；单 AudioTrack 多句边界每句 Completed 恰好一次。
+- [ ] 从同一 DOM 文本节点的中间 CFI 启动，定位到正确字符；跨次恢复不因 segmentIndex 漂移而跳过。
+- [ ] 快速切模型/跳句期间 native 推理安全结束，无 use-after-free、无无限任务积压。
+- [ ] Kokoro 语速仅在合成层控制，播放中切速重合成未完成句；系统 TTS 保持独立速率控制。
 - [ ] 暂停/恢复、锁屏通知、耳机控制、焦点变化、来电、拔出耳机符合预期。
-- [ ] Activity 销毁后跨 3 章继续播放，且位置持续落库。
+- [ ] Activity 销毁后跨 3 章继续播放，且位置持续落库；服务独立启动也能获取 Room sink。
 - [ ] 返回阅读界面当前章句级高亮正确；跨章按 §12 口径验收。
 - [ ] 杀进程后可从当前未完成句恢复，不自动出声。
 - [ ] 切书、同名覆盖、应用云端位置时旧队列不覆盖新进度。
@@ -592,12 +699,12 @@ files/tts-models/
 
 | 风险 | 等级 | 触发 | 缓解 | 验证 |
 |---|---|---|---|---|
-| 播放完成误判 | 高 | 缓冲/路由/暂停 | marker + 播放头 + 双状态机 | C |
+| 播放完成误判 | 高 | 缓冲/路由/暂停/单 marker 被覆盖 | 累计帧边界 + 单活动 marker + 播放头 + 双状态机 | C |
 | 进度不落库（Activity 销毁） | 高 | 后台长读 | core 端口 + 服务主动写 | D |
 | 模型内存/OOM | 高 | WebView 并存、连续长读 | int8 默认、缓存上限、OOM 时释放模型并回退 | B/D |
 | 首声延迟 | 高 | 冷启动、长句 | 常驻模型、二次切块、预生成 | B |
 | int8 钉死/杂音/更慢 | 高 | ARM + int8 | 默认 int8 v1_1、健康检查、重试、fp32 回退 | B/C |
-| 分段索引漂移 | 中 | 阅读位置变化后恢复 | 整章文本 + startIndex | E |
+| 分段索引漂移/节点内偏移丢失 | 高 | 阅读位置变化后恢复 | 整章文本 + 精确 CFI + 稳定锚点 + plannerVersion | E |
 | 16 KB / ABI 不合规 | 高 | 上架 targetSdk 36 | AAR 预检、abiFilters、zipalign | A |
 | 双引擎语义冲突 | 中 | 切引擎/暂停/跳句 | 协调器 + 三元 token | C/D |
 | native 释放竞态 | 中 | 切模型/停止 | 推理与释放互斥 | C/E |
@@ -618,7 +725,7 @@ files/tts-models/
 3. **精度优先级**：优先支持并默认 `kokoro-int8-multi-lang-v1_1`；fp32 作为对照与一键回退，均启用健康检查。
 4. **跨章高亮**：已确认接受无高亮，只要求继续读；当前章句级高亮为准。
 5. **首声目标**：模型已加载后 ≤ 2 s；冷启动单独统计，不承诺 2 s。
-6. **持久化**：全局偏好走 DataStore；位置由服务通过 core 端口写 Room；默认不做 4→5 迁移。
+6. **持久化**：全局偏好走 DataStore；位置由服务通过 core 端口写 Room；稳定 CFI 锚点若需新列则执行正式 Room 迁移。
 7. **SDK 版本**：先验证 1.13.4 与 2.0.3，默认倾向 1.13.4，锁定后随仓库固定哈希。
 8. **唤醒锁**：朗读会话期间持有，暂停/停止释放。
 9. **目标机型**：三星 Galaxy S25+ 单档；Release 仅 `arm64-v8a`，不做低端机适配分支。
@@ -634,6 +741,16 @@ files/tts-models/
 
 ---
 
+## 19.3 v3.2 新增的验证重点
+
+- 阶段 A：核验 `OfflineTts` 实际 speed 参数、线程/取消语义、模型目录和 Android AAR 的可用性。
+- 阶段 B：用调试模型目录跑 S25+ 真机 INT8/FP32；记录 0.8×/1.0×/1.2×/1.5× 合成效果。
+- 阶段 C：测试一个 AudioTrack 连续 100 句、marker 更新竞态、播放头回绕与暂停/恢复；验证 native 释放安全。
+- 阶段 D：服务独立于 Activity 的数据库装配与进度写入。
+- 阶段 E：同一节点中部 CFI 定位、旧版 Room 数据迁移、导入器安全边界。
+
+---
+
 ## 20. 参考与核验边界
 
 - Sherpa-ONNX：https://github.com/k2-fsa/sherpa-onnx
@@ -641,6 +758,6 @@ files/tts-models/
 - Android 构建文档：https://k2-fsa.github.io/sherpa/onnx/android/index.html
 - int8 ARM 异常报告：https://github.com/k2-fsa/sherpa-onnx/issues/3754
 - Android TTS API：https://developer.android.com/reference/android/speech/tts/TextToSpeech
-- 项目原技术方案：《Android阅读App_技术方案.md》第 3、5、7、14、16 节
+- 项目原技术方案：`docs/00-项目总览/Android阅读App_技术方案.md` 第 3、5、7、14、16 节
 
 > 核验边界：AAR 的 ABI/类/minSdk/16 KB 对齐、1.13.4 与 2.0.3 的 API 差异、fp32/int8 的真机音质与性能，均未在本次文档修订中实测；这些是阶段 A/B 的门槛项。文档中的体积数据来自官方发布资产与同系列参考，不是本机实测值。

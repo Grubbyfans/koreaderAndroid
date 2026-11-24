@@ -1,6 +1,6 @@
 # 内置 Kokoro TTS 改造验收报告
 
-- 适用方案：`docs/内置Sherpa-ONNX_Kokoro_TTS技术改造方案_v3.3.md`
+- 适用方案：`docs/03-TTS与语音/内置Sherpa-ONNX_Kokoro_TTS技术改造方案_v3.3.md`
 - 主测机型：三星 SM-S9360（Galaxy S25+，Android 16，12 GB）
 - 测试包：`com.yuezhou.reader.tts.test`（静读测试版）；正式版 `com.yuezhou.reader` 未被覆盖
 - 报告更新：2026-11-23（阶段 A/B/C/D 已验收；阶段 E 起为待验项）

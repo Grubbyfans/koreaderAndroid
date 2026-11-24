@@ -19,4 +19,4 @@
 
 ## 来源
 
-对照 BaiduPanSync 0.10.9 插件实现梳理（见 `docs/cloud-integration.md`）。
+对照 BaiduPanSync 0.10.9 插件实现梳理（见 `docs/02-架构与协议/cloud-integration.md`）。

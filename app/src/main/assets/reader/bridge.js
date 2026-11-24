@@ -1,6 +1,6 @@
 // 阅舟阅读器桥接脚本：连接 foliate-js 与 Android Kotlin 层。
 // 通过 window.ReaderBridge（由 Android @JavascriptInterface 注入）通信。
-// 采用 MIT 许可证的 foliate-js 作为阅读引擎（见 docs/third-party-notices.md）。
+// 采用 MIT 许可证的 foliate-js 作为阅读引擎（见 docs/01-工程与构建/third-party-notices.md）。
 
 import './view.js'
 import { Overlayer } from './overlayer.js'

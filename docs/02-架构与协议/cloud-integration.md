@@ -2,7 +2,7 @@
 
 > 状态：设计文档，尚未在 Android 端实现或真机验证。
 > 对齐对象：BaiduPanSync 0.10.9 的 `schemaVersion=2` 云端协议。
-> 阅读本文前先看 `Android阅读App_技术方案.md` §4（协议）与 §16（实施阶段）。
+> 阅读本文前先看 `docs/00-项目总览/Android阅读App_技术方案.md` §4（协议）与 §16（实施阶段）。
 
 本文把「与 KOReader 上的 BaiduPanSync 共享云端数据」这件事拆成两条后端各自的对接流程，目标只有一个：Android 端读写出来的 `library.json`、`books/*.epub`、`covers/*.json`、`progress/*.json` 必须与插件产出的数据**逐字节语义等价**，从而可以双向互认、交替使用。
 
