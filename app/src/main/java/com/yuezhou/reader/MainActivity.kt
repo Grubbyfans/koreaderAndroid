@@ -433,8 +433,8 @@ private fun BookshelfScreen() {
                         if (currentTab == Tab.书架 && bookScope == BookScope.本地 && removedBooks.isNotEmpty()) {
                             TextButton(onClick = { showHiddenBooks = true }) { Text("已移除") }
                         }
-                        // 下载任务入口：有任务时显示下载图标，点击查看任务状态
-                        if (downloadTask != null) {
+                        // 下载任务入口：固定在书库标题栏右上角，无任务时也可查看历史
+                        if (currentTab == Tab.书架) {
                             IconButton(onClick = { downloadTasksOpen = true }) {
                                 AnimatedDownloadIcon(
                                     downloading = downloadTask?.status == DownloadStatus.Downloading,
@@ -546,8 +546,6 @@ private fun BookshelfScreen() {
                             vm = onlineVm,
                             onRefresh = { refreshRemoteLibrary() },
                             onOpenDetail = { detailBook = it },
-                            onOpenSettings = { currentTab = Tab.设置 },
-                            onShowDownloads = { downloadTasksOpen = true },
                         )
                     }
                 }
@@ -1456,7 +1454,13 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             }
         }
 
-        SettingsCard("云端账号") {
+        SettingsCard("书源设置") {
+            Text(
+                "配置百度网盘、WebDAV 等云端书源账号。",
+                style = MaterialTheme.typography.bodySmall,
+                color = YuezhouColors.TextSecondary,
+            )
+            Spacer(Modifier.height(4.dp))
             CloudConfigSection(store = credentialStore)
         }
 

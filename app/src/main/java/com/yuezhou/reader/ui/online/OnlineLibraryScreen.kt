@@ -1,6 +1,5 @@
 package com.yuezhou.reader.ui.online
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,14 +19,14 @@ import com.yuezhou.reader.reader.CloudSync
  *
  * 云存储书源复用现有 CloudBookshelfContent；检索型书源（Z-Library）在阶段 C/D 接入，
  * 当前仅展示禁用占位，不提供未完成功能。
+ *
+ * 下载任务入口位于书库标题栏右上角，书源配置入口位于设置页，本页只负责书源切换与书库展示。
  */
 @Composable
 fun OnlineLibraryScreen(
     vm: OnlineLibraryViewModel,
     onRefresh: () -> Unit,
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
-    onOpenSettings: () -> Unit,
-    onShowDownloads: () -> Unit,
 ) {
     val state = vm.selectedState
 
@@ -54,18 +52,6 @@ fun OnlineLibraryScreen(
                 onClick = {},
                 label = { Text("Z-Library") },
             )
-        }
-
-        // 操作入口单独一行右对齐：窄屏上若与书源 Tab 同行会被挤压成竖排文字并裁切。
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onShowDownloads) { Text("下载") }
-            TextButton(onClick = onOpenSettings) { Text("书源设置") }
         }
 
         CloudBookshelfContent(
