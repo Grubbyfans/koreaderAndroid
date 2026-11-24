@@ -1,0 +1,19 @@
+app/src/main/java/com/yuezhou/reader/ui/online/ServerListCards.kt
+  s_4565e709496b9b::t_3c880dce9b36bb 238,242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "282cdbaa00ed23615304e9c4019fcc92786e8c85",
+  "prompts": {},
+  "sessions": {
+    "s_4565e709496b9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f78a-526b-7031-b1b9-203c29ed78d2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
