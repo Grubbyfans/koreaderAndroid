@@ -1,0 +1,22 @@
+core/src/main/java/com/yuezhou/reader/core/online/config/ServerTrustScope.kt
+  h_7f20b2a03eb3b6 1-24
+core/src/test/java/com/yuezhou/reader/core/online/ServerTrustScopeTest.kt
+  h_7f20b2a03eb3b6 1-35
+docs/服务器发现-增量实施报告.md
+  h_7f20b2a03eb3b6 1-90
+reader/src/main/java/com/yuezhou/reader/reader/online/config/OnlineCredentialStore.kt
+  h_7f20b2a03eb3b6 23-24
+reader/src/main/java/com/yuezhou/reader/reader/online/zlibrary/ZLibraryBookProvider.kt
+  h_7f20b2a03eb3b6 17,53,63-64,68-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "50b48a57c909a9c7fbbc7e08f27c64036b9411ca",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
