@@ -56,6 +56,7 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
 
     var config by remember { mutableStateOf(store.load()) }
     var message by remember { mutableStateOf<String?>(null) }
+    var connectionTestResult by remember { mutableStateOf<String?>(null) }
     var showEdit by remember { mutableStateOf(false) }
     var serverText by remember { mutableStateOf(config.servers.baseUrls.joinToString("\n")) }
     var languageText by remember { mutableStateOf(config.preferences.defaultLanguage) }
@@ -180,13 +181,23 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
                             Text("编辑地址")
                         }
                         TextButton(onClick = {
+                            connectionTestResult = "正在测试…"
                             scope.launch {
                                 store.testConnection(config).fold(
-                                    onSuccess = { message = it },
-                                    onFailure = { message = "连接测试失败：${it.message ?: "未知错误"}" },
+                                    onSuccess = { connectionTestResult = it },
+                                    onFailure = { connectionTestResult = "连接测试失败：${it.message ?: "未知错误"}" },
                                 )
                             }
                         }) { Text("连接测试") }
+                    }
+                    connectionTestResult?.let { result ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            result,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (result.startsWith("连接测试失败")) MaterialTheme.colorScheme.error
+                                    else YuezhouColors.TextSecondary,
+                        )
                     }
                 }
             }
