@@ -125,6 +125,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.ui.online.OnlineLibraryScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryViewModel
+import com.yuezhou.reader.ui.online.ZLibrarySettingsScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1413,9 +1414,15 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
 
     // 是否进入「同步记录」二级页面
     var showSyncLogPage by rememberSaveable { mutableStateOf(false) }
+    // 是否进入「Z-Library 书源设置」二级页面
+    var showZLibrarySettings by rememberSaveable { mutableStateOf(false) }
 
     if (showSyncLogPage) {
         SyncLogPage(onBack = { showSyncLogPage = false })
+        return
+    }
+    if (showZLibrarySettings) {
+        ZLibrarySettingsScreen(onBack = { showZLibrarySettings = false })
         return
     }
 
@@ -1462,6 +1469,26 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
             )
             Spacer(Modifier.height(4.dp))
             CloudConfigSection(store = credentialStore)
+
+            // Z-Library 为检索型书源，配置与云同步账号分开管理。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showZLibrarySettings = true }
+                    .padding(vertical = 12.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Z-Library", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "检索型书源 · 配置、登录与额度",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                }
+                Text("去配置", style = MaterialTheme.typography.bodyMedium, color = YuezhouColors.Brand)
+            }
         }
 
         if (SpeechRuntime.kokoro != null) {

@@ -1,0 +1,308 @@
+package com.yuezhou.reader.ui.online
+
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
+import kotlinx.coroutines.launch
+
+/**
+ * Z-Library 书源设置（阶段 C1）：服务器、偏好、连接测试、JSON 导入导出、回滚与恢复默认。
+ *
+ * 凭证不在此处导入导出，也不在界面明文显示；账号相关入口由阶段 C2 的网络层接入。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ZLibrarySettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val store = remember(context) { ZLibraryConfigStore(context) }
+
+    var config by remember { mutableStateOf(store.load()) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var showEdit by remember { mutableStateOf(false) }
+    var serverText by remember { mutableStateOf(config.servers.baseUrls.joinToString("\n")) }
+    var languageText by remember { mutableStateOf(config.preferences.defaultLanguage) }
+    var pageSizeText by remember { mutableStateOf(config.preferences.pageSize.toString()) }
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = try {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            } catch (e: Exception) {
+                null
+            }
+            if (text == null) {
+                message = "读取配置失败"
+                return@launch
+            }
+            store.importText(text).fold(
+                onSuccess = { imported ->
+                    store.save(imported).fold(
+                        onSuccess = {
+                            config = imported
+                            serverText = imported.servers.baseUrls.joinToString("\n")
+                            languageText = imported.preferences.defaultLanguage
+                            pageSizeText = imported.preferences.pageSize.toString()
+                            message = "配置已导入并应用"
+                        },
+                        onFailure = { message = "保存失败：${it.message ?: "未知错误"}" },
+                    )
+                },
+                onFailure = { message = "配置无效，未覆盖当前配置：${it.message ?: "未知错误"}" },
+            )
+        }
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = try {
+                context.contentResolver.openOutputStream(uri)?.use {
+                    it.write(store.exportJson(config).toByteArray(Charsets.UTF_8))
+                } != null
+            } catch (e: Exception) {
+                false
+            }
+            message = if (ok) "配置已导出（不含凭证）" else "导出失败"
+        }
+    }
+
+    fun applyPreferences() {
+        val pageSize = pageSizeText.toIntOrNull()
+        if (pageSize == null) {
+            message = "分页数量必须是数字"
+            return
+        }
+        val updated = config.copy(
+            preferences = config.preferences.copy(
+                defaultLanguage = languageText.trim(),
+                pageSize = pageSize,
+            ),
+        )
+        scope.launch {
+            store.save(updated).fold(
+                onSuccess = { config = it; message = "偏好已保存" },
+                onFailure = { message = "保存失败：${it.message ?: "未知错误"}" },
+            )
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Z-Library 设置") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("服务器", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (store.hasCustomConfig()) config.servers.baseUrls.joinToString("\n")
+                        else "当前使用内置默认占位地址，请配置你有权访问的 HTTPS 服务器",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "配置版本 ${config.configVersion} · ${config.servers.mode} 模式",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row {
+                        TextButton(onClick = { serverText = config.servers.baseUrls.joinToString("\n"); showEdit = true }) {
+                            Text("编辑地址")
+                        }
+                        TextButton(onClick = {
+                            scope.launch {
+                                store.testConnection(config).fold(
+                                    onSuccess = { message = it },
+                                    onFailure = { message = "连接测试失败：${it.message ?: "未知错误"}" },
+                                )
+                            }
+                        }) { Text("连接测试") }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("默认偏好", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = languageText,
+                        onValueChange = { languageText = it },
+                        label = { Text("默认语言（如 zh 或 zh-CN）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = pageSizeText,
+                        onValueChange = { pageSizeText = it },
+                        label = { Text("分页数量（1–30）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    Text(
+                        "格式固定为 EPUB；搜索免登录，下载需登录并计额度。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = { applyPreferences() }) { Text("保存偏好") }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("配置管理", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "配置文件不包含账号、Token 或 Cookie；凭证独立加密保存，不随配置导出。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row {
+                        TextButton(onClick = { importLauncher.launch(arrayOf("application/json")) }) {
+                            Text("导入 JSON")
+                        }
+                        TextButton(onClick = { exportLauncher.launch("zlibrary-config.json") }) {
+                            Text("导出 JSON")
+                        }
+                    }
+                    Row {
+                        TextButton(onClick = {
+                            scope.launch {
+                                store.rollback().fold(
+                                    onSuccess = {
+                                        config = it
+                                        serverText = it.servers.baseUrls.joinToString("\n")
+                                        message = "已回滚到上一份配置"
+                                    },
+                                    onFailure = { message = "回滚失败：${it.message ?: "未知错误"}" },
+                                )
+                            }
+                        }) { Text("回滚上一版本") }
+                        TextButton(onClick = {
+                            scope.launch {
+                                store.reset().fold(
+                                    onSuccess = {
+                                        config = it
+                                        serverText = it.servers.baseUrls.joinToString("\n")
+                                        message = "已恢复默认配置（可回滚）"
+                                    },
+                                    onFailure = { message = "恢复默认失败：${it.message ?: "未知错误"}" },
+                                )
+                            }
+                        }) { Text("恢复默认") }
+                    }
+                }
+            }
+
+            if (message != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    message.orEmpty(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+
+    if (showEdit) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showEdit = false },
+            title = { Text("服务器地址") },
+            text = {
+                Column {
+                    Text(
+                        "每行一个 HTTPS 地址；默认地址为占位，请使用你有权访问的服务器。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = serverText,
+                        onValueChange = { serverText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val urls = serverText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+                    val updated = config.copy(servers = config.servers.copy(baseUrls = urls))
+                    scope.launch {
+                        store.save(updated).fold(
+                            onSuccess = {
+                                config = it
+                                message = "服务器地址已保存"
+                                showEdit = false
+                            },
+                            onFailure = { message = "保存失败：${it.message ?: "未知错误"}" },
+                        )
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { showEdit = false }) { Text("取消") } },
+        )
+    }
+}
