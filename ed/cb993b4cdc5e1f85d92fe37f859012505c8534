@@ -1,0 +1,14 @@
+docs/阶段B-实施报告.md
+  h_7f20b2a03eb3b6 1-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "edcb993b4cdc5e1f85d92fe37f859012505c8534",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
