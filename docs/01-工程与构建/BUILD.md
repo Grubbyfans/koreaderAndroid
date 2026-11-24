@@ -29,6 +29,20 @@
 
 测试版包名为 `com.yuezhou.reader.tts.test`，版本名带 `-tts-test`（当前为 `0.1.0-tts-test`）。它包含 sherpa-onnx 运行时和测试入口，可与包名为 `com.yuezhou.reader` 的「静读」同时安装。当前仓库未配置 Release 签名，正式发布 APK 生成后需使用正式签名密钥签名。使用明确的变体任务，避免 `:app:assembleDebug` 同时构建两个 Debug 变体。
 
+### 测试版签名固定（2026-11-24）
+
+`keystore/debug.keystore` 随仓库提交，`app/build.gradle.kts` 的 `signingConfigs.debug` 明确引用它；不再使用各机器默认的 `~/.android/debug.keystore`，换机或密钥重建也不会导致签名漂移。该密钥只用于 debug 构建，正式签名密钥不入库。
+
+校验构建产物与手机已装版本是否同一签名（需 JDK，摘要应为 `f1dd9c113dda1f28b1e46846f60d12bf4fe1082561b9548e28dabb278a35f33d`）：
+
+```bash
+export JAVA_HOME="D:/Android/Android Studio/jbr"
+"$JAVA_HOME/bin/keytool" -list -v -keystore keystore/debug.keystore -storepass android -alias androiddebugkey | grep SHA256
+"$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs app/build/outputs/apk/ttsTest/debug/app-ttsTest-debug.apk
+```
+
+签名不一致时 `adb install -r` 会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，系统要求先卸载旧版（应用数据会丢失）；因此不要替换仓库中的 debug keystore。
+
 ### Windows PowerShell 打包并安装测试版
 
 从仓库根目录运行。根据本机安装位置设置 `JAVA_HOME`，并在 `local.properties` 中配置 `sdk.dir`。

@@ -22,6 +22,7 @@ captures/
 # 本地签名密钥（正式签名单独保管，不入库）
 *.jks
 *.keystore
+!keystore/debug.keystore
 signing.properties
 
 # 系统
