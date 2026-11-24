@@ -111,7 +111,15 @@ class ZLibraryBookProvider(context: Context) : CatalogBookProvider {
             sort = order,
             pageSize = config.preferences.pageSize.coerceIn(1, 30),
         )
-        return api().search(effective, session).getOrElse { throw asProviderException(it) }
+        val result = api().search(effective, session)
+        result.getOrNull()?.let { return it }
+        val error = result.exceptionOrNull() ?: ProviderException(ProviderErrorCode.NETWORK, "搜索失败")
+        // 服务端拒绝搜索时（2026-11-23 起 Z-Library 的 400 Access denied），
+        // 按参考实现降级到仍可用的官方「最热门」列表，并在结果中提示。
+        if ((error as? ProviderException)?.code == ProviderErrorCode.SERVER_REJECTED) {
+            api().getMostPopular(effective.pageSize, session).getOrNull()?.let { return it }
+        }
+        throw asProviderException(error)
     }
 
     override suspend fun fetchCover(url: String): Result<ByteArray> = api().fetchCover(url)

@@ -57,6 +57,8 @@ data class ZLibraryConfig(
     @Serializable
     data class Endpoints(
         val search: Endpoint = Endpoint("/eapi/book/search", "POST"),
+        /** 搜索被服务端拒绝时的降级列表端点（参考实现 b7eacbab 仍可用）。 */
+        val mostPopular: Endpoint = Endpoint("/eapi/book/most-popular"),
         val bookDetail: Endpoint = Endpoint("/eapi/book/{id}/{hash}"),
         val downloadLink: Endpoint = Endpoint("/eapi/book/{id}/{hash}/file"),
         val profile: Endpoint = Endpoint("/eapi/user/profile"),
@@ -245,6 +247,7 @@ object ZLibraryConfigValidator {
 
         listOf(
             "search" to config.endpoints.search,
+            "mostPopular" to config.endpoints.mostPopular,
             "bookDetail" to config.endpoints.bookDetail,
             "downloadLink" to config.endpoints.downloadLink,
             "profile" to config.endpoints.profile,

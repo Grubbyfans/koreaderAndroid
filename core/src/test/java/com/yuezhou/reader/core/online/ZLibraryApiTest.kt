@@ -136,6 +136,28 @@ class ZLibraryApiTest {
         assertEquals(ProviderErrorCode.AUTH, api.classify(403, "").code)
         assertEquals(ProviderErrorCode.RATE_LIMITED, api.classify(429, "").code)
         assertEquals(ProviderErrorCode.QUOTA, api.classify(200, "daily download quota reached").code)
+        assertEquals(ProviderErrorCode.SERVER_REJECTED, api.classify(400, "拒绝访问").code)
+        assertEquals(ProviderErrorCode.SERVER_REJECTED, api.classify(400, "Access denied").code)
+    }
+
+    @Test
+    fun `服务端拒绝搜索时归类为服务端拒绝而非认证失败`() = runBlocking {
+        val error = api(
+            code = 400,
+            body = """{"success":0,"error":"拒绝访问"}""",
+        ).search(SearchQuery(keyword = "kotlin")).exceptionOrNull()
+        assertTrue(error is ProviderException)
+        assertEquals(ProviderErrorCode.SERVER_REJECTED, (error as ProviderException).code)
+    }
+
+    @Test
+    fun `热门列表降级返回书籍并附带提示`() = runBlocking {
+        val body = """{"success":1,"books":[{"id":"9","hash":"h","title":"热门书","format":"epub"}]}"""
+        val page = api(body = body).getMostPopular(pageSize = 30).getOrThrow()
+        assertEquals(1, page.items.size)
+        assertEquals("热门书.epub", page.items.first().fileName)
+        assertTrue(!page.hasMore)
+        assertTrue(page.notice!!.contains("最热门"))
     }
 
     @Test

@@ -169,6 +169,15 @@ fun CatalogLibraryScreen(
             )
         }
 
+        state.notice?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = YuezhouColors.Brand,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+
         when {
             state.loading && state.items.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

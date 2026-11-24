@@ -14,6 +14,8 @@ enum class ProviderErrorCode {
     NETWORK,
     QUOTA,
     RATE_LIMITED,
+    /** 书源服务端主动拒绝该接口（如 Z-Library 的 Access denied），非本地配置或账号问题。 */
+    SERVER_REJECTED,
     UNSUPPORTED,
     INVALID_CONFIG,
     NOT_FOUND,

@@ -98,6 +98,31 @@ class ZLibraryApi(
         }
     }
 
+    /**
+     * 搜索被服务端拒绝时的降级入口：官方「最热门」列表仍可用（参考实现 b7eacbab）。
+     * 该端点只提供固定一页，因此不生成下一页游标。
+     */
+    suspend fun getMostPopular(
+        pageSize: Int = 30,
+        session: AuthSession? = null,
+    ): Result<BookPage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val limit = pageSize.coerceIn(1, 30)
+            val url = baseUrl + config.endpoints.mostPopular.path + "?page=1&limit=$limit"
+            val response = execute(Request.Builder().url(url).get().build(), session)
+            val element = parseJson(response)
+            val books = findBooks(element)
+            BookPage(
+                items = books.map { it.toOnlineBook() },
+                nextCursor = null,
+                hasMore = false,
+                totalCount = findInt(element, "total"),
+                fetchedAt = System.currentTimeMillis(),
+                notice = "Z-Library 服务端暂未开放搜索，当前展示官方「最热门」书单；登录、详情与下载不受影响。",
+            )
+        }
+    }
+
     suspend fun getBookDetail(id: String, hash: String, session: AuthSession? = null): Result<OnlineBook> =
         withContext(Dispatchers.IO) {
             runCatching {
@@ -315,6 +340,10 @@ class ZLibraryApi(
     }
 
     internal fun classify(code: Int, message: String): ProviderException = when {
+        isSearchRefused(message) -> ProviderException(
+            ProviderErrorCode.SERVER_REJECTED,
+            "Z-Library 服务端拒绝搜索：${message}",
+        )
         isQuotaError(message) -> ProviderException(ProviderErrorCode.QUOTA, message)
         isRateLimited(message) -> ProviderException(ProviderErrorCode.RATE_LIMITED, message)
         code == 401 || code == 403 -> ProviderException(ProviderErrorCode.AUTH, "登录已失效，请重新登录")
@@ -340,10 +369,11 @@ class ZLibraryApi(
             ?: throw ProviderException(ProviderErrorCode.NETWORK, "服务端返回的数据格式无效")
     }
 
-    private fun messageFromBody(body: String): String =
-        (runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject)
-            ?.let { textField(it, "message") }
-            ?: "请求失败"
+    private fun messageFromBody(body: String): String {
+        val obj = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject ?: return "请求失败"
+        // 服务端拒绝搜索时返回 {"success":0,"error":"Access denied"/"拒绝访问"}，没有 message 字段。
+        return textField(obj, "message") ?: textField(obj, "error") ?: "请求失败"
+    }
 
     private fun sessionFrom(response: Response, element: JsonObject): AuthSession {
         val cookies = response.headers("Set-Cookie")
@@ -367,6 +397,10 @@ class ZLibraryApi(
 
     private fun isQuotaError(message: String): Boolean =
         message.contains("quota", true) || message.contains("limit", true) || message.contains("额度", true)
+
+    /** 服务端自 2026-11-23 起对搜索统一返回 400 Access denied，与会话/请求格式无关。 */
+    private fun isSearchRefused(message: String): Boolean =
+        message.contains("access denied", true) || message.contains("拒绝访问", true)
 
     private fun findBooks(element: JsonObject): List<JsonObject> {
         val candidate = element["books"] as? JsonArray

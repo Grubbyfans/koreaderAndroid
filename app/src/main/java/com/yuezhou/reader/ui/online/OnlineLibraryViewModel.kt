@@ -50,6 +50,8 @@ data class ProviderUiState(
     val hasMore: Boolean = false,
     val loadingMore: Boolean = false,
     val searchError: String? = null,
+    /** 降级等非错误提示（如服务端拒绝搜索后展示热门书单）。 */
+    val notice: String? = null,
     val gridMode: Boolean = true,
     val scrollIndex: Int = 0,
     val detail: OnlineBook? = null,
@@ -273,6 +275,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             hasMore = false,
             error = null,
             searchError = null,
+            notice = null,
             loading = true,
             loadingMore = false,
             scrollIndex = 0,
@@ -316,6 +319,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
                 fetchedAt = page.fetchedAt,
                 error = null,
                 searchError = null,
+                notice = page.notice,
                 searched = true,
             )
         } catch (e: CancellationException) {
@@ -456,6 +460,8 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             ProviderErrorCode.AUTH -> "登录已失效，请重新登录"
             ProviderErrorCode.QUOTA -> "下载额度已用尽"
             ProviderErrorCode.RATE_LIMITED -> "请求过于频繁，请稍后再试"
+            ProviderErrorCode.SERVER_REJECTED ->
+                "Z-Library 服务端暂未开放搜索（HTTP 400 拒绝访问），与账号和本地配置无关；热门书单、详情与下载仍可使用。"
             else -> e.message ?: "请求失败"
         }
         else -> e.message ?: "网络请求失败"

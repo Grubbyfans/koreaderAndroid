@@ -21,4 +21,6 @@ data class BookPage(
     val fromCache: Boolean = false,
     /** 最后成功获取时间（epoch millis）。 */
     val fetchedAt: Long = 0L,
+    /** 降级或异常成功的说明，供 UI 提示（如搜索被服务端拒绝后展示热门列表）。 */
+    val notice: String? = null,
 )
