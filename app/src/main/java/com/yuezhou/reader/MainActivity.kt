@@ -125,6 +125,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.ui.online.OnlineLibraryScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryViewModel
+import com.yuezhou.reader.ui.online.ServerSettingsScreen
 import com.yuezhou.reader.ui.online.ZLibrarySettingsScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -1416,13 +1417,22 @@ private fun SettingsPage(cloudSync: CloudSync, uploadQueue: BookUploadQueue, clo
     var showSyncLogPage by rememberSaveable { mutableStateOf(false) }
     // 是否进入「Z-Library 书源设置」二级页面
     var showZLibrarySettings by rememberSaveable { mutableStateOf(false) }
+    // 是否进入「服务器配置」三级页面
+    var showServerSettings by rememberSaveable { mutableStateOf(false) }
 
     if (showSyncLogPage) {
         SyncLogPage(onBack = { showSyncLogPage = false })
         return
     }
+    if (showServerSettings) {
+        ServerSettingsScreen(onBack = { showServerSettings = false })
+        return
+    }
     if (showZLibrarySettings) {
-        ZLibrarySettingsScreen(onBack = { showZLibrarySettings = false })
+        ZLibrarySettingsScreen(
+            onBack = { showZLibrarySettings = false },
+            onOpenServerSettings = { showServerSettings = true },
+        )
         return
     }
 

@@ -49,7 +49,7 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ZLibrarySettingsScreen(onBack: () -> Unit) {
+fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(context) { ZLibraryConfigStore(context) }
@@ -181,8 +181,8 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
                             Text("编辑地址")
                         }
                         TextButton(onClick = {
-                            connectionTestResult = "正在测试…"
                             scope.launch {
+                                connectionTestResult = "正在测试…"
                                 store.testConnection(config).fold(
                                     onSuccess = { connectionTestResult = it },
                                     onFailure = { connectionTestResult = "连接测试失败：${it.message ?: "未知错误"}" },
@@ -190,6 +190,7 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit) {
                             }
                         }) { Text("连接测试") }
                     }
+                    TextButton(onClick = onOpenServerSettings) { Text("服务器配置（候选列表 / 自动检测）") }
                     connectionTestResult?.let { result ->
                         Spacer(Modifier.height(4.dp))
                         Text(
