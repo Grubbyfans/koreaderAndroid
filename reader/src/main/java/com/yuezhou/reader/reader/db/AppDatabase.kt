@@ -23,8 +23,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DiagnosticEventEntity::class,
         SpeechPositionEntity::class,
         SyncLogEntity::class,
+        OnlineDownloadTaskEntity::class,
+        OnlineBookMappingEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,6 +34,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun diagnosticEventDao(): DiagnosticEventDao
     abstract fun speechPositionDao(): SpeechPositionDao
     abstract fun syncLogDao(): SyncLogDao
+    abstract fun onlineDownloadTaskDao(): OnlineDownloadTaskDao
+    abstract fun onlineBookMappingDao(): OnlineBookMappingDao
 
     companion object {
         private val isolatePublications = object : Migration(1, 2) {
@@ -93,6 +97,45 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 阶段 E：只新增下载任务与在线映射两张表，旧表与既有数据零改动。 */
+        private val addOnlineDownloadTables = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS online_download_task (
+                        taskId TEXT NOT NULL PRIMARY KEY,
+                        providerId TEXT NOT NULL,
+                        accountScope TEXT NOT NULL,
+                        remoteId TEXT NOT NULL,
+                        bookTitle TEXT NOT NULL,
+                        fileName TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        receivedBytes INTEGER NOT NULL,
+                        totalBytes INTEGER,
+                        localPath TEXT,
+                        errorCode TEXT,
+                        errorMessage TEXT,
+                        attempts INTEGER NOT NULL,
+                        overwriteApproved INTEGER NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        localBookId TEXT
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS online_book_mapping (
+                        providerId TEXT NOT NULL,
+                        accountScope TEXT NOT NULL,
+                        remoteId TEXT NOT NULL,
+                        fileName TEXT NOT NULL,
+                        localBookId TEXT NOT NULL,
+                        downloadedAt INTEGER NOT NULL,
+                        active INTEGER NOT NULL,
+                        PRIMARY KEY (providerId, accountScope, remoteId)
+                    )
+                """.trimIndent())
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -102,7 +145,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yuezhou_reader.db",
-                ).addMigrations(isolatePublications, addSpeechPosition, addSyncLog, addSpeechAnchor)
+                ).addMigrations(isolatePublications, addSpeechPosition, addSyncLog, addSpeechAnchor, addOnlineDownloadTables)
                     .build().also { instance = it }
             }
     }

@@ -18,6 +18,7 @@ import com.yuezhou.reader.core.online.config.ServerTrustScope
 import com.yuezhou.reader.reader.online.config.OnlineCredentialStore
 import com.yuezhou.reader.reader.online.config.OnlineCredentials
 import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
+import java.io.File
 
 /**
  * Z-Library 检索型书源适配器（阶段 C2）。
@@ -127,10 +128,31 @@ class ZLibraryBookProvider(context: Context) : CatalogBookProvider {
         request: BookDownloadRequest,
         onProgress: (received: Long, total: Long?) -> Unit,
         isBookOpen: (String) -> Boolean,
-    ): DownloadResult = DownloadResult.Failed(
-        ProviderErrorCode.UNSUPPORTED,
-        "下载队列、EPUB 校验与导入将在后续阶段接入",
-    )
+    ): DownloadResult {
+        if (request.providerId != id) {
+            return DownloadResult.Failed(ProviderErrorCode.INVALID_CONFIG, "下载请求与书源不匹配")
+        }
+        val session = currentSession()
+            ?: return DownloadResult.Failed(ProviderErrorCode.AUTH, "请先登录 Z-Library 后再下载")
+        val parts = request.remoteId.split(":", limit = 2)
+        if (parts.size != 2 || parts.any { it.isBlank() }) {
+            return DownloadResult.Failed(ProviderErrorCode.INVALID_CONFIG, "远程标识格式无效")
+        }
+        val target = request.remotePath?.let(::File)
+            ?: return DownloadResult.Failed(ProviderErrorCode.IO, "下载临时路径无效")
+        val link = api().getDownloadLink(parts[0], parts[1], session).getOrElse { error ->
+            return DownloadResult.Failed(failureCode(error), error.message ?: "获取下载链接失败")
+        }
+        val bytes = api().downloadToFile(link, target, request.expectedSize, onProgress).getOrElse { error ->
+            return DownloadResult.Failed(failureCode(error), error.message ?: "下载失败")
+        }
+        if (bytes <= 0L) return DownloadResult.Failed(ProviderErrorCode.IO, "下载文件为空")
+        // 本地 bookId 由文件名确定，导入协调器在覆盖检查后返回；此处不以 remoteId 代替 bookId。
+        return DownloadResult.Success(request.fileName, "")
+    }
+
+    private fun failureCode(error: Throwable): ProviderErrorCode =
+        (error as? ProviderException)?.code ?: ProviderErrorCode.NETWORK
 
     private fun asProviderException(throwable: Throwable): ProviderException =
         throwable as? ProviderException ?: ProviderException(ProviderErrorCode.NETWORK, throwable.message ?: "网络请求失败", throwable)

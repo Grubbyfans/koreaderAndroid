@@ -24,6 +24,8 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import java.net.URL
@@ -168,6 +170,76 @@ class ZLibraryApi(
                 out.toByteArray()
             }
         }
+    }
+
+    /**
+     * 按服务端签名链接流式下载到指定临时文件。
+     *
+     * 签名链接本身是凭证等价物：不附加 Cookie，重定向只允许 HTTPS，且最多跟随 3 次；
+     * 目标主机由服务端签名决定，不向它发送任何账号凭证。调用方负责取消与临时文件清理。
+     */
+    suspend fun downloadToFile(
+        url: String,
+        target: File,
+        expectedSize: Long? = null,
+        onProgress: (received: Long, total: Long?) -> Unit = { _, _ -> },
+    ): Result<Long> = withContext(Dispatchers.IO) {
+        runCatching {
+            var currentUrl = url
+            var response = openDownload(currentUrl)
+            var hops = 0
+            while (response.code in 300..399) {
+                val location = response.header("Location")
+                response.close()
+                if (hops++ >= 3 || location.isNullOrBlank()) {
+                    throw ProviderException(ProviderErrorCode.NETWORK, "下载重定向次数过多或缺少目标")
+                }
+                val next = runCatching { URL(URL(currentUrl), location).toString() }.getOrNull()
+                    ?: throw ProviderException(ProviderErrorCode.NETWORK, "下载重定向地址无效")
+                if (URL(next).protocol != "https") {
+                    throw ProviderException(ProviderErrorCode.NETWORK, "下载重定向必须使用 HTTPS")
+                }
+                currentUrl = next
+                response = openDownload(currentUrl)
+            }
+            response.use { resp ->
+                if (resp.code !in 200..299) throw classify(resp.code, "下载失败（HTTP ${resp.code}）")
+                val body = resp.body
+                val total = body.contentLength().takeIf { it > 0 } ?: expectedSize?.takeIf { it > 0 }
+                if (total != null && total > MAX_DOWNLOAD_BYTES) {
+                    throw ProviderException(ProviderErrorCode.NETWORK, "文件过大，已拒绝下载")
+                }
+                var received = 0L
+                FileOutputStream(target).use { out ->
+                    val buffer = ByteArray(64 * 1024)
+                    body.byteStream().use { input ->
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            received += read
+                            if (received > MAX_DOWNLOAD_BYTES) {
+                                throw ProviderException(ProviderErrorCode.NETWORK, "文件过大，已拒绝下载")
+                            }
+                            out.write(buffer, 0, read)
+                            onProgress(received, total)
+                        }
+                    }
+                }
+                if (total != null && received != total) {
+                    throw ProviderException(ProviderErrorCode.NETWORK, "下载文件大小与服务端声明不符")
+                }
+                received
+            }
+        }
+    }
+
+    private fun openDownload(url: String): Response {
+        val parsed = runCatching { URL(url) }.getOrNull()
+            ?: throw ProviderException(ProviderErrorCode.NETWORK, "下载地址格式无效")
+        if (parsed.protocol != "https") {
+            throw ProviderException(ProviderErrorCode.NETWORK, "下载地址必须使用 HTTPS")
+        }
+        return client.newCall(Request.Builder().url(url).get().build()).execute()
     }
 
     suspend fun getQuota(session: AuthSession): Result<Quota> = withContext(Dispatchers.IO) {
@@ -381,8 +453,9 @@ class ZLibraryApi(
     private fun String?.orElse(default: String): String = this ?: default
 
     companion object {
-        /** 封面是Decoration资源，限制单张 2 MiB，防止异常响应占用内存。 */
+        /** 封面装饰资源限制单张 2 MiB；正文下载上限 1 GiB，与现有云端下载一致。 */
         const val MAX_COVER_BYTES = 2L * 1024 * 1024
+        const val MAX_DOWNLOAD_BYTES = 1024L * 1024 * 1024
 
         fun buildClient(config: ZLibraryConfig): OkHttpClient = OkHttpClient.Builder()
             .followRedirects(false)

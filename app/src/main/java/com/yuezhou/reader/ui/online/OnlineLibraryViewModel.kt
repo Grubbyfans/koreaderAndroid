@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yuezhou.reader.core.cloud.BackendKind
+import com.yuezhou.reader.ReaderActivity
+import com.yuezhou.reader.core.online.model.BookDownloadRequest
 import com.yuezhou.reader.core.online.model.OnlineBook
 import com.yuezhou.reader.core.online.model.OnlinePageMerger
 import com.yuezhou.reader.core.online.model.ProviderErrorCode
@@ -21,6 +23,7 @@ import com.yuezhou.reader.reader.CloudCredentialStore
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.online.cloud.BaiduBookProvider
 import com.yuezhou.reader.reader.online.cloud.WebDavBookProvider
+import com.yuezhou.reader.reader.online.download.BookDownloadManager
 import com.yuezhou.reader.reader.online.zlibrary.ZLibraryBookProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -72,6 +75,14 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
 
     val registry = ProviderRegistry(listOf(baiduProvider, webDavProvider, zLibraryProvider))
 
+    /** 统一下载管理器：并发 2、进度节流、恢复与覆盖确认由 reader 层负责。 */
+    val downloadManager = BookDownloadManager(
+        context,
+        registry,
+        notifier = AppDownloadNotifier(context),
+        isBookOpen = ReaderActivity::isBookOpen,
+    )
+
     var selectedProviderId: String by mutableStateOf("baidu")
         private set
 
@@ -105,6 +116,8 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         get() = registry.get(selectedProviderId) is CatalogBookProvider
 
     init {
+        // 进程重启后只标记中断任务为失败，不自动重新申请额度。
+        viewModelScope.launch { downloadManager.recoverInterrupted() }
         // 沿用用户已有的同步后端选择，避免切换入口后目标云端发生变化。
         viewModelScope.launch {
             val active = CloudCredentialStore(context).load().activeBackend
@@ -355,6 +368,28 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         val id = selectedProviderId
         detailSeq[id] = (detailSeq[id] ?: 0) + 1
         states[id] = stateOf(id).copy(detail = null, detailLoading = false, detailMessage = null)
+    }
+
+    /** 从详情页发起下载：文件名唯一性检查与覆盖确认在管理器/导入协调器中完成。 */
+    fun enqueueDownload(book: OnlineBook) {
+        val id = selectedProviderId
+        val provider = registry.get(id)
+        if (provider !is CatalogBookProvider || !provider.capabilities.contains(
+                com.yuezhou.reader.core.online.provider.ProviderCapability.DOWNLOAD,
+            )
+        ) return
+        viewModelScope.launch {
+            downloadManager.enqueue(
+                BookDownloadRequest(
+                    providerId = id,
+                    accountScope = zLibraryProvider.currentAccount().orEmpty(),
+                    remoteId = book.remoteId,
+                    fileName = book.fileName,
+                    expectedSize = book.fileSize,
+                ),
+                title = book.title,
+            )
+        }
     }
 
     fun setAutoImport(value: Boolean) {

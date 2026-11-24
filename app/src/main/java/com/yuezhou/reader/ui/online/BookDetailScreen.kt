@@ -1,5 +1,10 @@
 package com.yuezhou.reader.ui.online
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +61,10 @@ fun BookDetailScreen(
     onBack: () -> Unit,
 ) {
     var descriptionExpanded by remember(book.remoteId) { mutableStateOf(false) }
+    val context = LocalContext.current
+    val requestNotificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* 未授权也继续下载，仅不显示进度通知 */ }
 
     Scaffold(
         containerColor = YuezhouColors.Background,
@@ -199,12 +210,24 @@ fun BookDetailScreen(
             }
 
             Spacer(Modifier.height(16.dp))
-            Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                Text("下载书籍（后续阶段接入）")
+            Button(
+                onClick = {
+                    if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.POST_NOTIFICATIONS,
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    vm.enqueueDownload(book)
+                    vm.closeDetail()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("下载书籍")
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "下载将校验文件并按文件名判断同名书籍；覆盖需你确认。",
+                "下载将校验文件并按文件名判断同名书籍；覆盖需你确认。下载可能消耗额度。",
                 style = MaterialTheme.typography.bodySmall,
                 color = YuezhouColors.TextSecondary,
             )

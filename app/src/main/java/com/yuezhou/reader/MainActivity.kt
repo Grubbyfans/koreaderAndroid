@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import com.yuezhou.reader.reader.db.SyncLogEntity
+import com.yuezhou.reader.reader.online.mapping.OnlineBookMappingStore
 import com.yuezhou.reader.speech.SpeechDiagnosticsState
 import com.yuezhou.reader.speech.KokoroImportState
 import com.yuezhou.reader.speech.SpeechRuntime
@@ -123,6 +124,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yuezhou.reader.ui.online.DownloadManagerScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryViewModel
 import com.yuezhou.reader.ui.online.ServerSettingsScreen
@@ -370,6 +372,9 @@ private fun BookshelfScreen() {
     BackHandler(enabled = showServerSettings) { showServerSettings = false }
     BackHandler(enabled = !showServerSettings && showZLibrarySettings) { showZLibrarySettings = false }
     BackHandler(enabled = !showServerSettings && !showZLibrarySettings && showSyncLogPage) { showSyncLogPage = false }
+    // 统一下载管理页：覆盖在主界面之上，返回键逐层退出。
+    var showOnlineDownloads by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = showOnlineDownloads) { showOnlineDownloads = false }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -453,7 +458,7 @@ private fun BookshelfScreen() {
                         }
                         // 下载任务入口：固定在书库标题栏右上角，无任务时也可查看历史
                         if (currentTab == Tab.书架) {
-                            IconButton(onClick = { downloadTasksOpen = true }) {
+                            IconButton(onClick = { showOnlineDownloads = true }) {
                                 AnimatedDownloadIcon(
                                     downloading = downloadTask?.status == DownloadStatus.Downloading,
                                 )
@@ -588,6 +593,26 @@ private fun BookshelfScreen() {
         }
     }
 
+    // 统一下载管理（阶段 E）：在线任务与既有云端下载入口并列，不改动原下载弹窗。
+    if (showOnlineDownloads) {
+        DownloadManagerScreen(
+            vm = onlineVm,
+            onBack = { showOnlineDownloads = false },
+            onOpenBook = { bookId ->
+                showOnlineDownloads = false
+                context.startActivity(
+                    Intent(context, ReaderActivity::class.java).apply {
+                        putExtra(ReaderActivity.EXTRA_BOOK_ID, bookId)
+                    },
+                )
+            },
+            onOpenLegacyDownloads = {
+                showOnlineDownloads = false
+                downloadTasksOpen = true
+            },
+        )
+    }
+
     if (showHiddenBooks) {
         AlertDialog(
             onDismissRequest = { showHiddenBooks = false },
@@ -638,6 +663,10 @@ private fun BookshelfScreen() {
                     scope.launch {
                         try {
                             val result = store.removeBooks(toDelete, ReaderActivity::isBookOpen)
+                            // 本地书籍删除后同步失效在线映射，避免仍显示为「已下载」。
+                            books.filter { it.bookId in result.removed }.forEach { book ->
+                                runCatching { OnlineBookMappingStore.deactivateByFileName(context, book.fileName) }
+                            }
                             refreshKey++
                             val failures = result.failures.entries.joinToString("；") { (id, reason) -> "$id：$reason" }
                             status = "已删除 ${result.removed.size} 本本机文件" +

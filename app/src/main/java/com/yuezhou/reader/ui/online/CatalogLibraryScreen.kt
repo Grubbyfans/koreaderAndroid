@@ -46,6 +46,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.model.OnlineBook
 import kotlinx.coroutines.Dispatchers
@@ -83,6 +84,7 @@ fun CatalogLibraryScreen(
     state: ProviderUiState,
     onOpenSettings: () -> Unit,
 ) {
+    val downloadedIds by vm.downloadManager.activeRemoteIds.collectAsStateWithLifecycle(initialValue = emptySet())
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = state.scrollIndex)
     LaunchedEffect(gridState.firstVisibleItemIndex) { vm.saveScroll(gridState.firstVisibleItemIndex) }
     LaunchedEffect(state.submittedKeyword) {
@@ -207,7 +209,7 @@ fun CatalogLibraryScreen(
                     )
                 }
             }
-            else -> CatalogResults(vm, state, gridState)
+            else -> CatalogResults(vm, state, gridState, downloadedIds)
         }
     }
 }
@@ -217,6 +219,7 @@ private fun CatalogResults(
     vm: OnlineLibraryViewModel,
     state: ProviderUiState,
     gridState: LazyGridState,
+    downloadedIds: Set<String>,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(if (state.gridMode) 2 else 1),
@@ -227,7 +230,8 @@ private fun CatalogResults(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         items(state.items, key = { it.remoteId }) { book ->
-            if (state.gridMode) GridBookCard(book, vm) else ListBookCard(book, vm)
+            if (state.gridMode) GridBookCard(book, vm, book.remoteId in downloadedIds)
+            else ListBookCard(book, vm, book.remoteId in downloadedIds)
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
             when {
@@ -256,7 +260,7 @@ private fun CatalogResults(
 }
 
 @Composable
-private fun GridBookCard(book: OnlineBook, vm: OnlineLibraryViewModel) {
+private fun GridBookCard(book: OnlineBook, vm: OnlineLibraryViewModel, downloaded: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -288,11 +292,18 @@ private fun GridBookCard(book: OnlineBook, vm: OnlineLibraryViewModel) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (downloaded) {
+            Text(
+                "已下载",
+                style = MaterialTheme.typography.bodySmall,
+                color = YuezhouColors.Brand,
+            )
+        }
     }
 }
 
 @Composable
-private fun ListBookCard(book: OnlineBook, vm: OnlineLibraryViewModel) {
+private fun ListBookCard(book: OnlineBook, vm: OnlineLibraryViewModel, downloaded: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -322,6 +333,9 @@ private fun ListBookCard(book: OnlineBook, vm: OnlineLibraryViewModel) {
                 style = MaterialTheme.typography.bodySmall,
                 color = YuezhouColors.TextSecondary,
             )
+            if (downloaded) {
+                Text("已下载", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.Brand)
+            }
         }
     }
 }
