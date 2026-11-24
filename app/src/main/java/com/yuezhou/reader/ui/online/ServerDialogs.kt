@@ -23,7 +23,11 @@ import com.yuezhou.reader.core.online.config.ServerCandidate
 import com.yuezhou.reader.core.online.config.ServerImportPreview
 import com.yuezhou.reader.core.online.config.ServerUrlPolicy
 
-/** 新增/编辑候选弹窗：地址输入、启用开关、取消、保存。保存后由调用方清空探测状态标记为未检测。 */
+/**
+ * 新增/编辑共用弹窗（服务器设置优化 §6）：
+ * 只输入服务器地址，校验格式、处理首尾空格与末尾斜杠；新增默认启用，启用状态由列表开关管理。
+ * 保存后由调用方清空该地址检测缓存并标记为未检测。
+ */
 @Composable
 fun CandidateEditorDialog(
     title: String,
@@ -32,7 +36,6 @@ fun CandidateEditorDialog(
     onSave: (ServerCandidate) -> Unit,
 ) {
     var url by remember { mutableStateOf(initial.baseUrl) }
-    var enabled by remember { mutableStateOf(initial.enabled) }
     val error = ServerUrlPolicy.validate(url)
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -42,26 +45,52 @@ fun CandidateEditorDialog(
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("HTTPS 地址（不含路径）") },
+                    label = { Text("服务器地址（https://）") },
+                    placeholder = { Text("https://server.example.com") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     isError = url.isNotBlank() && error != null,
                 )
                 if (url.isNotBlank() && error != null) {
+                    Spacer(Modifier.height(4.dp))
                     Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = enabled, onCheckedChange = { enabled = it })
-                    Text("启用该候选")
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                onSave(initial.copy(baseUrl = url.trim().trimEnd('/'), enabled = enabled))
-            }, enabled = error == null) { Text("保存") }
+            TextButton(
+                onClick = { onSave(initial.copy(baseUrl = url.trim().trimEnd('/'))) },
+                enabled = error == null,
+            ) { Text("保存") }
         },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/** 删除服务器二次确认（服务器设置优化 §7.1）。 */
+@Composable
+fun ConfirmDeleteDialog(
+    candidate: ServerCandidate,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除服务器") },
+        text = { Text("确定删除 ${candidate.baseUrl} 吗？此操作不可撤销。") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("删除") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/** 恢复默认服务器列表二次确认（§10）。 */
+@Composable
+fun ConfirmResetDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("恢复默认服务器列表") },
+        text = { Text("将清空当前所有服务器地址（不写入占位地址），不影响账号及其他书源设置。该操作可回滚。") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("确认恢复") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
@@ -94,12 +123,13 @@ fun ImportPreviewDialog(
                 }
                 if (confirmReplace) {
                     Spacer(Modifier.height(8.dp))
-                    Text("替换会移除当前列表中的候选项，此操作不可撤销（可在配置管理中回滚）。", style = MaterialTheme.typography.bodySmall)
+                    Text("替换会移除当前列表中的服务器，此操作不可撤销（可在配置管理中回滚）。", style = MaterialTheme.typography.bodySmall)
                 } else {
                     Spacer(Modifier.height(8.dp))
+                    Text("默认合并：保留现有项，仅追加新地址。", style = MaterialTheme.typography.bodySmall)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = replace, onCheckedChange = onReplaceChange)
-                        Text("替换当前列表（默认合并）")
+                        Text("替换当前列表")
                     }
                 }
             }
