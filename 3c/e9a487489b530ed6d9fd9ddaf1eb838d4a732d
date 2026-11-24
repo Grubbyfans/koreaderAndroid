@@ -1,0 +1,20 @@
+core/src/main/java/com/yuezhou/reader/core/online/api/ServerProbeClient.kt
+  h_7f20b2a03eb3b6 1-94
+core/src/main/java/com/yuezhou/reader/core/online/config/ServerDiscovery.kt
+  h_7f20b2a03eb3b6 1-113
+core/src/main/java/com/yuezhou/reader/core/online/config/ZLibraryConfig.kt
+  h_7f20b2a03eb3b6 57-58,192
+core/src/test/java/com/yuezhou/reader/core/online/ServerDiscoveryTest.kt
+  h_7f20b2a03eb3b6 1-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3ce9a487489b530ed6d9fd9ddaf1eb838d4a732d",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
