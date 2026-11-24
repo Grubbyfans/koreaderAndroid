@@ -142,7 +142,7 @@
 1. 方案 `pageSize=20`；参考实现固定 `limit=30`。
 2. 方案 `sort="relevance"` 字符串；参考实现为 `order[1]` 数组。
 3. 方案 JSON 配置结构（`schemaVersion/servers/network/endpoints/preferences`）在参考仓库**不存在**，属全新设计，需自建校验与转换层。
-4. 方案 `RemoteBook.isbn/resourceHash` 在参考仓库无直接对应（`identifier` 可能是 ISBN，`hash` 是书 hash 非文件 SHA-256）；SHA-256 三级去重需自研。
+4. 方案 `RemoteBook.isbn/resourceHash` 在参考仓库无直接对应；`resourceHash` 与哈希判重设计已按最终确认删除（`identifier` 可能是 ISBN，`hash` 是书 hash 非文件 SHA-256）。
 5. 方案要求 EPUB ZIP/mimetype/container.xml/OPF 校验、ZIP bomb 与路径穿越防护；参考仓库无此能力，现有 `CoverExtractor.validatePackage()` 也不完整。
 6. 方案要求断点续传需确认服务支持；参考实现未体现 Range 语义，**不可假设支持**。
 7. 文案需明确：未登录可搜索，**下载才需登录且计额度**。
@@ -159,12 +159,12 @@
 | `BookProvider` / `ProviderRegistry` / `ProviderCapability` / `CloudBookProvider` / `CatalogBookProvider` | Kotlin 零命中 | ❌ 全部新增 |
 | `RemoteBook` | 仅 `CloudSync.RemoteBook`（6 字段 UI 模型） | ⚠️ 名称冲突，另建模型，不改原类 |
 | `BookDownloadManager` / `DownloadTask` / `DownloadRepository` / `OnlineBookCache` | 零实现；只有 UI 内存 `downloadTask` | ❌ 全部新增 |
-| `remoteId` / `accountScope` / `fileHash` 映射 | 无；身份为文件名去扩展名 | ❌ 新增映射表，原 bookId 规则不动 |
-| 「不新增底部一级入口」 | 底部仅「书架/设置」，云端为二级切换 | ⚠️ 与线框图三入口矛盾，需确认（§7） |
+| `remoteId` / `accountScope` 映射 | 无；身份为文件名去扩展名；唯一性按文件名（含扩展名） | ❌ 新增映射表（不用于判重），原 bookId 规则不动 |
+| 「不新增底部一级入口」 | 底部仅「书架/设置」，云端为二级切换 | ✅ 已确认保持两项，书源 Tab 置于云端作用域内 |
 | 云端搜索 / 布局切换 / 进度展示 | 无 | ❌ 新增 UI 状态与组件，复用卡片 |
-| 数据库增量迁移 | Room v5、4 表、非破坏迁移 | ✅ 可加 6→7（或 5→6）增量表 |
+| 数据库增量迁移 | Room v5、4 表、非破坏迁移 | ✅ 已确认仅新增 2 张表（5→6） |
 | 复用现有认证 | 百度 OAuth OOB、WebDAV Basic + Keystore 加密 | ✅ 不改；新源独立凭证存储 |
-| 复用现有导入 | `EpubImporter` + `CoverExtractor.validatePackage()` | ⚠️ 需补 EPUB 安全校验与去重前置 |
+| 复用现有导入 | `EpubImporter` + `CoverExtractor.validatePackage()` | ⚠️ 需补 EPUB 安全校验；同名覆盖弹窗前置拦截 |
 | 后台下载机制 | 前台 Service + 协程，无 WorkManager | ✅ 复用 `DownloadForegroundService` 模式 |
 | 测试版包名 | `com.yuezhou.reader.tts.test`，名称「静读测试版」 | ✅ 保持 |
 | 强制保护范围 | foliate-js、Sherpa/Kokoro、TTS、位置算法、KOReader 协议与云端索引 | ✅ 全部零改动 |
@@ -172,14 +172,16 @@
 
 ---
 
-## 7. 需用户确认的修订点（保持兼容优先）
+## 7. 最终确认结论（2026-11-24，最高优先级）
 
-1. **导航入口**（重要）：方案 §3 文字说「不新增底部一级入口」，线框图却画了「本地书库｜在线书库｜设置」三个底部入口。建议**保持现有两项底部导航**，在书架页「云端」作用域内新增书源横条（百度网盘 / WebDAV / Z-Library），「下载管理」「书源管理」作为在线页顶部按钮或设置页子入口；不改动 `BottomNavBar`。请确认。
-2. **模型命名**：为避免影响 `CloudSync.RemoteBook`，新增模型置于 `core/online/model` 并命名 `RemoteBook`（不同包），或统一叫 `OnlineBook`。建议后者，减少歧义。请确认。
-3. **数据库范围**：方案建议 4 张新表；建议先只新增 `online_download_task`、`online_book_mapping` 两张（下载恢复与去重需要），书源配置用 `files/providers/configs/*.json`（天然支持导入/回滚），搜索/详情缓存用内存 + 现有磁盘封面缓存。请确认。
-4. **Z-Library 默认值**：按参考仓库修正为 `limit=30`、`order` 数组、`POST /eapi/book/search`，并在 UI 明示「未登录可搜索，下载需登录」。请确认。
-5. **许可与合规**：参考仓库 AGPL-3.0，采用干净重写；是否需要对「借鉴协议语义」留存设计记录以备法务审查。请确认。
-6. **EPUB 文件名冲突**：现有 `EpubImportFiles.install()` 为同名覆盖。方案要求「不同译本不得自动合并、不得静默覆盖」，需由新导入协调器在调用现有导入器**之前**生成唯一文件名（如追加短 hash），并建立 `remoteId → localBookId` 映射；原导入器保持不变。请确认该策略。
+以下六项已由用户最终确认；与原方案冲突时以本节为准。
+
+1. **导航入口：保持两项底部导航，不新增底部项。** 百度网盘、WebDAV、Z-Library 统一放在书架页「云端」作用域内，通过顶部书源 Tab 切换；本地书库页面及导航结构不变；百度/WebDAV 保留原有云端书库功能；Z-Library 使用独立检索型书库页面；各书源独立维护搜索条件、筛选、分页及滚动位置，切换书源不重复加载已有数据；下载管理与书源配置使用统一入口；UI 风格与现有界面一致。
+2. **模型命名：使用 `OnlineBook`。** 保留 `CloudSync.RemoteBook` 及原有云端同步模型/业务逻辑不变；通过 Mapper/Adapter 实现各书源数据转换；`OnlineBook` 仅用于在线书籍展示、搜索、详情、下载；远程 ID 不替代本地 `bookId`；KOReader 书籍标识规则不变。
+3. **数据库：仅新增 `online_download_task` 与 `online_book_mapping` 两张表。** 前者用于下载任务管理/状态/失败重试/历史记录，后者维护在线与本地书籍关联及下载状态展示；书源配置用 JSON 文件管理，不新增配置表；搜索结果优先内存缓存；封面复用现有图片缓存；暂不新增在线元数据缓存表；敏感凭证独立加密存储，不写入 JSON 配置；`online_book_mapping` **不作为书籍重复判断依据**；仅必要增量迁移。
+4. **Z-Library 接口与默认参数：以参考源码为准。** `limit=30`、`order` 数组、`POST /eapi/book/search`；其他接口以实际参考源码和接口验证结果为准；采用「搜索免登录、下载需登录」，登录成功后恢复原下载操作（无需重新搜索或选书），取消/失败保留页面状态；支持额度查询展示；不绕过权限、额度、访问限制，仅用合法授权资源验证；配置支持内置默认、外部 JSON 导入、服务器与路径配置、版本管理、格式校验、连接测试、回滚与恢复默认，导入无效配置不覆盖当前可用配置，凭证不随配置导入导出，不向未信任服务器发送凭证，不引入动态脚本。
+5. **AGPL：同意独立实现。** 保留参考地址、commit `b7eacbab6cd7e64259857424749f0e2f26ff7bc5`、许可证及设计参考记录；参考接口行为、业务流程与架构设计；用静读现有 Android 技术栈独立实现，不复制或逐行翻译受约束源码，不引入 Lua 代码及运行环境；保留第三方参考说明；不视为自动免除许可证义务；后续公开分发/开源/商业化需重新评估。
+6. **唯一性判断：改为文件名（含扩展名）唯一判断。** 文件名相同即同一书，不同即不同书（内容相同亦视为不同）；不使用 SHA-256/MD5/元数据/远程 ID 判重。同名弹窗确认覆盖：取消则取消下载或导入并保留原书，确认则安全替换；不生成唯一文件名、不加 `(1)/(2)` 后缀、不提供「保留两个版本」。下载前能确定文件名时先检查，不能确定时确定后检查，正式导入前再次检查；使用独立临时文件；校验通过且用户确认后才替换；安全替换（必要时备份），失败可恢复；同名覆盖串行执行，正在阅读的书待释放后覆盖；失败/取消不得损坏原书。覆盖后保留 bookId、DB 记录、进度、书签、历史与云端同步关系，重提元数据、更新大小/时间、刷新封面、清理旧章解析及阅读缓存、刷新书库，不主动重置进度、不改云端文件。统一适用于三个书源及后续书源；原有云端同步冲突机制不变。删除原三级去重、哈希判重、元数据判重、三选一弹窗、自动唯一文件名设计；EPUB 校验仅判断文件有效性。
 
 ---
 
@@ -234,9 +236,9 @@
 | `.../online/cloud/BaiduBookProvider.kt` / `WebDavBookProvider.kt` | 委托 `CloudSync`，补 `listBooks/getBookDetail/download/upload` |
 | `.../online/credential/OnlineCredentialStore.kt` | 新书源凭证独立加密存储（Keystore 新别名） |
 | `.../online/cache/OnlineBookCache.kt` | 搜索结果内存 TTL、详情 TTL、服务器探测短缓存 |
-| `.../online/mapping/OnlineBookMappingStore.kt` | remoteId ↔ localBookId ↔ fileHash 查询与更新 |
+| `.../online/mapping/OnlineBookMappingStore.kt` | remoteId ↔ localBookId 关联与下载状态展示（**不作为重复判断依据**） |
 | `.../online/download/BookDownloadManager.kt` / `DownloadRepository.kt` | 并发 2、进度节流、重试策略、取消、重启恢复、幂等 |
-| `.../online/import/OnlineImportCoordinator.kt` | 三级去重、唯一文件名、调用现有导入、导入失败独立重试 |
+| `.../online/import/OnlineImportCoordinator.kt` | 文件名唯一判断、同名覆盖确认、安全替换、调用现有导入、导入失败独立重试 |
 | `.../online/upload/CloudUploadBridge.kt` | 复用 `CloudSync.pushLocal()`，两云端分别记录结果 |
 | `reader/.../db/OnlineDownloadTaskEntity.kt` / `OnlineDownloadTaskDao.kt` / `OnlineBookMappingEntity.kt` / `OnlineBookMappingDao.kt` | Room 增量表与 DAO |
 | `reader/src/main/java/com/yuezhou/reader/reader/online/OnlineFiles.kt` | `files/downloads/temporary`、`pending_import`、`files/providers/configs` 目录 |
@@ -269,7 +271,7 @@
 ### 9.6 新增测试
 
 - `core/src/test/.../online/`：`ZLibraryConfigTest`（校验/回滚/优先级）、`ZLibraryMapperTest`、`ZLibraryErrorClassificationTest`、`DownloadStateMachineTest`、`EpubValidatorTest`（ZIP bomb、路径穿越、HTML 错误页）。
-- `reader/src/test/.../online/`：`OnlineImportCoordinatorTest`（去重、唯一文件名、幂等）、`OnlineBookMappingStoreTest`（如用 Room 需 Robolectric 或纯逻辑抽取）。
+- `reader/src/test/.../online/`：`OnlineImportCoordinatorTest`（文件名唯一判断、同名覆盖确认与取消、安全替换、幂等）、`OnlineBookMappingStoreTest`（如用 Room 需 Robolectric 或纯逻辑抽取）。
 - `tests/` 现有 Node 测试不改；阶段 G 追加在线 UI 关键交互的手工验收脚本/清单。
 
 ---
@@ -282,7 +284,8 @@
 | R2 | Z-Library 非公开 API 变动、域名封锁、bot challenge | 书源随时不可用 | 配置化端点 + 动态域名 + 发现缓存；失败不影响其他书源；不绕过反爬；不承诺稳定性 |
 | R3 | 内容合法性 | 法律风险 | 仅测试/获取具有合法授权的资源；UI 提示合规责任 |
 | R4 | `CloudBackend` 与 `BookProvider` 语义混淆 | 错误抽象导致大改 | 检索源只实现 `CatalogBookProvider`；云源通过 `CloudSync` 委托，不改 `cloud/protocol` |
-| R5 | 同名 EPUB 静默覆盖、译本合并 | 原有书籍/进度丢失 | 新协调器前置唯一文件名 + 映射表；三选一去重弹窗；保留旧书进度 |
+| R5 | 同名 EPUB 静默覆盖导致书籍/进度丢失 | 原有书籍/进度丢失 | 文件名唯一判断；下载前/确定名后/导入前三次检查；同名覆盖确认弹窗；独立临时文件 + 安全替换 + 串行覆盖；保留原进度书签 |
+| R5b | 覆盖后阅读位置偏差 | 阅读体验 | 允许偏差，不主动删除阅读记录；覆盖后重提元数据、刷新封面与缓存 |
 | R6 | `bookId` 规则被改动 | KOReader 同步与进度错乱 | 保持 `BookNames.localId/cloudId` 与 `library.json` 完全不变；remoteId 独立存储 |
 | R7 | 现有 EPUB 校验不足 | 损坏文件/HTML 错误页入库 | 新增 `EpubValidator`，限制解压体积与路径，拒绝错误页；校验在导入前 |
 | R8 | 全局允许明文 HTTP | 新书源凭证被中间人窃取 | Z-Library 强制 HTTPS；重定向校验 Location 主机；凭证不向未知主机转发 |
@@ -305,9 +308,9 @@
 | **B2** | B | 统一入口：书源横条、按源独立状态容器；保留原云端作用域行为 | `MainActivity.kt`（最小）、`OnlineLibraryScreen/ViewModel`、`CloudLibraryScreen` | 切换书源/配置变化不崩溃；本地/云端原行为一致；提交 |
 | **C1** | C | Z-Library 配置模型、内置 JSON、校验与导入回滚、独立凭证存储 | `ZLibraryConfig.kt`、`zlibrary.default.json`、`OnlineCredentialStore.kt`、`ProviderSettingsScreen.kt` | 非法配置不覆盖、凭证不落明文；配置相关单测；提交 |
 | **C2** | C | 网络层：发现、登录、搜索/详情/链接/额度 API、错误分类；单测 | `ZLibraryApi/Auth/Discovery.kt` | 单测覆盖端点构造、重定向主机校验、错误分类；提交 |
-| **D** | D | 检索页：搜索、语言/格式/排序筛选、分页去重、列表/网格、详情与封面；状态恢复 | `CatalogLibraryScreen.kt`、`BookDetailScreen.kt`、`OnlineBookCache.kt` | 分页无重复/过期请求污染；断网保留列表；提交 |
+| **D** | D | 检索页：搜索、语言/格式/排序筛选、分页、列表/网格、详情与封面；状态恢复 | `CatalogLibraryScreen.kt`、`BookDetailScreen.kt`、`OnlineBookCache.kt` | 分页无重复/过期请求污染；断网保留列表；提交 |
 | **E1** | E | 下载任务表、状态机、并发 2、进度节流、取消、通知、重启恢复 | `DownloadTask/State`、`BookDownloadManager`、`DownloadRepository`、`AppDatabase(5→6)`、`DownloadManagerScreen.kt` | 并发下载不卡 UI；退出重进恢复队列；提交 |
-| **E2** | E | `EpubValidator`、三级去重、唯一文件名、导入协调器、导入失败独立重试 | `EpubValidator.kt`、`OnlineImportCoordinator.kt`、`OnlineBookMapping*` | 损坏/HTML 页拒绝入库；不静默覆盖；幂等重试；提交 |
+| **E2** | E | `EpubValidator`、文件名唯一判断与同名覆盖确认、安全替换、导入协调器、导入失败独立重试 | `EpubValidator.kt`、`OnlineImportCoordinator.kt`、`OnlineBookMapping*` | 损坏/HTML 页拒绝入库；同名弹窗取消保留原书、确认后进度书签不丢；幂等重试；提交 |
 | **F** | F | 完成后手动上传百度/WebDAV，复用 `CloudSync.pushLocal()` 与索引；KOReader 同步兼容验证 | `CloudUploadBridge.kt`、下载完成 UI | 两云端分别记结果；进度双向同步与原有测试通过；提交 |
 | **G** | G | 全量回归、安全测试（凭证/重定向/ZIP/空间）、性能、打包；修订文档 | 测试清单与打包产物 | `./gradlew test`、`:app:lintTtsTestDebug`、`:app:assembleTtsTestDebug`、`:app:assembleProductionRelease`；逐主题提交 |
 
@@ -321,7 +324,8 @@
 
 - **回归基线**：节点 B1 后即跑一次「本地 EPUB 导入阅读 / 原生 TTS / Kokoro 朗读 / 百度上传下载 / WebDAV 上传下载 / KOReader 进度双向同步 / 原有书籍书签进度无丢失」，每节点结束复跑关键项。
 - **书源隔离**：断开 Z-Library 服务后，百度/WebDAV 仍可用；反之亦然。
-- **下载安全**：用构造的 HTML 错误页、超限 ZIP、路径穿越 ZIP、同名不同内容 EPUB 验证拒绝/去重行为。
+- **下载安全**：用构造的 HTML 错误页、超限 ZIP、路径穿越 ZIP、同名不同内容 EPUB 验证拒绝与覆盖确认行为。
+- **覆盖安全**：同名文件取消覆盖保留原书；确认覆盖后 bookId/进度/书签/历史/云端关系保留，文件与元数据/封面已刷新；并发下载串行覆盖不冲突；阅读中书籍不直接替换。
 - **额度约束**：模拟重启，确认不自动重新申请下载、`IMPORT_FAILED` 只重试导入。
 - **迁移**：从当前 v5 数据库升级到 v6，确认 4 张旧表数据与本地书籍文件完好。
 - **打包**：测试版与正式版共存，测试版升级保留数据，应用名与包名不变。
@@ -329,6 +333,6 @@
 
 ---
 
-## 13. 阶段 A 暂停声明
+## 13. 阶段 A 最终确认与阶段 B 启动
 
-阶段 A 仅完成分析、设计、风险识别与计划输出，**未编写任何业务代码、未改动现有源码**。请确认 §7 的 6 个修订点与 §11 的节点划分；确认后再进入阶段 B1。每完成一个节点，我会立即做一次本地提交（简体中文提交信息）。
+阶段 A 已完成分析、设计、风险识别与计划输出，未改动业务源码。用户已最终确认 §7 六项结论；本次确认与原方案冲突处以确认结论为准。据此进入阶段 B（B1 Provider 抽象与云书源适配 → B2 统一入口与书源切换 UI），阶段 B 完成后汇报并暂停，不自动进入阶段 C。每完成一个节点立即做一次本地提交（简体中文提交信息）。
