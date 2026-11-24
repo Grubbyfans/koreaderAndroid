@@ -1,0 +1,34 @@
+core/src/main/java/com/yuezhou/reader/core/online/model/OnlineBook.kt
+  h_7f20b2a03eb3b6 1-30
+core/src/main/java/com/yuezhou/reader/core/online/model/ProviderModels.kt
+  h_7f20b2a03eb3b6 1-54
+core/src/main/java/com/yuezhou/reader/core/online/model/SearchQuery.kt
+  h_7f20b2a03eb3b6 1-20
+core/src/main/java/com/yuezhou/reader/core/online/provider/BookProvider.kt
+  h_7f20b2a03eb3b6 1-49
+core/src/main/java/com/yuezhou/reader/core/online/provider/ProviderCapability.kt
+  h_7f20b2a03eb3b6 1-16
+core/src/main/java/com/yuezhou/reader/core/online/provider/ProviderRegistry.kt
+  h_7f20b2a03eb3b6 1-60
+core/src/test/java/com/yuezhou/reader/core/online/ProviderContractTest.kt
+  h_7f20b2a03eb3b6 1-82
+reader/src/main/java/com/yuezhou/reader/reader/CloudSync.kt
+  h_7f20b2a03eb3b6 90-94,99-103,118-119,127-128,136-137,143-144,168-169,187,198,365,368,435-436,447,450,568,577
+reader/src/main/java/com/yuezhou/reader/reader/online/cloud/BaiduBookProvider.kt
+  h_7f20b2a03eb3b6 1-21
+reader/src/main/java/com/yuezhou/reader/reader/online/cloud/CloudBookProviderBase.kt
+  h_7f20b2a03eb3b6 1-175
+reader/src/main/java/com/yuezhou/reader/reader/online/cloud/WebDavBookProvider.kt
+  h_7f20b2a03eb3b6 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dca20fef0a88a9fd354b67131eb63f74b2bac267",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
