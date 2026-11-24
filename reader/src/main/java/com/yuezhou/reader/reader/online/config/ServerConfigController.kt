@@ -61,20 +61,18 @@ class ServerConfigController(private val store: ZLibraryConfigStore) {
         discovery.invalidate()
         val decision = discovery.resolve(config, store.loadState(), ::probeWithConfig, force = true, onResult = onResult)
         if (decision.results.isNotEmpty()) {
-            // 只有探测成功选中时才写入最近可用地址缓存；失败不覆盖上一次成功的缓存。
-            val state = if (decision.selectedBaseUrl != null) {
-                DiscoveryState(
-                    lastAvailableBaseUrl = decision.selectedBaseUrl,
-                    lastCheckedAt = System.currentTimeMillis(),
-                    configRevision = decision.revision,
-                )
-            } else {
-                DiscoveryState(
-                    lastAvailableBaseUrl = null,
-                    lastCheckedAt = System.currentTimeMillis(),
-                    configRevision = decision.revision,
-                )
-            }
+            // 只有选中项实际探测可用才写入最近可用地址缓存；失败不覆盖上一次成功的缓存。
+            val selectedAvailable = decision.selectedBaseUrl?.let { url ->
+                decision.results.any { result ->
+                    result.status == com.yuezhou.reader.core.online.config.ProbeStatus.AVAILABLE.name &&
+                        url.equals(config.servers.candidates.firstOrNull { it.id == result.candidateId }?.baseUrl, ignoreCase = true)
+                }
+            } == true
+            val state = DiscoveryState(
+                lastAvailableBaseUrl = if (selectedAvailable) decision.selectedBaseUrl else null,
+                lastCheckedAt = System.currentTimeMillis(),
+                configRevision = decision.revision,
+            )
             store.saveState(state)
         }
         return decision

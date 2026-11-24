@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,13 +32,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import com.yuezhou.reader.YuezhouColors
+import com.yuezhou.reader.core.online.config.DiscoveryState
+import com.yuezhou.reader.core.online.config.ServerMode
+import com.yuezhou.reader.core.online.config.ZLibraryConfig
 import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
 import com.yuezhou.reader.reader.online.zlibrary.ZLibraryBookProvider
 import kotlinx.coroutines.launch
@@ -56,9 +63,7 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
 
     var config by remember { mutableStateOf(store.load()) }
     var message by remember { mutableStateOf<String?>(null) }
-    var connectionTestResult by remember { mutableStateOf<String?>(null) }
-    var showEdit by remember { mutableStateOf(false) }
-    var serverText by remember { mutableStateOf(config.servers.baseUrls.joinToString("\n")) }
+    var serverState by remember { mutableStateOf(store.loadState()) }
     var languageText by remember { mutableStateOf(config.preferences.defaultLanguage) }
     var pageSizeText by remember { mutableStateOf(config.preferences.pageSize.toString()) }
     val provider = remember(context, config) { ZLibraryBookProvider(context) }
@@ -85,7 +90,6 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
                     store.save(imported).fold(
                         onSuccess = {
                             config = imported
-                            serverText = imported.servers.baseUrls.joinToString("\n")
                             languageText = imported.preferences.defaultLanguage
                             pageSizeText = imported.preferences.pageSize.toString()
                             message = "配置已导入并应用"
@@ -156,50 +160,39 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
                 .padding(padding)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
+            // 服务器区域（方案 §2.1）：统一为单一「服务器管理」入口，只展示模式、当前地址、最近检测状态。
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenServerSettings() },
                 shape = RoundedCornerShape(16.dp),
                 color = YuezhouColors.Surface,
                 border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("服务器", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        if (store.hasCustomConfig()) config.servers.baseUrls.joinToString("\n")
-                        else "当前使用内置默认占位地址，请配置你有权访问的 HTTPS 服务器",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "配置版本 ${config.configVersion} · ${config.servers.mode} 模式",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row {
-                        TextButton(onClick = { serverText = config.servers.baseUrls.joinToString("\n"); showEdit = true }) {
-                            Text("编辑地址")
-                        }
-                        TextButton(onClick = {
-                            scope.launch {
-                                connectionTestResult = "正在测试…"
-                                store.testConnection(config).fold(
-                                    onSuccess = { connectionTestResult = it },
-                                    onFailure = { connectionTestResult = "连接测试失败：${it.message ?: "未知错误"}" },
-                                )
-                            }
-                        }) { Text("连接测试") }
-                    }
-                    TextButton(onClick = onOpenServerSettings) { Text("服务器配置（候选列表 / 自动检测）") }
-                    connectionTestResult?.let { result ->
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("服务器管理", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            result,
+                            serverModeLabel(config) + " · " + serverConnectionLabel(config, serverState),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            currentServerAddress(config, serverState) ?: "尚未配置服务器地址",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (result.startsWith("连接测试失败")) MaterialTheme.colorScheme.error
-                                    else YuezhouColors.TextSecondary,
+                            color = YuezhouColors.TextSecondary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "进入服务器管理",
+                        tint = YuezhouColors.TextSecondary,
+                    )
                 }
             }
 
@@ -267,7 +260,7 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
                                 store.rollback().fold(
                                     onSuccess = {
                                         config = it
-                                        serverText = it.servers.baseUrls.joinToString("\n")
+                                        serverState = store.loadState()
                                         message = "已回滚到上一份配置"
                                     },
                                     onFailure = { message = "回滚失败：${it.message ?: "未知错误"}" },
@@ -279,7 +272,7 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
                                 store.reset().fold(
                                     onSuccess = {
                                         config = it
-                                        serverText = it.servers.baseUrls.joinToString("\n")
+                                        serverState = store.loadState()
                                         message = "已恢复默认配置（可回滚）"
                                     },
                                     onFailure = { message = "恢复默认失败：${it.message ?: "未知错误"}" },
@@ -349,45 +342,6 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
         }
     }
 
-    if (showEdit) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showEdit = false },
-            title = { Text("服务器地址") },
-            text = {
-                Column {
-                    Text(
-                        "每行一个 HTTPS 地址；默认地址为占位，请使用你有权访问的服务器。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = serverText,
-                        onValueChange = { serverText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 2,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val urls = serverText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-                    val updated = config.copy(servers = config.servers.copy(baseUrls = urls))
-                    scope.launch {
-                        store.save(updated).fold(
-                            onSuccess = {
-                                config = it
-                                message = "服务器地址已保存"
-                                showEdit = false
-                            },
-                            onFailure = { message = "保存失败：${it.message ?: "未知错误"}" },
-                        )
-                    }
-                }) { Text("保存") }
-            },
-            dismissButton = { TextButton(onClick = { showEdit = false }) { Text("取消") } },
-        )
-    }
-
     if (showLogin) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showLogin = false },
@@ -438,4 +392,27 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
             },
         )
     }
+}
+
+/** 服务器管理入口摘要：模式名（服务器设置优化 §4.2/§4.3 重命名）。 */
+private fun serverModeLabel(config: ZLibraryConfig): String =
+    if (ServerMode.fromWire(config.servers.mode) == ServerMode.MANUAL) "手动选择" else "自动选择"
+
+/** 最近一次连接检测状态文案（来自运行状态，不使用模拟值）。 */
+private fun serverConnectionLabel(config: ZLibraryConfig, state: DiscoveryState): String {
+    if (config.servers.candidates.isEmpty()) return "未配置服务器"
+    val checkedAt = state.lastCheckedAt ?: return "尚未检测"
+    val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(checkedAt))
+    return if (state.lastAvailableBaseUrl != null) "连接正常 · $time" else "连接失败 · $time"
+}
+
+/** 当前生效服务器地址（两页共用同一状态来源）：手动取选中项，自动优先取最近探测可用项。 */
+private fun currentServerAddress(config: ZLibraryConfig, state: DiscoveryState): String? {
+    val candidates = config.servers.candidates
+    if (ServerMode.fromWire(config.servers.mode) == ServerMode.MANUAL) {
+        return candidates.firstOrNull { it.id == config.servers.manualSelectedServerId }?.baseUrl
+    }
+    val recent = state.lastAvailableBaseUrl
+    return candidates.firstOrNull { it.baseUrl.equals(recent, ignoreCase = true) }?.baseUrl
+        ?: config.servers.baseUrls.firstOrNull()
 }
