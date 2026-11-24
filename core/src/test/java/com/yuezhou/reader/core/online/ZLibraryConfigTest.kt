@@ -109,7 +109,7 @@ class ZLibraryConfigTest {
             ),
         )
         val migrated = ZLibraryConfigMigration.normalize(legacy)
-        assertEquals(2, migrated.schemaVersion)
+        assertEquals(3, migrated.schemaVersion)
         assertEquals(2, migrated.servers.candidates.size)
         assertEquals("https://b.example.com", migrated.servers.candidates[0].baseUrl)
         assertEquals(1, migrated.servers.candidates[0].priority)
@@ -134,8 +134,9 @@ class ZLibraryConfigTest {
     }
 
     @Test
-    fun `手动模式只使用固定地址且模式保留`() {
+    fun `手动模式旧固定地址迁移为统一候选并建立选择关系`() {
         val config = ZLibraryConfig.DEFAULT.copy(
+            schemaVersion = 2,
             servers = ZLibraryConfig.DEFAULT.servers.copy(
                 mode = ServerMode.MANUAL.wire,
                 manualBaseUrl = "https://manual.example.com",
@@ -143,8 +144,55 @@ class ZLibraryConfigTest {
             ),
         )
         val normalized = ZLibraryConfigMigration.normalize(config)
+        // 旧手动地址并入统一候选列表，baseUrls 镜像指向选中项。
+        assertEquals(2, normalized.servers.candidates.size)
         assertEquals(listOf("https://manual.example.com"), normalized.servers.baseUrls)
-        assertEquals(1, normalized.servers.candidates.size)
+        assertNotNull(normalized.servers.manualSelectedServerId)
+        assertEquals(
+            "https://manual.example.com",
+            normalized.servers.candidates.first { it.id == normalized.servers.manualSelectedServerId }.baseUrl,
+        )
+        assertEquals("", normalized.servers.manualBaseUrl)
+        assertTrue(ZLibraryConfigValidator.validate(normalized).isEmpty())
+    }
+
+    @Test
+    fun `手动旧地址已在候选列表时不重复添加且迁移幂等`() {
+        val existing = candidate("https://manual.example.com", 1)
+        val config = ZLibraryConfig.DEFAULT.copy(
+            schemaVersion = 2,
+            servers = ZLibraryConfig.DEFAULT.servers.copy(
+                mode = ServerMode.MANUAL.wire,
+                manualBaseUrl = "https://manual.example.com/",
+                candidates = listOf(existing),
+            ),
+        )
+        val once = ZLibraryConfigMigration.normalize(config)
+        val twice = ZLibraryConfigMigration.normalize(once)
+        assertEquals(1, once.servers.candidates.size)
+        assertEquals(existing.id, once.servers.manualSelectedServerId)
+        assertEquals(once, twice)
+    }
+
+    @Test
+    fun `默认配置为空列表且允许空列表通过校验`() {
+        assertTrue(ZLibraryConfig.DEFAULT.servers.candidates.isEmpty())
+        assertTrue(ZLibraryConfigValidator.validate(ZLibraryConfig.DEFAULT).isEmpty())
+    }
+
+    @Test
+    fun `手动选中项被禁用时清除选择关系`() {
+        val selected = candidate("https://manual.example.com", 1, enabled = false)
+        val config = ZLibraryConfig.DEFAULT.copy(
+            servers = ZLibraryConfig.DEFAULT.servers.copy(
+                mode = ServerMode.MANUAL.wire,
+                manualSelectedServerId = selected.id,
+                candidates = listOf(selected),
+            ),
+        )
+        val normalized = ZLibraryConfigMigration.normalize(config)
+        assertEquals(null, normalized.servers.manualSelectedServerId)
+        assertTrue(normalized.servers.baseUrls.isEmpty())
         assertTrue(ZLibraryConfigValidator.validate(normalized).isEmpty())
     }
 

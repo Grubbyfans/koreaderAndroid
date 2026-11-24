@@ -3,12 +3,13 @@ package com.yuezhou.reader.core.online.config
 import kotlinx.serialization.Serializable
 
 /**
- * Z-Library 书源配置（原方案 §6 + 服务器发现增量方案 §3）。
+ * Z-Library 书源配置（原方案 §6 + 服务器发现增量方案 §3 + 服务器设置优化 §11）。
  *
  * 只描述服务器、网络、发现策略、端点与偏好；**不包含任何账号、密码、Token、Cookie**。
  * 配置以 JSON 文件管理，凭证由 reader 层独立加密存储。
  *
- * schemaVersion=1 为旧版（servers.baseUrls 字符串数组），加载时迁移到 v2。
+ * schemaVersion=1 为旧版（servers.baseUrls 字符串数组），加载时依次迁移到 v2、v3。
+ * v3 起自动/手动共用同一份 candidates；manualSelectedServerId 指向手动选中的候选。
  */
 @Serializable
 data class ZLibraryConfig(
@@ -23,13 +24,21 @@ data class ZLibraryConfig(
 ) {
     @Serializable
     data class Servers(
-        /** 兼容字段：auto 按候选优先级探测，manual 只用 manualBaseUrl。 */
+        /** auto 从启用候选按优先级选择；manual 只在候选中选一个固定使用。 */
         val mode: String = "auto",
-        /** 手动模式固定地址；auto 模式可为空。 */
+        /**
+         * 兼容字段：旧版手动固定地址。schema v3 起并入 candidates 后写回为空；
+         * 仅在读取旧配置时使用，不再作为独立入口。
+         */
         val manualBaseUrl: String = "",
-        /** 自动检测候选列表；旧版 baseUrls 在加载时迁移至此。 */
-        val candidates: List<ServerCandidate> = listOf(DEFAULT_CANDIDATE),
-        /** 旧版 schema v1 字段，仅用于读取并迁移，不在新配置中写出。 */
+        /** 手动模式选中的候选 id；须指向 candidates 中启用的项，空表示尚未选择。 */
+        val manualSelectedServerId: String? = null,
+        /** 自动/手动共用的统一候选列表；默认空，由用户在服务器管理页添加。 */
+        val candidates: List<ServerCandidate> = emptyList(),
+        /**
+         * 兼容镜像（不再作为独立配置入口）：auto 为启用候选地址，manual 为选中候选地址。
+         * 供搜索/连接/探测/凭证模块读取当前生效主机，A/B/C 代码无需改动。
+         */
         val baseUrls: List<String> = emptyList(),
     )
 
@@ -68,26 +77,27 @@ data class ZLibraryConfig(
 
     companion object {
         const val PROVIDER_ID = "zlibrary"
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         const val MAX_CANDIDATES = 50
-        val DEFAULT_CANDIDATE = ServerCandidate(
-            id = "default", baseUrl = "https://example.com", enabled = true, priority = 1,
-        )
         val DEFAULT: ZLibraryConfig = ZLibraryConfig()
     }
 }
 
 /**
  * 把配置规范化为当前生效状态：
- * - 旧 schema v1：baseUrls 迁移为启用候选，补齐 manualBaseUrl，升级 schema。
- * - 候选列表变化时同步 baseUrls（首个启用候选），保证现有 A/B/C 代码继续可用。
+ * - schema v1：baseUrls 字符串数组迁移为启用候选。
+ * - schema v2：manualBaseUrl 并入统一候选列表；手动模式建立 manualSelectedServerId。
  * - 候选按 priority 去重排序并重编号；规范化相同地址只保留首个。
+ * - 校正 manualSelectedServerId 只指向启用候选；baseUrls 同步为生效地址镜像。
+ * - 全程幂等：迁移后的配置再次 normalize 结果不变。
  */
 object ZLibraryConfigMigration {
     fun normalize(config: ZLibraryConfig): ZLibraryConfig {
-        val upgraded = if (config.schemaVersion < 2) {
-            val legacy = config.servers.baseUrls
-            val candidates = if (config.servers.candidates.isEmpty() && legacy.isNotEmpty()) {
+        // v1 → v2：字符串地址数组转为启用候选。
+        var upgraded = config
+        if (upgraded.schemaVersion < 2) {
+            val legacy = upgraded.servers.baseUrls
+            val candidates = if (upgraded.servers.candidates.isEmpty() && legacy.isNotEmpty()) {
                 legacy.mapIndexed { index, url ->
                     ServerCandidate(
                         id = "migrated-${index + 1}",
@@ -96,18 +106,19 @@ object ZLibraryConfigMigration {
                         priority = index + 1,
                     )
                 }
-            } else config.servers.candidates
-            config.copy(
-                schemaVersion = ZLibraryConfig.SCHEMA_VERSION,
-                servers = config.servers.copy(
-                    manualBaseUrl = config.servers.manualBaseUrl.ifBlank {
-                        legacy.firstOrNull()?.trim()?.trimEnd('/').orEmpty()
-                    },
-                    candidates = candidates,
-                ),
+            } else upgraded.servers.candidates
+            upgraded = upgraded.copy(
+                schemaVersion = 2,
+                servers = upgraded.servers.copy(candidates = candidates),
             )
-        } else config
+        }
 
+        // v2 → v3：旧 manualBaseUrl 并入统一候选列表并建立选择关系。
+        if (upgraded.schemaVersion < 3) {
+            upgraded = migrateManualBaseUrl(upgraded)
+        }
+
+        // 去重、按优先级排序、重编号。
         val seen = HashSet<String>()
         val distinct = upgraded.servers.candidates.mapNotNull { candidate ->
             val normalized = runCatching { ServerUrlPolicy.normalize(candidate.baseUrl) }.getOrNull()
@@ -117,12 +128,62 @@ object ZLibraryConfigMigration {
         val sorted = distinct.sortedBy { it.priority }.mapIndexed { index, candidate ->
             candidate.copy(priority = index + 1)
         }
+
+        // 选择关系只允许指向启用候选；否则置空（提示用户重新选择）。
+        val selectedId = sorted.firstOrNull {
+            it.id == upgraded.servers.manualSelectedServerId && it.enabled
+        }?.id
+
+        // 生效地址镜像：manual 只取选中项，auto 取全部启用项。
         val effective = when (ServerMode.fromWire(upgraded.servers.mode)) {
-            ServerMode.MANUAL -> listOf(upgraded.servers.manualBaseUrl).filter { it.isNotBlank() }
+            ServerMode.MANUAL -> sorted.firstOrNull { it.id == selectedId }?.let { listOf(it.baseUrl) }.orEmpty()
             ServerMode.AUTO -> sorted.filter { it.enabled }.map { it.baseUrl }
         }.map { it.trim().trimEnd('/') }
+
         return upgraded.copy(
-            servers = upgraded.servers.copy(candidates = sorted, baseUrls = effective),
+            schemaVersion = ZLibraryConfig.SCHEMA_VERSION,
+            servers = upgraded.servers.copy(
+                manualBaseUrl = "",
+                manualSelectedServerId = selectedId,
+                candidates = sorted,
+                baseUrls = effective,
+            ),
+        )
+    }
+
+    /** 把旧 manualBaseUrl 并入统一候选列表并建立选择关系；不重复、不丢失、幂等。 */
+    private fun migrateManualBaseUrl(config: ZLibraryConfig): ZLibraryConfig {
+        val manual = config.servers.manualBaseUrl.trim().trimEnd('/')
+        if (manual.isBlank()) {
+            return config.copy(schemaVersion = ZLibraryConfig.SCHEMA_VERSION)
+        }
+        val key = runCatching { ServerUrlPolicy.normalize(manual) }.getOrNull() ?: manual
+        val existing = config.servers.candidates.firstOrNull { candidate ->
+            (runCatching { ServerUrlPolicy.normalize(candidate.baseUrl) }.getOrNull()
+                ?: candidate.baseUrl.trim().trimEnd('/')) == key
+        }
+        val candidates: List<ServerCandidate>
+        val migratedId: String
+        if (existing != null) {
+            candidates = config.servers.candidates
+            migratedId = existing.id
+        } else {
+            migratedId = "manual-migrated"
+            val nextPriority = (config.servers.candidates.maxOfOrNull { it.priority } ?: 0) + 1
+            candidates = config.servers.candidates + ServerCandidate(migratedId, manual, true, nextPriority)
+        }
+        // 仅手动模式建立选择关系；自动模式只保证地址进入候选列表，不丢配置。
+        val selectedId = if (ServerMode.fromWire(config.servers.mode) == ServerMode.MANUAL) {
+            migratedId
+        } else {
+            config.servers.manualSelectedServerId
+        }
+        return config.copy(
+            schemaVersion = ZLibraryConfig.SCHEMA_VERSION,
+            servers = config.servers.copy(
+                candidates = candidates,
+                manualSelectedServerId = selectedId,
+            ),
         )
     }
 }
@@ -140,17 +201,18 @@ object ZLibraryConfigValidator {
         if (config.providerId != ZLibraryConfig.PROVIDER_ID) add("providerId 必须为 zlibrary")
         if (!VERSION.matches(config.configVersion)) add("configVersion 必须为 x.y.z 格式")
 
-        val mode = ServerMode.fromWire(config.servers.mode)
         if (config.servers.mode.lowercase() !in setOf("auto", "manual")) {
             add("servers.mode 只能是 auto 或 manual")
         }
-        if (config.servers.candidates.isEmpty() && config.servers.baseUrls.isEmpty()) {
-            add("至少需要一个服务器地址")
+        // 允许空列表（方案 §7.3）：用户可从空列表开始添加。
+        // manualSelectedServerId 必须指向存在的候选项；启用性由 normalize 校正。
+        config.servers.manualSelectedServerId?.let { selected ->
+            if (config.servers.candidates.none { it.id == selected }) {
+                add("servers.manualSelectedServerId 必须指向候选列表中的服务器")
+            }
         }
-        if (mode == ServerMode.MANUAL) {
-            val error = ServerUrlPolicy.validate(config.servers.manualBaseUrl)
-            if (error != null) add("servers.manualBaseUrl: $error")
-        } else if (config.servers.manualBaseUrl.isNotBlank()) {
+        // 兼容字段：旧配置非空地址仍需格式合法；新配置写回为空。
+        if (config.servers.manualBaseUrl.isNotBlank()) {
             val error = ServerUrlPolicy.validate(config.servers.manualBaseUrl)
             if (error != null) add("servers.manualBaseUrl: $error")
         }

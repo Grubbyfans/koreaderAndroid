@@ -170,14 +170,19 @@ class ZLibraryConfigStore(private val context: Context) {
         }
     }
 
-    /** 恢复内置默认服务器列表；保留端点、偏好、模式等其他设置。 */
+    /**
+     * 清空服务器列表（方案 §11.4：无经过核实的真实默认地址时默认为空列表）。
+     * 保留端点、偏好、模式、探测参数等其他设置；不写入任何占位地址。
+     */
     suspend fun resetServers(): Result<ZLibraryConfig> = withContext(Dispatchers.IO) {
         val current = load()
         save(
             current.copy(
                 servers = current.servers.copy(
-                    candidates = listOf(ZLibraryConfig.DEFAULT_CANDIDATE),
-                    manualBaseUrl = ZLibraryConfig.DEFAULT_CANDIDATE.baseUrl,
+                    candidates = emptyList(),
+                    manualSelectedServerId = null,
+                    manualBaseUrl = "",
+                    baseUrls = emptyList(),
                 ),
             ),
         )
