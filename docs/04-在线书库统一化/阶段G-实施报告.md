@@ -80,7 +80,16 @@
 ### 现象与定位
 - 设备 SM-S9360 / Android 16 登录后搜索任意关键词均提示「请求失败」。
 - 抓包式日志定位：搜索端点返回 `HTTP 400`，响应体 `{"success":0,"error":"拒绝访问"}`；首次还出现过一次 `SSLHandshakeException: connection closed`（瞬时网络故障，非根因）。
-- 对照上游参考实现固定 commit `b7eacbab` 的注释：**Z-Library 自 2026-11-23 起对所有搜索返回 400 Access denied，与会话、UA、请求体无关**；其列表、最热门与下载仍可用。因此这不是账号、登录态或本地配置问题。
+- 对照上游参考实现固定 commit `b7eacbab`（版本 1.0.62，commit 日期 2026-11-23）的 `zlibrary/api_books.lua` 源码注释：**Z-Library 自 2026-11-23 起对所有搜索返回 400 Access denied，与会话、UA、请求体无关**；其列表、最热门与下载仍可用。
+- **证据性质**：这是上游插件作者写在源码里的实测记录，**不是 Z-Library 官方公告**；该 commit 的 message 仅为 `chore: Bump version to 1.0.62 [skip ci]`，未提及此事。原文注释逐字如下：
+  > `-- What a reader sees instead of the server's bare "Access denied", which Z-library has sent for`
+  > `-- every search since 2026-11-23 (an HTTP 400, whatever the session, user agent or body). That`
+  > `-- reads like a problem with their account or the plugin, and it is neither.`
+  >
+  > `-- Since 2026-11-23 the server answers every search with "Access denied" while its`
+  > `-- own most-popular list still works. The unfiltered list beats an error, so show it`
+  > `-- and say the filters were left out.`
+- 我们的真机日志（连续三次 `HTTP 400`、`{"success":0,"error":"拒绝访问"}`）独立印证了同一现象。因此这不是账号、登录态或本地配置问题。
 
 ### 修复
 - `ProviderErrorCode` 新增 `SERVER_REJECTED`；错误解析同时读取 `error` 字段，把 `Access denied`/`拒绝访问` 归类为服务端拒绝，不再误报为「请求失败」或认证失败。
