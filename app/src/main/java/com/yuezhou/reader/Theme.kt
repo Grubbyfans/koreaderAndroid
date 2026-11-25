@@ -1,18 +1,25 @@
 package com.yuezhou.reader
 
+import android.content.res.AssetManager
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Typeface
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** 应用浅色语义色。正文配色仍由阅读器的阅读主题管理。 */
 object YuezhouColors {
@@ -82,12 +89,30 @@ private val YuezhouShapes = Shapes(
     extraLarge = RoundedCornerShape(20.dp),
 )
 
+private object LiteraryHeadingFont {
+    private val loadLock = Mutex()
+    private var loaded = false
+    private val serif = mutableStateOf<FontFamily>(FontFamily.Serif)
+    val family: FontFamily get() = serif.value
+
+    suspend fun load(assets: AssetManager) = loadLock.withLock {
+        if (loaded) return@withLock
+        val font = withContext(Dispatchers.IO) {
+            runCatching {
+                Typeface(android.graphics.Typeface.createFromAsset(assets, "reader/fonts/noto-serif-sc.otf"))
+            }.getOrNull()
+        }
+        if (font != null) serif.value = FontFamily(font)
+        loaded = true
+    }
+}
+
 @Composable
 fun YuezhouTheme(content: @Composable () -> Unit) {
-    val assets = LocalContext.current.assets
-    val typography = remember(assets) {
-        // 复用已随阅读器打包的中文衬线字体，无额外字体资源。
-        val serif = FontFamily(Font("reader/fonts/noto-serif-sc.otf", assets))
+    val assets = LocalContext.current.applicationContext.assets
+    LaunchedEffect(assets) { LiteraryHeadingFont.load(assets) }
+    val serif = LiteraryHeadingFont.family
+    val typography = remember(serif) {
         val defaults = Typography()
         Typography(
             headlineLarge = defaults.headlineLarge.copy(fontFamily = serif, fontSize = 30.sp, lineHeight = 38.sp),
