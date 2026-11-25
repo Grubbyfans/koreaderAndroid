@@ -69,6 +69,18 @@
             android:name=".DownloadForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!--
+            Z-Library 内置网页容器（阶段 C）：非导出、独立进程。
+            Application 进程守卫保证该进程不初始化 Room/同步/TTS；WebView 使用独立数据目录。
+        -->
+        <activity
+            android:name=".web.ZLibraryWebActivity"
+            android:exported="false"
+            android:process=":zlibraryweb"
+            android:theme="@style/Theme.YuezhouReader"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>
