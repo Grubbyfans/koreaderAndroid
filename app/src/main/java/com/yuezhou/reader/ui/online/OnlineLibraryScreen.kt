@@ -18,10 +18,10 @@ import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.core.online.provider.CatalogBookProvider
 
 /**
- * 在线书库统一入口：置于书架页「云端」作用域内，顶部书源 Tab 切换。
+ * 在线书库统一入口：作为底部一级「云端」页，顶部书源 Tab 切换。
  *
  * 云存储书源复用现有 CloudBookshelfContent；Z-Library 走独立检索页（搜索、筛选、分页、详情）。
- * 下载任务入口位于书库标题栏右上角，书源配置入口位于设置页；底部导航仍为「书架 / 设置」两项。
+ * 下载任务与更多菜单位于云端标题栏右上角；书源配置入口位于设置页。
  */
 @Composable
 fun OnlineLibraryScreen(

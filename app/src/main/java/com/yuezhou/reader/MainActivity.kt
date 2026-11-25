@@ -103,6 +103,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -131,6 +132,7 @@ import com.yuezhou.reader.ui.online.OnlineLibraryScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryViewModel
 import com.yuezhou.reader.ui.online.ServerSettingsScreen
 import com.yuezhou.reader.ui.online.ZLibrarySettingsScreen
+import com.yuezhou.reader.web.ZLibraryWebEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -180,11 +182,6 @@ private val TabSaver = Saver<Tab, String>(
     restore = { runCatching { Tab.valueOf(it) }.getOrDefault(Tab.书架) },
 )
 
-private val BookScopeSaver = Saver<BookScope, String>(
-    save = { it.name },
-    restore = { runCatching { BookScope.valueOf(it) }.getOrDefault(BookScope.本地) },
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BookshelfScreen() {
@@ -196,9 +193,8 @@ private fun BookshelfScreen() {
     var status by remember { mutableStateOf<String?>(null) }
     // 刷新触发计数：+1 触发重新加载书库
     var refreshKey by remember { mutableStateOf(0) }
-    // 主导航状态须跨 Activity 重建/从桌面返回保留，否则会掉回默认的「书架/本地」。
+    // 主导航状态须跨 Activity 重建/从桌面返回保留，否则会掉回默认的「书库」。
     var currentTab by rememberSaveable(stateSaver = TabSaver) { mutableStateOf(Tab.书架) }
-    var bookScope by rememberSaveable(stateSaver = BookScopeSaver) { mutableStateOf(BookScope.本地) }
     // 管理态（多选删除）：非空表示进入管理态，集合为已勾选的 bookId
     var selecting by remember { mutableStateOf<Set<String>?>(null) }
     // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
@@ -372,9 +368,17 @@ private fun BookshelfScreen() {
         }
     }
 
-    // 切换到云端 tab 时自动加载（命中缓存时几乎瞬时返回，不重复请求网络）
-    LaunchedEffect(currentTab, bookScope) {
-        if (currentTab == Tab.书架 && bookScope == BookScope.云端) {
+    // 网页搜索：只传已配置服务器与当前输入关键词，登录沿用 WebView 自身会话。
+    fun openZLibraryWeb() {
+        val keyword = onlineVm.selectedState.keyword
+        if (!ZLibraryWebEntry.launch(context, onlineVm.webBaseUrl(), keyword)) {
+            scope.launch { snackbarHostState.showSnackbar("请先配置可用的 Z-Library 服务器") }
+        }
+    }
+
+    // 切换到云端一级页时加载一次（命中缓存时不重复请求网络）
+    LaunchedEffect(currentTab) {
+        if (currentTab == Tab.云端) {
             loadRemote()
         }
     }
@@ -397,13 +401,15 @@ private fun BookshelfScreen() {
     // 统一下载管理页：覆盖在主界面之上，返回键逐层退出。
     var showOnlineDownloads by rememberSaveable { mutableStateOf(false) }
     BackHandler(enabled = showOnlineDownloads) { showOnlineDownloads = false }
+    // 云端一级页右上角「更多」：刷新与网页搜索；额度/账户在后续阶段迁入。
+    var cloudMenuOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = YuezhouColors.Background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            if (!fullscreenSubPage && selecting != null && currentTab == Tab.书架 && bookScope == BookScope.本地) {
+            if (!fullscreenSubPage && selecting != null && currentTab == Tab.书架) {
                 // 管理态顶栏：已选数量 + 全选/删除
                 val selected = selecting!!
                 TopAppBar(
@@ -473,17 +479,58 @@ private fun BookshelfScreen() {
                 )
             } else if (!fullscreenSubPage) {
                 TopAppBar(
-                    title = { Text(if (currentTab == Tab.书架) "书库" else currentTab.label) },
+                    title = {
+                        Text(
+                            when (currentTab) {
+                                Tab.书架 -> "书库"
+                                Tab.云端 -> "云端书库"
+                                Tab.设置 -> currentTab.label
+                            },
+                        )
+                    },
                     actions = {
-                        if (currentTab == Tab.书架 && bookScope == BookScope.本地 && removedBooks.isNotEmpty()) {
+                        if (currentTab == Tab.书架 && removedBooks.isNotEmpty()) {
                             TextButton(onClick = { showHiddenBooks = true }) { Text("已移除") }
                         }
-                        // 下载任务入口：固定在书库标题栏右上角，无任务时也可查看历史
-                        if (currentTab == Tab.书架) {
+                        // 下载任务入口：书库与云端都保留；设置页不显示。
+                        if (currentTab == Tab.书架 || currentTab == Tab.云端) {
                             IconButton(onClick = { showOnlineDownloads = true }) {
                                 AnimatedDownloadIcon(
                                     downloading = downloadTask?.status == DownloadStatus.Downloading,
                                 )
+                            }
+                        }
+                        if (currentTab == Tab.云端) {
+                            Box {
+                                IconButton(onClick = { cloudMenuOpen = true }) {
+                                    Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+                                }
+                                DropdownMenu(
+                                    expanded = cloudMenuOpen,
+                                    onDismissRequest = { cloudMenuOpen = false },
+                                ) {
+                                    val catalog = onlineVm.isCatalogSelected
+                                    val submitted = onlineVm.selectedState.submittedKeyword
+                                    DropdownMenuItem(
+                                        text = { Text("刷新云端书库") },
+                                        // 检索书源必须已有提交词才可刷新，避免用输入框草稿触发请求。
+                                        enabled = !onlineVm.selectedState.refreshing &&
+                                            (!catalog || submitted.isNotBlank()),
+                                        onClick = {
+                                            cloudMenuOpen = false
+                                            refreshRemoteLibrary()
+                                        },
+                                    )
+                                    if (catalog) {
+                                        DropdownMenuItem(
+                                            text = { Text("网页搜索") },
+                                            onClick = {
+                                                cloudMenuOpen = false
+                                                openZLibraryWeb()
+                                            },
+                                        )
+                                    }
+                                }
                             }
                         }
                     },
@@ -495,34 +542,16 @@ private fun BookshelfScreen() {
             }
         },
         floatingActionButton = {
+            // 云端刷新改由下拉刷新与「更多」菜单承接，不再使用悬浮按钮。
             if (!fullscreenSubPage && currentTab == Tab.书架) {
-                if (bookScope == BookScope.本地) {
-                    FloatingActionButton(
-                        onClick = {
-                            if (!scanning && !importing) importOptionsOpen = true
-                        },
-                        containerColor = YuezhouColors.Brand,
-                        contentColor = Color.White,
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "导入书籍")
-                    }
-                } else {
-                    // 云端：主动刷新按钮（主动更新：强制拉列表 + 发现外部上传）
-                    FloatingActionButton(
-                        onClick = { refreshRemoteLibrary() },
-                        containerColor = if (remoteLoading) YuezhouColors.Brand.copy(alpha = 0.6f) else YuezhouColors.Brand,
-                        contentColor = Color.White,
-                    ) {
-                        if (remoteLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                color = Color.White,
-                                strokeWidth = 2.5.dp,
-                            )
-                        } else {
-                            Text("刷新", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                        }
-                    }
+                FloatingActionButton(
+                    onClick = {
+                        if (!scanning && !importing) importOptionsOpen = true
+                    },
+                    containerColor = YuezhouColors.Brand,
+                    contentColor = Color.White,
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "导入书籍")
                 }
             }
         },
@@ -560,46 +589,37 @@ private fun BookshelfScreen() {
 
             when (currentTab) {
                 Tab.书架 -> {
-                    // 本地/云端切换条
-                    BookScopeSwitch(current = bookScope, onSelect = {
-                        bookScope = it
-                        selecting = null
-                    })
-                    when (bookScope) {
-                        BookScope.本地 -> {
-                            if (scanning) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("扫描文件夹中…", style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                            BookshelfContent(
-                                books = visibleBooks,
-                                loading = loading,
-                                selecting = selecting,
-                                onImport = { if (!scanning && !importing) importOptionsOpen = true },
-                                onEnterSelect = { selecting = setOf(it) },
-                                onToggleSelect = { id ->
-                                    val cur = selecting ?: emptySet()
-                                    selecting = if (id in cur) cur - id else cur + id
-                                },
-                            )
+                    if (scanning) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("扫描文件夹中…", style = MaterialTheme.typography.bodyMedium)
                         }
-                        BookScope.云端 -> OnlineLibraryScreen(
-                            vm = onlineVm,
-                            onRefresh = { refreshRemoteLibrary() },
-                            onOpenDetail = { detailBook = it },
-                            onOpenSettings = {
-                                currentTab = Tab.设置
-                                showZLibrarySettings = true
-                            },
-                        )
                     }
+                    BookshelfContent(
+                        books = visibleBooks,
+                        loading = loading,
+                        selecting = selecting,
+                        onImport = { if (!scanning && !importing) importOptionsOpen = true },
+                        onEnterSelect = { selecting = setOf(it) },
+                        onToggleSelect = { id ->
+                            val cur = selecting ?: emptySet()
+                            selecting = if (id in cur) cur - id else cur + id
+                        },
+                    )
                 }
+                Tab.云端 -> OnlineLibraryScreen(
+                    vm = onlineVm,
+                    onRefresh = { refreshRemoteLibrary() },
+                    onOpenDetail = { detailBook = it },
+                    onOpenSettings = {
+                        currentTab = Tab.设置
+                        showZLibrarySettings = true
+                    },
+                )
                 Tab.设置 -> SettingsPage(
                     cloudSync = cloudSync,
                     uploadQueue = uploadQueue,
@@ -1069,17 +1089,33 @@ private fun ScanResultDialog(
     )
 }
 
-/** 底部导航的两个 tab。 */
+/** 底部导航的三个 tab。 */
 private enum class Tab(val label: String, val icon: ImageVector) {
     书架("书库", Icons.Filled.List),
+    云端("云端", cloudTabIcon()),
     设置("设置", Icons.Filled.Settings),
 }
 
-/** 书库范围：本地 / 云端。 */
-private enum class BookScope(val label: String) {
-    本地("本地"),
-    云端("云端"),
-}
+/** icons-core 不包含 Cloud，使用标准 Material Cloud 24dp 路径，避免新增图标依赖。 */
+private fun cloudTabIcon(): ImageVector = ImageVector.Builder(
+    name = "CloudTab",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).apply {
+    path(fill = SolidColor(Color.Black)) {
+        moveTo(19.35f, 10.04f)
+        curveTo(18.67f, 6.59f, 15.64f, 4f, 12f, 4f)
+        curveTo(9.11f, 4f, 6.6f, 5.64f, 5.35f, 8.04f)
+        curveTo(2.34f, 8.36f, 0f, 10.91f, 0f, 14f)
+        curveTo(0f, 17.31f, 2.69f, 20f, 6f, 20f)
+        horizontalLineTo(19f)
+        curveTo(21.76f, 20f, 24f, 17.76f, 24f, 15f)
+        curveTo(24f, 12.37f, 21.95f, 10.22f, 19.35f, 10.04f)
+        close()
+    }
+}.build()
 
 /** 单一下载任务状态（同一时间最多一个任务）。 */
 private data class DownloadTask(
@@ -1173,41 +1209,6 @@ private fun AnimatedDownloadIcon(downloading: Boolean) {
                 .size(20.dp)
                 .graphicsLayer { translationY = if (downloading) floatY else 0f },
         )
-    }
-}
-
-/** 本地/云端切换条：胶囊滑块式分段控件。 */
-@Composable
-private fun BookScopeSwitch(current: BookScope, onSelect: (BookScope) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .clip(RoundedCornerShape(22.dp))
-            .background(YuezhouColors.Surface)
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        BookScope.entries.forEach { scope ->
-            val selected = current == scope
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(19.dp))
-                    .background(if (selected) YuezhouColors.BrandContainer else Color.Transparent)
-                    .clickable { onSelect(scope) }
-                    .padding(vertical = 7.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    scope.label,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    ),
-                    color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
-                )
-            }
-        }
     }
 }
 
@@ -2248,32 +2249,21 @@ private fun BottomNavBar(current: Tab, onSelect: (Tab) -> Unit) {
         // 只预留底部系统栏；safeDrawing 会把状态栏高度也算进来，导致导航栏明显变高。
         windowInsets = WindowInsets.navigationBars,
     ) {
-        NavigationBarItem(
-            selected = current == Tab.书架,
-            onClick = { onSelect(Tab.书架) },
-            icon = { Icon(Tab.书架.icon, contentDescription = Tab.书架.label) },
-            label = { Text(Tab.书架.label) },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = YuezhouColors.Brand,
-                selectedTextColor = YuezhouColors.Brand,
-                unselectedIconColor = YuezhouColors.TextSecondary,
-                unselectedTextColor = YuezhouColors.TextSecondary,
-                indicatorColor = YuezhouColors.Brand.copy(alpha = 0.12f),
-            ),
-        )
-        NavigationBarItem(
-            selected = current == Tab.设置,
-            onClick = { onSelect(Tab.设置) },
-            icon = { Icon(Tab.设置.icon, contentDescription = Tab.设置.label) },
-            label = { Text(Tab.设置.label) },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = YuezhouColors.Brand,
-                selectedTextColor = YuezhouColors.Brand,
-                unselectedIconColor = YuezhouColors.TextSecondary,
-                unselectedTextColor = YuezhouColors.TextSecondary,
-                indicatorColor = YuezhouColors.Brand.copy(alpha = 0.12f),
-            ),
-        )
+        Tab.entries.forEach { tab ->
+            NavigationBarItem(
+                selected = current == tab,
+                onClick = { onSelect(tab) },
+                icon = { Icon(tab.icon, contentDescription = tab.label) },
+                label = { Text(tab.label) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = YuezhouColors.Brand,
+                    selectedTextColor = YuezhouColors.Brand,
+                    unselectedIconColor = YuezhouColors.TextSecondary,
+                    unselectedTextColor = YuezhouColors.TextSecondary,
+                    indicatorColor = YuezhouColors.Brand.copy(alpha = 0.12f),
+                ),
+            )
+        }
     }
 }
 
