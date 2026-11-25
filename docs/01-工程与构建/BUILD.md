@@ -25,13 +25,13 @@
 | --- | --- | --- |
 | 静读测试版（默认） | `:app:assembleTtsTestDebug` | `app/build/outputs/apk/ttsTest/debug/app-ttsTest-debug.apk` |
 | 静读正式版渠道调试包 | `:app:assembleProductionDebug` | `app/build/outputs/apk/production/debug/app-production-debug.apk` |
-| 静读正式发布包 | `:app:assembleProductionRelease` | `app/build/outputs/apk/production/release/app-production-release-unsigned.apk` |
+| 静读 Release 本地安装包 | `:app:assembleProductionRelease` | `app/build/outputs/apk/production/release/app-production-release.apk` |
 
-测试版包名为 `com.yuezhou.reader.tts.test`，版本名带 `-tts-test`（当前为 `0.1.0-tts-test`）。它包含 sherpa-onnx 运行时和测试入口，可与包名为 `com.yuezhou.reader` 的「静读」同时安装。当前仓库未配置 Release 签名，正式发布 APK 生成后需使用正式签名密钥签名。使用明确的变体任务，避免 `:app:assembleDebug` 同时构建两个 Debug 变体。
+测试版包名为 `com.yuezhou.reader.tts.test`，版本名带 `-tts-test`。它包含 sherpa-onnx 运行时和测试入口，可与包名为 `com.yuezhou.reader` 的「静读」同时安装。`productionRelease` 暂用仓库内的 Debug 密钥，供旧版覆盖安装和本地验证。对外发布时应改用独立的正式签名密钥。使用明确的变体任务，避免 `:app:assembleDebug` 同时构建两个 Debug 变体。
 
 ### 测试版签名固定（2026-11-24）
 
-`keystore/debug.keystore` 随仓库提交，`app/build.gradle.kts` 的 `signingConfigs.debug` 明确引用它；不再使用各机器默认的 `~/.android/debug.keystore`，换机或密钥重建也不会导致签名漂移。该密钥只用于 debug 构建，正式签名密钥不入库。
+`keystore/debug.keystore` 随仓库提交，`app/build.gradle.kts` 的 `signingConfigs.debug` 明确引用它。Debug 构建和用于本地安装验证的 `productionRelease` 共用该密钥，正式签名密钥不入库。
 
 校验构建产物与手机已装版本是否同一签名（需 JDK，摘要应为 `f1dd9c113dda1f28b1e46846f60d12bf4fe1082561b9548e28dabb278a35f33d`）：
 

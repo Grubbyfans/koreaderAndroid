@@ -17,7 +17,7 @@ android {
     }
 
     // 固定测试版签名：不再依赖各机器 ~/.android/debug.keystore，避免换机或密钥重建后签名漂移。
-    // 该密钥仅用于 debug 构建，android/android 是 Android 公开默认值；正式签名另行保管。
+    // android/android 是 Android 公开默认值；此密钥用于本地安装验证。
     signingConfigs {
         getByName("debug") {
             storeFile = rootProject.file("keystore/debug.keystore")
@@ -46,6 +46,8 @@ android {
     productFlavors {
         create("production") {
             dimension = "distribution"
+            // 临时沿用旧版签名，以便本地 Release APK 可以覆盖安装。
+            signingConfig = signingConfigs.getByName("debug")
         }
         create("ttsTest") {
             dimension = "distribution"
