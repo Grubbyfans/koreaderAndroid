@@ -232,7 +232,7 @@ private fun BookshelfScreen() {
     val searching = query.isNotEmpty()
     val shelfBooks = remember(books, hiddenBooks) { books.filter { it.bookId !in hiddenBooks } }
     val localBookIds = remember(books) { books.mapTo(mutableSetOf()) { it.bookId } }
-    val visibleAuthorCache = remember(shelfBooks) { mutableMapOf<String, String?>() }
+    val visibleAuthorCache = remember(shelfBooks) { android.util.LruCache<String, List<String>>(256) }
     var shelfAuthors by remember(shelfBooks) { mutableStateOf<Map<String, List<String>>?>(null) }
     LaunchedEffect(shelfBooks, searching) {
         if (searching && shelfAuthors == null) shelfAuthors = store.shelfAuthors(shelfBooks)
@@ -366,7 +366,7 @@ private fun BookshelfScreen() {
                     } catch (e: Exception) {
                         // 持久授权失败不阻断单次扫描
                     }
-                    val existingIds = store.snapshot().books.map { it.bookId }.toSet()
+                    val existingIds = store.snapshot(includeCoverBytes = false).books.map { it.bookId }.toSet()
                     val result = LocalScanner.scan(context, uri, existingIds)
                     scanResult = result
                     scanUri = uri
@@ -401,7 +401,7 @@ private fun BookshelfScreen() {
     // 初次加载 + 每次 refreshKey 变化时重新加载书库
     LaunchedEffect(refreshKey) {
         loading = true
-        books = store.snapshot().books
+        books = store.snapshot(includeCoverBytes = false).books
         hiddenBooks = store.hiddenBookIds()
         loading = false
     }
@@ -863,11 +863,11 @@ private fun BookshelfScreen() {
                             authorSearchLoading = searching && shelfAuthors == null,
                             authors = shelfAuthors.orEmpty(),
                             lookupAuthor = { book ->
-                                if (book.bookId !in visibleAuthorCache) {
-                                    visibleAuthorCache[book.bookId] = store.shelfAuthors(listOf(book))
-                                        .get(book.bookId)?.joinToString("、")
-                                }
-                                visibleAuthorCache[book.bookId]
+                                val authors = visibleAuthorCache.get(book.bookId)
+                                    ?: store.shelfAuthors(listOf(book))[book.bookId].orEmpty().also {
+                                        visibleAuthorCache.put(book.bookId, it)
+                                    }
+                                authors.takeIf { it.isNotEmpty() }?.joinToString("、")
                             },
                             gridMode = localGridMode,
                             selecting = selecting,
@@ -1316,7 +1316,7 @@ private fun BookshelfScreen() {
                         refreshKey++
                         // 重新扫描刷新「已在库」状态
                         scanUri?.let { u ->
-                            val ids = store.snapshot().books.map { it.bookId }.toSet()
+                            val ids = store.snapshot(includeCoverBytes = false).books.map { it.bookId }.toSet()
                             scanResult = LocalScanner.scan(context, u, ids)
                         }
                     } else {
@@ -1727,6 +1727,7 @@ private fun BookshelfContent(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val localPrefs = remember(context) { LibraryUiPrefs(context) }
+    val coverStorage = remember(context) { LibraryStore(context.applicationContext) }
     val filtering = query.isNotEmpty() || readingFilter != ReadingFilter.ALL
     val temporaryResults = filtering || librarySort != LibrarySort.RECENT
     val gridState = if (temporaryResults) rememberLazyGridState() else rememberRestoredGridState("local", localPrefs)
@@ -1777,6 +1778,7 @@ private fun BookshelfContent(
                     }
                     BookListRow(
                         book = book,
+                        coverStorage = coverStorage,
                         author = author,
                         selecting = selecting != null,
                         checked = selecting?.contains(book.bookId) == true,
@@ -1800,6 +1802,7 @@ private fun BookshelfContent(
                 items(books, key = { it.bookId }) { book ->
                     BookCard(
                         book = book,
+                        coverStorage = coverStorage,
                         selecting = selecting != null,
                         checked = selecting?.contains(book.bookId) == true,
                         onClick = { openBook(book) },
@@ -1814,6 +1817,7 @@ private fun BookshelfContent(
 @Composable
 private fun BookCard(
     book: LibraryStore.Entry,
+    coverStorage: LibraryStore,
     selecting: Boolean,
     checked: Boolean,
     onClick: () -> Unit,
@@ -1843,11 +1847,12 @@ private fun BookCard(
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            val cover = book.coverPng
+            val cover = rememberShelfCover(book, storage = coverStorage, targetPx = COVER_GRID_SIZE)
             if (cover != null) {
-                CoverImage(
-                    bytes = cover,
+                Image(
+                    bitmap = cover,
                     contentDescription = book.title,
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.FillBounds,
                 )
             } else {
@@ -1914,6 +1919,7 @@ private fun BookCard(
 @Composable
 private fun BookListRow(
     book: LibraryStore.Entry,
+    coverStorage: LibraryStore,
     author: String?,
     selecting: Boolean,
     checked: Boolean,
@@ -1941,11 +1947,12 @@ private fun BookListRow(
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            val cover = book.coverPng
+            val cover = rememberShelfCover(book, storage = coverStorage, targetPx = COVER_LIST_SIZE)
             if (cover != null) {
-                CoverImage(
-                    bytes = cover,
+                Image(
+                    bitmap = cover,
                     contentDescription = book.title,
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
             } else {
@@ -2012,6 +2019,44 @@ private fun BookListRow(
                 }
             }
         }
+    }
+}
+
+private const val COVER_GRID_SIZE = 512
+private const val COVER_LIST_SIZE = 192
+
+private data class ShelfCoverKey(
+    val path: String,
+    val version: String?,
+    val modifiedAt: Long,
+    val fileSize: Long,
+    val targetPx: Int,
+)
+
+private val shelfCoverCache = object : android.util.LruCache<ShelfCoverKey, android.graphics.Bitmap>(8 * 1024 * 1024) {
+    override fun sizeOf(key: ShelfCoverKey, value: android.graphics.Bitmap): Int =
+        value.allocationByteCount
+}
+private val shelfCoverDispatcher = Dispatchers.IO.limitedParallelism(2)
+
+@Composable
+private fun rememberShelfCover(
+    book: LibraryStore.Entry,
+    storage: LibraryStore,
+    targetPx: Int,
+): androidx.compose.ui.graphics.ImageBitmap? {
+    val file = book.coverFile ?: return null
+    return androidx.compose.runtime.key(file, book.coverVersion, targetPx) {
+        val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null) {
+            value = withContext(shelfCoverDispatcher) {
+                val key = ShelfCoverKey(file.path, book.coverVersion, file.lastModified(), file.length(), targetPx)
+                val bitmap = shelfCoverCache.get(key) ?: storage.readCover(file)
+                    ?.let { decodeCoverDownsampled(it, targetPx) }
+                    ?.also { shelfCoverCache.put(key, it) }
+                bitmap?.asImageBitmap()
+            }
+        }
+        image
     }
 }
 

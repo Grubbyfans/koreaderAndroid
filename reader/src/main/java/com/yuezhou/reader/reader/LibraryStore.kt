@@ -83,15 +83,19 @@ class LibraryStore(private val context: Context) {
         val lastReadAt: Long?,
         val sourceUri: Uri?,
         val localPath: String,
+        val coverFile: File? = null,
+        val coverVersion: String? = null,
     )
 
     /** 读取本地书库快照。书库文件不存在或损坏时返回空列表（不覆盖原文件）。 */
-    suspend fun snapshot(): Snapshot = withContext(Dispatchers.IO) {
+    suspend fun snapshot(includeCoverBytes: Boolean = true): Snapshot = withContext(Dispatchers.IO) {
         val entries = if (libraryFile.exists()) {
             try {
                 val catalog = LibraryCatalog.decode(libraryFile.readText())
                 val titles = readTitles()
-                catalog.books.mapNotNull { book -> toEntry(book, titles[book.bookId] ?: book.bookId) }
+                catalog.books.mapNotNull { book ->
+                    toEntry(book, titles[book.bookId] ?: book.bookId, includeCoverBytes)
+                }
             } catch (e: Exception) {
                 // 书库损坏：按方案约定保留原文件，返回空列表由上层提示，不静默清空。
                 emptyList()
@@ -121,17 +125,13 @@ class LibraryStore(private val context: Context) {
         }
     }
 
-    private fun toEntry(book: LibraryBook, title: String): Entry? {
+    private fun toEntry(book: LibraryBook, title: String, includeCoverBytes: Boolean): Entry? {
         // 正文必须真实存在，否则列表条目视为失效（本地删除后残留记录）。
         val source = sourceUri(book)
         val epub = File(booksDir, book.fileName)
         if (source == null && !epub.isFile) return null
-        val cover = book.coverPath?.let { path ->
-            val coverFile = File(root, path)
-            if (coverFile.exists()) {
-                try { CoverFile.decode(coverFile.readText()).pngBytes } catch (e: Exception) { null }
-            } else null
-        }
+        val coverFile = book.coverPath?.let { File(root, it) }
+        val cover = coverFile?.takeIf { includeCoverBytes }?.let(::readCover)
         val progress = readProgress(book.bookId)
         return Entry(
             bookId = book.bookId,
@@ -143,11 +143,19 @@ class LibraryStore(private val context: Context) {
             location = progress?.second,
             lastReadAt = progress?.third,
             sourceUri = source,
+            coverFile = coverFile,
+            coverVersion = book.coverVersion,
             localPath = source?.let {
                 val id = DocumentsContract.getDocumentId(it)
                 if (it.authority == "com.android.externalstorage.documents") id else it.toString()
             } ?: epub.path,
         )
+    }
+
+    fun readCover(file: File): ByteArray? = try {
+        CoverFile.decode(file.readText()).pngBytes
+    } catch (_: Exception) {
+        null
     }
 
     private fun sourceUri(book: LibraryBook): Uri? =
