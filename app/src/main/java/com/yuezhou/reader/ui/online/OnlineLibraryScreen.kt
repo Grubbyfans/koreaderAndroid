@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -20,10 +21,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,6 +38,7 @@ import com.yuezhou.reader.core.online.provider.BookProvider
 import com.yuezhou.reader.core.online.provider.CatalogBookProvider
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
+import kotlin.math.abs
 
 /**
  * 在线书库统一入口：作为底部一级「云端」页，顶部书源 Tab 切换。
@@ -147,16 +152,20 @@ private fun CloudEmptyState(onOpenSettings: () -> Unit) {
  * 已抽离到 Pager 外层，由 MainActivity 统一渲染一份，避免随页面整体滑动（阶段 E 评审 P0 修复）。
  *
  * @param providers 当前可用书源列表。
- * @param selectedProgress 每个书源 id → 选中进度（0~1）。由外层按 Pager 连续浮点位置计算，
- *   使选中背景/文字色/字重与手指滑动 100% 同步，消除中点离散翻转导致的闪烁。
+ * @param pageIndices 书源 ID 对应的 Pager 页索引。
+ * @param pagerState 用于在二级栏内读取连续滑动位置。
  * @param onSelect 点击某书源后的回调；由外层负责发起导航（如 `navigateTo("cloud.$id")`）。
  */
 @Composable
 fun CloudSourceTabs(
     providers: List<BookProvider>,
-    selectedProgress: Map<String, Float>,
+    pageIndices: Map<String, Int>,
+    pagerState: PagerState,
     onSelect: (String) -> Unit,
 ) {
+    val pagePosition by remember(pagerState) {
+        derivedStateOf { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+    }
     // 书源较多时等宽分段会挤压名称，改为可横向滚动且保留最小宽度。
     val scrollable = providers.size > 3
     Row(
@@ -170,7 +179,8 @@ fun CloudSourceTabs(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         providers.forEach { provider ->
-            val progress = (selectedProgress[provider.id] ?: 0f).coerceIn(0f, 1f)
+            val pageIndex = pageIndices[provider.id]
+            val progress = if (pageIndex == null) 0f else (1f - abs(pagePosition - pageIndex)).coerceIn(0f, 1f)
             // 只改变透明度，避免透明黑参与颜色插值导致滑动中途变灰。
             val backgroundColor = YuezhouColors.BrandContainer.copy(alpha = progress)
             val textColor = lerp(YuezhouColors.TextSecondary, YuezhouColors.BrandDark, progress)
