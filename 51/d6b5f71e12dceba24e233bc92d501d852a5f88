@@ -1,0 +1,14 @@
+docs/06-多级栏目滑动切换/静读多级栏目滑动切换阶段E实施报告.md
+  h_7f20b2a03eb3b6 145-262,270-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "51d6b5f71e12dceba24e233bc92d501d852a5f88",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
