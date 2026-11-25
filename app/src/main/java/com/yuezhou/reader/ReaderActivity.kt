@@ -10,15 +10,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +56,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Slider
@@ -213,7 +213,8 @@ private fun ReaderScreen(
     var pendingOpen by remember { mutableStateOf<Triple<String, String?, Uri?>?>(null) }
     var openedSource by remember { mutableStateOf<Pair<String, Uri?>?>(null) }
     // 沉浸式面板显隐
-    var panelVisible by remember { mutableStateOf(false) }
+    var readerOverlay by remember { mutableStateOf(ReaderOverlay.Hidden) }
+    val panelVisible = readerOverlay != ReaderOverlay.Hidden
     // 亮度：0..1，null 表示跟随系统；左侧滑动调节后为具体值
     var brightness by remember { mutableStateOf<Float?>(null) }
     // 本次打开是否已恢复过记忆亮度（避免 prefs 刷新时重复应用）
@@ -543,8 +544,8 @@ private fun ReaderScreen(
     }
 
     // 面板打开且音色列表为空时，一次性查询系统 TTS 音色（供朗读前选择男声/女声）
-    LaunchedEffect(panelVisible, availableVoices.isEmpty()) {
-        if (panelVisible && availableVoices.isEmpty()) {
+    LaunchedEffect(readerOverlay, availableVoices.isEmpty()) {
+        if (readerOverlay == ReaderOverlay.Speech && availableVoices.isEmpty()) {
             TtsEngine.queryVoicesOnce(context) { voices ->
                 SpeechVoices.publish(voices)
             }
@@ -783,7 +784,7 @@ private fun ReaderScreen(
             if (drawerState.isOpen) {
                 scope.launch { drawerState.close() }
             } else if (panelVisible) {
-                panelVisible = false
+                readerOverlay = if (readerOverlay == ReaderOverlay.Toolbar) ReaderOverlay.Hidden else ReaderOverlay.Toolbar
             } else {
                 leaveReader()
             }
@@ -798,7 +799,9 @@ private fun ReaderScreen(
                 factory = { ctx ->
                     ReaderWebView(ctx).also { wv ->
                         wv.eventListener = eventListener
-                        wv.onTap = { panelVisible = !panelVisible }
+                        wv.onTap = {
+                            readerOverlay = if (readerOverlay == ReaderOverlay.Hidden) ReaderOverlay.Toolbar else ReaderOverlay.Hidden
+                        }
                         wv.onPageTap = { dir ->
                             if (dir > 0) wv.nextPage() else wv.prevPage()
                         }
@@ -891,8 +894,13 @@ private fun ReaderScreen(
                     kokoroModels = kokoroModels,
                     speaking = speaking || speakRequested,
                     onBack = { leaveReader() },
-                    onDismiss = { panelVisible = false },
-                    onOpenToc = { scope.launch { drawerState.open() } },
+                    overlay = readerOverlay,
+                    onOverlay = { readerOverlay = it },
+                    onDismiss = { readerOverlay = ReaderOverlay.Hidden },
+                    onOpenToc = {
+                        readerOverlay = ReaderOverlay.Toolbar
+                        scope.launch { drawerState.open() }
+                    },
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
                     onPrefsChange = { p ->
@@ -1059,6 +1067,10 @@ private fun themeBackground(theme: String): Color = when (theme) {
     else -> Color(0xFFFAF9F7)
 }
 
+private enum class ReaderOverlay(val title: String) {
+    Hidden(""), Toolbar(""), Layout("排版"), Theme("主题"), Speech("朗读"), More("更多")
+}
+
 @Composable
 private fun ReaderPanel(
     title: String,
@@ -1070,6 +1082,8 @@ private fun ReaderPanel(
     kokoroModels: List<KokoroModel>,
     speaking: Boolean,
     onBack: () -> Unit,
+    overlay: ReaderOverlay,
+    onOverlay: (ReaderOverlay) -> Unit,
     onDismiss: () -> Unit,
     onOpenToc: () -> Unit,
     onImport: () -> Unit,
@@ -1078,10 +1092,25 @@ private fun ReaderPanel(
     onSync: () -> Unit,
     onSpeak: () -> Unit,
 ) {
-    // 设置区折叠状态
-    var settingsExpanded by remember { mutableStateOf(false) }
     // 进度滑块拖动中的本地预览值；null 表示未在拖动（跟随真实 fraction）
     var fractionPreview by remember { mutableStateOf<Float?>(null) }
+    val appColors = MaterialTheme.colorScheme
+    val dark = prefs.theme == "dark" || prefs.theme == "night-blue"
+    val surface = if (prefs.theme == "light") appColors.surface else themeBackground(prefs.theme)
+    val panelColors = appColors.copy(
+        surface = surface,
+        surfaceContainer = surface,
+        surfaceContainerHigh = surface,
+        onSurface = if (dark) Color(0xFFE8E9E1) else Color(0xFF252821),
+        onSurfaceVariant = if (dark) Color(0xFFBDC7B8) else Color(0xFF51584B),
+        primary = if (dark) Color(0xFFB0C5A4) else Color(0xFF526B53),
+        onPrimary = if (dark) Color(0xFF202D1E) else Color.White,
+        secondaryContainer = if (dark) Color(0xFF394B36) else Color(0xFFDCE3CF),
+        onSecondaryContainer = if (dark) Color(0xFFE2E9D9) else Color(0xFF344E36),
+        outline = if (dark) Color(0xFF869083) else Color(0xFF737867),
+        outlineVariant = if (dark) Color(0xFF53594E) else Color(0xFFC4C6B7),
+    )
+    MaterialTheme(colorScheme = panelColors) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val panelMaxHeight = maxHeight / 2
         // 全屏透明点击层：拦截对正文/翻页区的点击，直接隐藏面板
@@ -1177,30 +1206,29 @@ private fun ReaderPanel(
                     }
                     // 底部操作：目录 + 朗读 + 同步 + 设置（设置默认收起）
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
                     ) {
                         PanelAction("目录", onClick = onOpenToc)
-                        PanelAction(if (speaking) "停止朗读" else "朗读", onClick = onSpeak)
-                        PanelAction("同步", onClick = onSync)
-                        PanelAction(
-                            if (settingsExpanded) "收起设置" else "设置",
-                            onClick = { settingsExpanded = !settingsExpanded },
-                        )
+                        listOf(ReaderOverlay.Layout, ReaderOverlay.Theme, ReaderOverlay.Speech, ReaderOverlay.More).forEach { item ->
+                            FilterChip(
+                                selected = overlay == item,
+                                onClick = { onOverlay(if (overlay == item) ReaderOverlay.Toolbar else item) },
+                                label = { Text(item.title, maxLines = 1) },
+                            )
+                        }
                     }
-                    // 底部面板最多占半屏；操作栏固定，设置内容超出剩余高度时滚动。
-                    AnimatedVisibility(
-                        visible = settingsExpanded,
-                        enter = expandVertically(tween(240)) + fadeIn(tween(240)),
-                        exit = shrinkVertically(tween(220)) + fadeOut(tween(180)),
-                        modifier = Modifier.weight(1f, fill = false),
-                    ) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (overlay != ReaderOverlay.Toolbar && overlay != ReaderOverlay.Hidden) {
+                        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                             SettingsControls(
+                                overlay = overlay,
                                 prefs = prefs,
                                 voices = voices,
                                 kokoroModels = kokoroModels,
+                                speaking = speaking,
                                 onPrefsChange = onPrefsChange,
+                                onSync = onSync,
+                                onSpeak = onSpeak,
                             )
                         }
                     }
@@ -1208,6 +1236,7 @@ private fun ReaderPanel(
             }
         }
         }
+    }
     }
 }
 
@@ -1218,10 +1247,14 @@ private fun PanelAction(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun SettingsControls(
+    overlay: ReaderOverlay,
     prefs: ReaderPreferences,
     voices: List<TtsVoice>,
     kokoroModels: List<KokoroModel>,
+    speaking: Boolean,
     onPrefsChange: (ReaderPreferences) -> Unit,
+    onSync: () -> Unit,
+    onSpeak: () -> Unit,
 ) {
     // 拖动中的本地预览值；null 表示未拖动（跟随真实 prefs），松手才提交，避免连续写 DataStore + 重排全文
     var fontSizePreview by remember { mutableStateOf<Int?>(null) }
@@ -1229,187 +1262,211 @@ private fun SettingsControls(
     // 语速预览值；null 表示未拖动
     var ratePreview by remember { mutableStateOf<Float?>(null) }
     Column(modifier = Modifier.fillMaxWidth()) {
-        ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
-            onPrefsChange(prefs.copy(fontWeight = w))
-        })
-        // 字号
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("字号", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.width(12.dp))
-            Text(
-                "${fontSizePreview ?: prefs.fontSize}",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.width(32.dp),
-                textAlign = TextAlign.Center,
-            )
-            Slider(
-                value = (fontSizePreview ?: prefs.fontSize).toFloat(),
-                onValueChange = { fontSizePreview = it.toInt() },
-                onValueChangeFinished = {
-                    val v = fontSizePreview
-                    if (v != null) {
-                        onPrefsChange(prefs.copy(fontSize = v))
-                        fontSizePreview = null
-                    }
-                },
-                valueRange = 12f..30f,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        // 行距
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("行距", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.width(12.dp))
-            Text(
-                String.format("%.1f", lineHeightPreview ?: prefs.lineHeight),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.width(32.dp),
-                textAlign = TextAlign.Center,
-            )
-            Slider(
-                value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
-                onValueChange = { lineHeightPreview = it.toDouble() },
-                onValueChangeFinished = {
-                    val v = lineHeightPreview
-                    if (v != null) {
-                        onPrefsChange(prefs.copy(lineHeight = v))
-                        lineHeightPreview = null
-                    }
-                },
-                valueRange = 1.2f..2.5f,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        // 主题
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("主题", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.width(12.dp))
-            listOf(
-                "light" to "浅色",
-                "sepia" to "米黄",
-                "dark" to "深色",
-                "green" to "护眼",
-                "night-blue" to "夜蓝",
-            ).forEach { (value, label) ->
-                TextButton(onClick = { onPrefsChange(prefs.copy(theme = value)) }) {
-                    Text(
-                        label,
-                        color = if (prefs.theme == value) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (prefs.theme == value) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
-            }
-        }
-        // 翻页模式
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("翻页", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.width(12.dp))
-            TextButton(onClick = { onPrefsChange(prefs.copy(vertical = false)) }) {
-                Text(
-                    "左右",
-                    color = if (!prefs.vertical) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = if (!prefs.vertical) FontWeight.Bold else FontWeight.Normal,
-                )
-            }
-            TextButton(onClick = { onPrefsChange(prefs.copy(vertical = true)) }) {
-                Text(
-                    "上下",
-                    color = if (prefs.vertical) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = if (prefs.vertical) FontWeight.Bold else FontWeight.Normal,
-                )
-            }
-        }
-        // 翻页动画方式
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("动画", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.width(12.dp))
-            listOf(
-                "none" to "无",
-                "slide" to "滑动",
-            ).forEach { (value, label) ->
-                TextButton(onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) }) {
-                    Text(
-                        label,
-                        color = if (prefs.pageAnimation == value) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (prefs.pageAnimation == value) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
-            }
-        }
-        // 朗读语速
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("语速", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.width(12.dp))
-            Text(
-                String.format("%.1fx", ratePreview ?: prefs.speechRate),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.width(44.dp),
-                textAlign = TextAlign.Center,
-            )
-            Slider(
-                value = (ratePreview ?: prefs.speechRate).coerceIn(0.5f, 2.0f),
-                onValueChange = { ratePreview = it },
-                onValueChangeFinished = {
-                    val v = ratePreview
-                    if (v != null) {
-                        onPrefsChange(prefs.copy(speechRate = v))
-                        ratePreview = null
-                    }
-                },
-                valueRange = 0.5f..2.0f,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        // 朗读引擎：测试版装配 Kokoro 后才显示切换；正式版固定系统 TTS。
-        if (kokoroModels.isNotEmpty()) {
+        if (overlay == ReaderOverlay.Layout) {
+            ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
+                onPrefsChange(prefs.copy(fontWeight = w))
+            })
+            // 字号
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("引擎", style = MaterialTheme.typography.bodyMedium)
+                Text("字号", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.width(12.dp))
-                TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "system")) }) {
+                Text(
+                    "${fontSizePreview ?: prefs.fontSize}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.width(32.dp),
+                    textAlign = TextAlign.Center,
+                )
+                Slider(
+                    value = (fontSizePreview ?: prefs.fontSize).toFloat(),
+                    onValueChange = { fontSizePreview = it.toInt() },
+                    onValueChangeFinished = {
+                        val v = fontSizePreview
+                        if (v != null) {
+                            onPrefsChange(prefs.copy(fontSize = v))
+                            fontSizePreview = null
+                        }
+                    },
+                    valueRange = 12f..30f,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            // 行距
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("行距", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    String.format("%.1f", lineHeightPreview ?: prefs.lineHeight),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.width(32.dp),
+                    textAlign = TextAlign.Center,
+                )
+                Slider(
+                    value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
+                    onValueChange = { lineHeightPreview = it.toDouble() },
+                    onValueChangeFinished = {
+                        val v = lineHeightPreview
+                        if (v != null) {
+                            onPrefsChange(prefs.copy(lineHeight = v))
+                            lineHeightPreview = null
+                        }
+                    },
+                    valueRange = 1.2f..2.5f,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            var marginPreview by remember { mutableStateOf<Int?>(null) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("页边距 ${marginPreview ?: prefs.pageMargin}", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = (marginPreview ?: prefs.pageMargin).toFloat(),
+                    onValueChange = { marginPreview = it.toInt() },
+                    onValueChangeFinished = {
+                        marginPreview?.let { onPrefsChange(prefs.copy(pageMargin = it)) }
+                        marginPreview = null
+                    },
+                    valueRange = 0f..48f,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            // 翻页模式
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("翻页", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.width(12.dp))
+                TextButton(onClick = { onPrefsChange(prefs.copy(vertical = false)) }) {
                     Text(
-                        "系统 TTS",
-                        color = if (prefs.speechEngine != "kokoro") MaterialTheme.colorScheme.primary
+                        "左右",
+                        color = if (!prefs.vertical) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (prefs.speechEngine != "kokoro") FontWeight.Bold else FontWeight.Normal,
+                        fontWeight = if (!prefs.vertical) FontWeight.Bold else FontWeight.Normal,
                     )
                 }
-                TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "kokoro")) }) {
+                TextButton(onClick = { onPrefsChange(prefs.copy(vertical = true)) }) {
                     Text(
-                        "Kokoro",
-                        color = if (prefs.speechEngine == "kokoro") MaterialTheme.colorScheme.primary
+                        "上下",
+                        color = if (prefs.vertical) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (prefs.speechEngine == "kokoro") FontWeight.Bold else FontWeight.Normal,
+                        fontWeight = if (prefs.vertical) FontWeight.Bold else FontWeight.Normal,
                     )
                 }
             }
-            if (prefs.speechEngine == "kokoro") {
+            // 翻页动画方式
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("动画", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.width(12.dp))
+                listOf(
+                    "none" to "无",
+                    "slide" to "滑动",
+                ).forEach { (value, label) ->
+                    TextButton(onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) }) {
+                        Text(
+                            label,
+                            color = if (prefs.pageAnimation == value) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (prefs.pageAnimation == value) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+        }
+        if (overlay == ReaderOverlay.Theme) {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf("light" to "浅色", "sepia" to "米黄", "green" to "护眼",
+                    "dark" to "深色", "night-blue" to "夜蓝").forEach { (value, title) ->
+                    FilterChip(
+                        selected = prefs.theme == value,
+                        onClick = { onPrefsChange(prefs.copy(theme = value)) },
+                        label = {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(Modifier.size(14.dp).background(themeBackground(value), RoundedCornerShape(4.dp)))
+                                Text(title)
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        if (overlay == ReaderOverlay.Speech) {
+            TextButton(onClick = onSpeak) { Text(if (speaking) "停止朗读" else "开始朗读") }
+            // 朗读语速
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("语速", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    String.format("%.1fx", ratePreview ?: prefs.speechRate),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.width(44.dp),
+                    textAlign = TextAlign.Center,
+                )
+                Slider(
+                    value = (ratePreview ?: prefs.speechRate).coerceIn(0.5f, 2.0f),
+                    onValueChange = { ratePreview = it },
+                    onValueChangeFinished = {
+                        val v = ratePreview
+                        if (v != null) {
+                            onPrefsChange(prefs.copy(speechRate = v))
+                            ratePreview = null
+                        }
+                    },
+                    valueRange = 0.5f..2.0f,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            // 朗读引擎：测试版装配 Kokoro 后才显示切换；正式版固定系统 TTS。
+            if (kokoroModels.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("模型", style = MaterialTheme.typography.bodyMedium)
+                    Text("引擎", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.width(12.dp))
-                    kokoroModels.forEach { model ->
-                        TextButton(onClick = { onPrefsChange(prefs.copy(kokoroModel = model.id)) }) {
-                            Text(
-                                model.label,
-                                color = if (prefs.kokoroModel == model.id) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = if (prefs.kokoroModel == model.id) FontWeight.Bold else FontWeight.Normal,
-                            )
+                    TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "system")) }) {
+                        Text(
+                            "系统 TTS",
+                            color = if (prefs.speechEngine != "kokoro") MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (prefs.speechEngine != "kokoro") FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                    TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "kokoro")) }) {
+                        Text(
+                            "Kokoro",
+                            color = if (prefs.speechEngine == "kokoro") MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (prefs.speechEngine == "kokoro") FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+                if (prefs.speechEngine == "kokoro") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("模型", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.width(12.dp))
+                        kokoroModels.forEach { model ->
+                            TextButton(onClick = { onPrefsChange(prefs.copy(kokoroModel = model.id)) }) {
+                                Text(
+                                    model.label,
+                                    color = if (prefs.kokoroModel == model.id) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (prefs.kokoroModel == model.id) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            }
                         }
                     }
+                    KokoroSpeakerPreference(prefs.kokoroSpeaker) { id ->
+                        onPrefsChange(prefs.copy(kokoroSpeaker = id))
+                    }
                 }
-                KokoroSpeakerPreference(prefs.kokoroSpeaker) { id ->
-                    onPrefsChange(prefs.copy(kokoroSpeaker = id))
+            }
+            if (prefs.speechEngine != "kokoro") {
+                SpeechVoicePreference(voices, prefs.speechVoice) { name ->
+                    onPrefsChange(prefs.copy(speechVoice = name))
                 }
             }
         }
-        if (prefs.speechEngine != "kokoro") {
-            SpeechVoicePreference(voices, prefs.speechVoice) { name ->
-                onPrefsChange(prefs.copy(speechVoice = name))
-            }
+        if (overlay == ReaderOverlay.More) {
+            TextButton(onClick = onSync) { Text("阅读进度同步") }
         }
     }
 }
