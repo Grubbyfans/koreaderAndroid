@@ -90,7 +90,8 @@ class LibraryStore(private val context: Context) {
         val entries = if (libraryFile.exists()) {
             try {
                 val catalog = LibraryCatalog.decode(libraryFile.readText())
-                catalog.books.mapNotNull { book -> toEntry(book) }
+                val titles = readTitles()
+                catalog.books.mapNotNull { book -> toEntry(book, titles[book.bookId] ?: book.bookId) }
             } catch (e: Exception) {
                 // 书库损坏：按方案约定保留原文件，返回空列表由上层提示，不静默清空。
                 emptyList()
@@ -120,7 +121,7 @@ class LibraryStore(private val context: Context) {
         }
     }
 
-    private fun toEntry(book: LibraryBook): Entry? {
+    private fun toEntry(book: LibraryBook, title: String): Entry? {
         // 正文必须真实存在，否则列表条目视为失效（本地删除后残留记录）。
         val source = sourceUri(book)
         val epub = File(booksDir, book.fileName)
@@ -132,7 +133,6 @@ class LibraryStore(private val context: Context) {
             } else null
         }
         val progress = readProgress(book.bookId)
-        val title = readTitles()[book.bookId] ?: book.bookId
         return Entry(
             bookId = book.bookId,
             fileName = book.fileName,
