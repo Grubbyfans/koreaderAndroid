@@ -1,0 +1,21 @@
+app/src/main/java/com/yuezhou/reader/ui/online/CatalogLibraryScreen.kt
+  s_3055a0147acc5f::t_918227b8b5a79f 11,19,29-31,33-35,38,40-41,43,48,52,54-55,60,64-66,103,112-113,119-125,131,134,137-142,145,147-149,159,162-165,167-170,213-215,231-232,238-408,411-413
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryViewModel.kt
+  s_3055a0147acc5f::t_a942044592c3fb 226,228-233,260-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "66539e20786b68436ce538bce916e5b23dd048d0",
+  "prompts": {},
+  "sessions": {
+    "s_3055a0147acc5f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2114b-e4b9-7853-a6c4-223dc3d2e21c",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
