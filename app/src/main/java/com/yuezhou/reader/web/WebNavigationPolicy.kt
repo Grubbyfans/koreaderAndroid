@@ -3,14 +3,18 @@ package com.yuezhou.reader.web
 import java.net.URI
 
 /**
- * 网页容器导航策略（阶段 C，纯 JVM 逻辑便于测试）。
+ * 网页容器导航策略（阶段 C/D，纯 JVM 逻辑便于测试）。
  *
- * 只放行配置服务器及其子域的 HTTPS 主框架导航；其它 HTTPS 域交给系统浏览器；
+ * 放行配置服务器及其子域的 HTTPS 主框架导航；已验证的下载 CDN 交回 WebView，
+ * 由 DownloadListener 接管；其它 HTTPS 域交给系统浏览器；
  * http/file/content/javascript/intent/data 等一律拒绝，避免网页获取应用文件或本地能力。
  */
 object WebNavigationPolicy {
 
-    enum class Decision { ALLOWED, EXTERNAL, BLOCKED }
+    enum class Decision { ALLOWED, DOWNLOAD, EXTERNAL, BLOCKED }
+
+    /** 第二阶段实测的 Z-Library 下载 CDN（dln1.ncdn.ec）；只放行该域及其子域。 */
+    private val DOWNLOAD_HOSTS = setOf("ncdn.ec")
 
     private const val MAX_LOG_URL_CHARS = 300
 
@@ -23,7 +27,16 @@ object WebNavigationPolicy {
         val host = normalizedHost(uri.host) ?: return Decision.BLOCKED
         val hosts = allowedHosts.mapNotNull(::normalizedHost)
         val sameSite = hosts.any { allowed -> host == allowed || host.endsWith(".$allowed") }
-        return if (sameSite) Decision.ALLOWED else Decision.EXTERNAL
+        return when {
+            sameSite -> Decision.ALLOWED
+            isDownloadHost(host) -> Decision.DOWNLOAD
+            else -> Decision.EXTERNAL
+        }
+    }
+
+    fun isDownloadHost(host: String?): Boolean {
+        val normalized = normalizedHost(host) ?: return false
+        return DOWNLOAD_HOSTS.any { allowed -> normalized == allowed || normalized.endsWith(".$allowed") }
     }
 
     /** 仅用于日志/标题的脱敏地址：保留 scheme://host/path，去掉 query、fragment 与 userinfo。 */

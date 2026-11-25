@@ -1,6 +1,7 @@
 package com.yuezhou.reader.ui.online
 
 import android.graphics.BitmapFactory
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -43,12 +44,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.model.OnlineBook
+import com.yuezhou.reader.web.ZLibraryWebEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -85,6 +88,7 @@ fun CatalogLibraryScreen(
     onOpenSettings: () -> Unit,
 ) {
     val downloadedIds by vm.downloadManager.activeRemoteIds.collectAsStateWithLifecycle(initialValue = emptySet())
+    val context = LocalContext.current
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = state.scrollIndex)
     LaunchedEffect(gridState.firstVisibleItemIndex) { vm.saveScroll(gridState.firstVisibleItemIndex) }
     LaunchedEffect(state.submittedKeyword) {
@@ -108,6 +112,14 @@ fun CatalogLibraryScreen(
             )
             Spacer(Modifier.width(8.dp))
             Button(onClick = { vm.search() }, enabled = !state.loading) { Text("搜索") }
+            // 原生搜索被拒绝时仍可完整使用网页搜索；网页、筛选、分页与登录都由站点自身完成。
+            TextButton(
+                onClick = {
+                    if (!ZLibraryWebEntry.launch(context, vm.webBaseUrl(), state.keyword)) {
+                        Toast.makeText(context, "请先配置可用的 Z-Library 服务器", Toast.LENGTH_SHORT).show()
+                    }
+                },
+            ) { Text("网页搜索") }
         }
 
         Row(

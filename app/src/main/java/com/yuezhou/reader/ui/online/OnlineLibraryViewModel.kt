@@ -24,6 +24,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+/** 原生搜索被服务端拒绝时的统一提示；保留网页入口，不展示降级书单冒充结果。 */
+private const val NATIVE_SEARCH_UNAVAILABLE = "原生搜索暂不可用，可使用网页搜索"
+
 /** 单个书源的页面状态：云书源保存列表，检索书源另存搜索词、筛选、分页、滚动与详情。 */
 data class ProviderUiState(
     val items: List<OnlineBook> = emptyList(),
@@ -297,17 +300,20 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             )
             if (requestSeq[id] != seq) return // 过期请求：不污染当前列表
             val merged = if (append) OnlinePageMerger.append(current.items, page.items) else page.items
+            // 服务端拒绝原生搜索时，适配器会降级为「最热门」书单并带 notice。
+            // 按方案 §5 不把热门列表冒充搜索结果：清空列表，只提示可用网页搜索。
+            val fallback = page.notice != null
             states[id] = stateOf(id).copy(
-                items = merged,
-                nextCursor = page.nextCursor,
-                hasMore = page.hasMore && page.nextCursor != null,
+                items = if (fallback) emptyList() else merged,
+                nextCursor = if (fallback) null else page.nextCursor,
+                hasMore = if (fallback) false else page.hasMore && page.nextCursor != null,
                 loading = false,
                 loadingMore = false,
                 refreshing = false,
                 fetchedAt = page.fetchedAt,
                 error = null,
                 searchError = null,
-                notice = page.notice,
+                notice = if (fallback) NATIVE_SEARCH_UNAVAILABLE else page.notice,
                 searched = true,
             )
         } catch (e: CancellationException) {
@@ -436,6 +442,9 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
+    /** 网页搜索使用当前生效服务器；未配置时返回 null，由入口提示先配置。 */
+    fun webBaseUrl(): String? = ZLibraryConfigStore(context).load().servers.baseUrls.firstOrNull()
+
     private fun nextRequestSeq(id: String): Int {
         val seq = (requestSeq[id] ?: 0) + 1
         requestSeq[id] = seq
@@ -448,8 +457,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             ProviderErrorCode.AUTH -> "登录已失效，请重新登录"
             ProviderErrorCode.QUOTA -> "下载额度已用尽"
             ProviderErrorCode.RATE_LIMITED -> "请求过于频繁，请稍后再试"
-            ProviderErrorCode.SERVER_REJECTED ->
-                "Z-Library 服务端暂未开放搜索（HTTP 400 拒绝访问），与账号和本地配置无关；热门书单、详情与下载仍可使用。"
+            ProviderErrorCode.SERVER_REJECTED -> NATIVE_SEARCH_UNAVAILABLE
             else -> e.message ?: "请求失败"
         }
         else -> e.message ?: "网络请求失败"

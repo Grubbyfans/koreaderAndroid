@@ -449,6 +449,45 @@ class BookDownloadManagerTest {
         assertTrue(recent.isFile)
     }
 
+    // —— 12. 系统下载失败记录（阶段 D） ——
+
+    @Test
+    fun `系统下载失败落一条可重试任务且不重复`() = runTest {
+        val f = fixture(UnconfinedTestDispatcher(testScheduler))
+        val transferId = "00000000-0000-4000-8000-000000000011"
+
+        val first = f.manager.recordExternalDownloadFailure(
+            transferId, "三体.epub", "https://example.com/dl/book.epub?token=secret", "", "存储空间不足",
+        )
+        val second = f.manager.recordExternalDownloadFailure(
+            transferId, "三体.epub", "https://example.com/dl/book.epub?token=secret", "", "存储空间不足",
+        )
+
+        assertTrue(first)
+        assertFalse(second)
+        val task = f.store.all().single()
+        assertEquals(DownloadStatus.FAILED, task.status)
+        assertEquals(ZLIBRARY_WEB_PROVIDER_ID, task.providerId)
+        assertEquals("三体.epub", task.fileName)
+        assertEquals("存储空间不足", task.errorMessage)
+        assertEquals("https://example.com/dl/book.epub", task.remoteId)
+    }
+
+    @Test
+    fun `已完成任务不被失败记录覆盖`() = runTest {
+        val f = fixture(UnconfinedTestDispatcher(testScheduler))
+        f.manager.acceptCompletedDownload(f.receipt(TRANSFER_A, name = "三体.epub"))
+        val completed = f.store.all().single()
+
+        val recorded = f.manager.recordExternalDownloadFailure(
+            TRANSFER_A, "三体.epub", null, "", "下载已取消",
+        )
+
+        assertFalse(recorded)
+        assertEquals(DownloadStatus.COMPLETED, f.store.find(completed.taskId)?.status)
+        assertEquals(1, f.store.all().size)
+    }
+
     // —— 测试装配 ——
 
     private fun fixture(dispatcher: CoroutineDispatcher): Fixture {

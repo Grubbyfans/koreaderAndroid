@@ -6,8 +6,11 @@ import com.yuezhou.reader.core.online.provider.ProviderRegistry
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.online.cloud.BaiduBookProvider
 import com.yuezhou.reader.reader.online.cloud.WebDavBookProvider
+import com.yuezhou.reader.reader.online.download.AndroidDownloadManagerGateway
 import com.yuezhou.reader.reader.online.download.BookDownloadManager
+import com.yuezhou.reader.reader.online.download.WebDownloadRegistry
 import com.yuezhou.reader.reader.online.zlibrary.ZLibraryBookProvider
+import com.yuezhou.reader.web.ZLibraryWebDownloadWatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +30,7 @@ object DownloadManagerHolder {
         val registry: ProviderRegistry,
         val zLibraryProvider: ZLibraryBookProvider,
         val manager: BookDownloadManager,
+        val webDownloads: ZLibraryWebDownloadWatcher,
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -40,6 +44,8 @@ object DownloadManagerHolder {
         return synchronized(this) {
             runtime ?: build(context.applicationContext).also { created ->
                 runtime = created
+                // 网页下载由主进程观察：先注册完成广播，再对账上次遗留的系统下载记录。
+                created.webDownloads.start()
                 if (recoveryStarted.compareAndSet(false, true)) {
                     scope.launch { created.manager.recoverInterrupted() }
                 }
@@ -63,6 +69,18 @@ object DownloadManagerHolder {
             notifier = AppDownloadNotifier(app),
             isBookOpen = ReaderActivity::isBookOpen,
         )
-        return Runtime(registry = registry, zLibraryProvider = zLibrary, manager = manager)
+        val webDownloads = ZLibraryWebDownloadWatcher(
+            context = app,
+            manager = manager,
+            registry = WebDownloadRegistry.forContext(app),
+            gateway = AndroidDownloadManagerGateway(app),
+            scope = scope,
+        )
+        return Runtime(
+            registry = registry,
+            zLibraryProvider = zLibrary,
+            manager = manager,
+            webDownloads = webDownloads,
+        )
     }
 }

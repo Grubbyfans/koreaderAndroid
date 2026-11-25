@@ -40,6 +40,27 @@ class WebNavigationPolicyTest {
     }
 
     @Test
+    fun `已验证的下载 CDN 交给 DownloadListener`() {
+        assertEquals(
+            WebNavigationPolicy.Decision.DOWNLOAD,
+            WebNavigationPolicy.classify("https://dln1.ncdn.ec/dl/abc/file.epub", hosts),
+        )
+        assertEquals(
+            WebNavigationPolicy.Decision.DOWNLOAD,
+            WebNavigationPolicy.classify("https://ncdn.ec/file.epub", hosts),
+        )
+        // 形似域名仍按外部站点处理，避免把伪装域当成下载 CDN。
+        assertEquals(
+            WebNavigationPolicy.Decision.EXTERNAL,
+            WebNavigationPolicy.classify("https://ncdn.ec.evil.com/file.epub", hosts),
+        )
+        assertEquals(
+            WebNavigationPolicy.Decision.EXTERNAL,
+            WebNavigationPolicy.classify("https://fake-ncdn.ec/file.epub", hosts),
+        )
+    }
+
+    @Test
     fun `非 HTTPS 与危险 scheme 一律拒绝`() {
         listOf(
             "http://z-lib.io/book/1",

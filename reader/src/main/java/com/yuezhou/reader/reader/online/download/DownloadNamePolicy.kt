@@ -9,7 +9,7 @@ import com.yuezhou.reader.reader.EpubImportFiles
 object DownloadNamePolicy {
     private val genericNames = setOf(
         "download", "downloads", "file", "files", "book", "books", "document", "documents",
-        "attachment", "attachments", "redirect", "index", "untitled", "unknown", "epub",
+        "attachment", "attachments", "redirect", "redirection", "index", "untitled", "unknown", "epub",
         "tmp", "temp", "new", "content", "open", "get", "default", "null",
         "下载", "文件", "书籍", "图书", "未命名", "未知", "附件", "正文",
     )

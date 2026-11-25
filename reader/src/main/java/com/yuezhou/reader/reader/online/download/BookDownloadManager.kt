@@ -336,6 +336,45 @@ class BookDownloadManager(
             }
         }
 
+    /**
+     * 记录系统下载失败/取消（阶段 D）。
+     *
+     * 网页任务在文件完成前不创建任务；只有确认失败时才落一条 FAILED 任务，让用户能在
+     * 下载管理中看到原因并重新发起。已有任务（含已完成/活动中/待命名）一律不覆盖。
+     */
+    suspend fun recordExternalDownloadFailure(
+        transferId: String,
+        suggestedFileName: String?,
+        remoteRef: String?,
+        accountScope: String,
+        reason: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!DownloadHandoffStore.isValidTransferId(transferId)) return@withContext false
+        val taskId = taskIdFor(transferId)
+        acceptLocks.computeIfAbsent(taskId) { Mutex() }.withLock {
+            if (repository.find(taskId) != null) return@withLock false
+            val safeName = DownloadNamePolicy.normalize(suggestedFileName) ?: "book.epub"
+            val now = System.currentTimeMillis()
+            repository.save(
+                OnlineDownloadTask(
+                    taskId = taskId,
+                    providerId = ZLIBRARY_WEB_PROVIDER_ID,
+                    accountScope = accountScope,
+                    remoteId = DownloadHandoffStore.sanitizeRemoteRef(remoteRef).orEmpty(),
+                    bookTitle = safeName.removeSuffix(".epub"),
+                    fileName = safeName,
+                    status = DownloadStatus.FAILED,
+                    overwriteApproved = false,
+                    errorCode = ProviderErrorCode.IO,
+                    errorMessage = reason,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+            true
+        }
+    }
+
     /** 用户确认/修改文件名后继续导入；同名冲突仍由导入前的最后一道检查处理。 */
     suspend fun confirmName(taskId: String, name: String): Boolean = withContext(Dispatchers.IO) {
         val current = repository.find(taskId) ?: return@withContext false

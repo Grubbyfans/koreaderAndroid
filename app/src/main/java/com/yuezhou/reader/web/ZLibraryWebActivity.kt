@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -29,7 +30,13 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -41,7 +48,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - 无 JS bridge、禁用 file/content 访问、禁止 mixed content、SSL 错误一律取消。
  * - 页面状态按导航代次管理；30 秒超时提供继续等待/重试/关闭；渲染器退出后可重建。
  *
- * 下载入口与顶部导航栏属于阶段 D，本类只提供可嵌入的网页容器与安全边界。
+ * 下载入口与顶部导航栏属于阶段 D：下载只接受用户确认后的 HTTPS 交付，经系统
+ * DownloadManager 落到应用私有暂存，再由主进程校验、命名并导入。
  */
 class ZLibraryWebActivity : ComponentActivity() {
 
@@ -60,7 +68,10 @@ class ZLibraryWebActivity : ComponentActivity() {
         }
     }
 
-    private lateinit var root: FrameLayout
+    private lateinit var root: LinearLayout
+    private lateinit var content: FrameLayout
+    private lateinit var hostLabel: TextView
+    private lateinit var historyButton: TextView
     private lateinit var webView: WebView
     private lateinit var overlay: LinearLayout
     private lateinit var overlayTitle: TextView
@@ -72,6 +83,7 @@ class ZLibraryWebActivity : ComponentActivity() {
     private var lastUrl: String? = null
     private var timeout: Runnable? = null
     private var askingExternal = false
+    private var askingDownload = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -143,19 +155,82 @@ class ZLibraryWebActivity : ComponentActivity() {
             // 不覆盖 UA，不注册任何 addJavascriptInterface。
         }
         view.webViewClient = Client()
+        view.setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
+            onDownloadRequested(url, userAgent, contentDisposition, mimeType, contentLength)
+        }
         return view
     }
 
     private fun openWebView(url: String) {
         val view = createWebView()
         webView = view
-        root.addView(view, 0, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        content.addView(view, 0, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         lastUrl = url
+        updateHistoryButton()
         view.loadUrl(url)
     }
 
+    @SuppressLint("SetTextI18n") // 站点名是品牌名，不做本地化。
+    private fun buildTopBar(): LinearLayout {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(4), 0, dp(4), 0)
+        }
+        // 返回 = 结束网页容器回到 Z-Library；浏览器历史由「后退」单独处理。
+        bar.addView(barItem("返回") { finish() }, barParams())
+        hostLabel = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.DKGRAY)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER
+            text = "Z-Library"
+        }
+        bar.addView(hostLabel, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+        historyButton = barItem("后退") { goBackInHistory() }
+        bar.addView(historyButton, barParams())
+        bar.addView(barItem("刷新") { refreshPage() }, barParams())
+        bar.addView(barItem("关闭") { finish() }, barParams())
+        return bar
+    }
+
+    private fun barParams(): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT)
+
+    private fun barItem(label: String, action: () -> Unit): TextView = TextView(this).apply {
+        text = label
+        textSize = 14f
+        setTextColor(Color.BLACK)
+        gravity = Gravity.CENTER
+        setPadding(dp(10), 0, dp(10), 0)
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { action() }
+    }
+
+    private fun updateHistoryButton() {
+        if (!::historyButton.isInitialized) return
+        val canGoBack = ::webView.isInitialized && webView.canGoBack()
+        historyButton.isEnabled = canGoBack
+        historyButton.alpha = if (canGoBack) 1f else 0.35f
+    }
+
+    private fun goBackInHistory() {
+        if (::webView.isInitialized && webView.canGoBack()) webView.goBack()
+    }
+
+    private fun refreshPage() {
+        if (::webView.isInitialized) webView.reload() else lastUrl?.let(::openWebView)
+    }
+
     private fun buildContentView() {
-        root = FrameLayout(this)
+        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content = FrameLayout(this)
+        root.addView(buildTopBar(), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)))
+        root.addView(content, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+
         overlay = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -198,8 +273,14 @@ class ZLibraryWebActivity : ComponentActivity() {
             overlayButtons,
             LinearLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT),
         )
-        root.addView(overlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        content.addView(overlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         setContentView(root)
+        // targetSdk 36 起系统强制 edge-to-edge，顶部栏需让出状态栏/导航栏区域。
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
     }
 
     private fun loadAllowedHosts(): Set<String> {
@@ -215,7 +296,8 @@ class ZLibraryWebActivity : ComponentActivity() {
 
     private fun handleMainFrameNavigation(rawUrl: String): Boolean {
         return when (WebNavigationPolicy.classify(rawUrl, allowedHosts)) {
-            WebNavigationPolicy.Decision.ALLOWED -> false
+            WebNavigationPolicy.Decision.ALLOWED,
+            WebNavigationPolicy.Decision.DOWNLOAD -> false
             WebNavigationPolicy.Decision.EXTERNAL -> {
                 askExternal(rawUrl)
                 true
@@ -237,6 +319,67 @@ class ZLibraryWebActivity : ComponentActivity() {
             .setNegativeButton("取消", null)
             .setOnDismissListener { askingExternal = false }
             .show()
+    }
+
+    // ---------------------------------------------------------------- 下载确认（阶段 D）
+
+    private fun onDownloadRequested(
+        url: String,
+        userAgent: String?,
+        contentDisposition: String?,
+        mimeType: String?,
+        contentLength: Long,
+    ) {
+        if (isFinishing || askingDownload) return
+        val safeUrl = DownloadRequestPolicy.supportedUrl(url)
+        if (safeUrl == null) {
+            toast("暂不支持该下载方式，请在浏览器中下载后手动导入")
+            return
+        }
+        askingDownload = true
+        val name = DownloadRequestPolicy.candidateFileName(contentDisposition, safeUrl)
+        val source = DownloadRequestPolicy.sourceHost(safeUrl) ?: "未知站点"
+        AlertDialog.Builder(this)
+            .setTitle("下载并导入书籍")
+            .setMessage(
+                "来源：$source\n" +
+                    "大小：${DownloadRequestPolicy.sizeText(contentLength)}\n" +
+                    "候选名：${name ?: "下载后按书籍标题确定"}\n\n" +
+                    "文件先下载到应用私有目录，校验后进入下载任务并导入书架；仅下载你有权使用的 EPUB。",
+            )
+            .setPositiveButton("下载并导入") { _, _ ->
+                startDownload(safeUrl, userAgent, contentDisposition, mimeType, contentLength)
+            }
+            .setNegativeButton("取消", null)
+            .setOnDismissListener { askingDownload = false }
+            .show()
+    }
+
+    private fun startDownload(
+        url: String,
+        userAgent: String?,
+        contentDisposition: String?,
+        mimeType: String?,
+        contentLength: Long,
+    ) {
+        // DownloadManager 入队与 Provider 登记都可能在主进程冷启动时短暂阻塞，放到后台线程。
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                ZLibraryWebDownloadStarter(applicationContext).start(
+                    url = url,
+                    userAgent = userAgent,
+                    mimeType = mimeType,
+                    contentDisposition = contentDisposition,
+                    contentLength = contentLength,
+                )
+            }
+            when (result) {
+                is ZLibraryWebDownloadStarter.Result.Started ->
+                    toast("已开始下载，完成后自动导入，可在下载管理中查看")
+                is ZLibraryWebDownloadStarter.Result.Unsupported -> toast(result.message)
+                is ZLibraryWebDownloadStarter.Result.Failed -> toast(result.message)
+            }
+        }
     }
 
     private fun showLoading() {
@@ -349,12 +492,19 @@ class ZLibraryWebActivity : ComponentActivity() {
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
             val decision = WebNavigationPolicy.classify(url, allowedHosts)
-            if (decision != WebNavigationPolicy.Decision.ALLOWED) {
+            if (decision == WebNavigationPolicy.Decision.EXTERNAL || decision == WebNavigationPolicy.Decision.BLOCKED) {
                 view.stopLoading()
                 if (decision == WebNavigationPolicy.Decision.EXTERNAL) askExternal(url) else toast("不支持打开该链接")
                 return
             }
+            // 下载 CDN 的导航交给 DownloadListener；不按页面展示处理，避免残留加载遮罩。
+            if (decision == WebNavigationPolicy.Decision.DOWNLOAD) {
+                hostLabel.text = WebNavigationPolicy.hostOf(url) ?: "Z-Library"
+                return
+            }
             lastUrl = url
+            hostLabel.text = WebNavigationPolicy.hostOf(url) ?: "Z-Library"
+            updateHistoryButton()
             val generation = state.beginNavigation()
             showLoading()
             armTimeout(generation)
@@ -368,6 +518,8 @@ class ZLibraryWebActivity : ComponentActivity() {
         }
 
         override fun onPageFinished(view: WebView, url: String) {
+            hostLabel.text = WebNavigationPolicy.hostOf(url) ?: "Z-Library"
+            updateHistoryButton()
             if (state.markContentVisible(state.generation)) {
                 cancelTimeout()
                 hideOverlay()

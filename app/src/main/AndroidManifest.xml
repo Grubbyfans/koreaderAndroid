@@ -81,6 +81,16 @@
             android:theme="@style/Theme.YuezhouReader"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density"
             android:windowSoftInputMode="adjustResize" />
+
+        <!--
+            Z-Library 网页下载登记（阶段 D）：非导出、只接受同 UID 的 call("watch")。
+            不提供查询/写入通道，避免成为通用文件接口；主进程据此观察系统 DownloadManager。
+        -->
+        <provider
+            android:name=".web.ZLibraryDownloadHandoffProvider"
+            android:authorities="${applicationId}.zlibrary.web"
+            android:exported="false"
+            android:grantUriPermissions="false" />
     </application>
 
 </manifest>
