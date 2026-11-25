@@ -142,7 +142,124 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 
 ---
 
-## 7. 阶段交付状态
+## 7. 评审后修复（P0 修复，`fbc4d00`）
+
+### 7.1 问题
+
+原始阶段 B 把 `CloudSourceTabs` 渲染在每个 `OnlineLibraryScreen` Pager 页面内部，导致：
+
+- 云端书源相互切换时，两条二级导航栏随着相邻页同步横向移动，滑动中途帧出现重复的「书源切换条」。
+- 一级顶部标题栏虽已在 Scaffold 外固定，但云端二级导航没有对齐为固定 UI。
+
+### 7.2 修复方向
+
+- 保留单层 `HorizontalPager` 架构，不引入嵌套 Pager，不改 `ShelfNavigator` 模型。
+- 把 `CloudSourceTabs` 从 `OnlineLibraryScreen` 内部抽离为公开组件，由 `MainActivity` 在 Scaffold 的 content Column 中、Pager 之外统一渲染**一份**。
+- 视觉选中态由 `pagerState.currentPage` 派生，胶囊选中背景/文字色/字重用 `animateColorAsState` 与 `animateFloatAsState` 做平滑过渡，不引入独立业务状态。
+- 一级栏目进出（书库 / 设置 ↔ 云端）使用 `AnimatedVisibility`（渐入渐出 + 纵向收缩），避免布局跳动。
+
+### 7.3 实际修改文件
+
+| 文件 | 改动 |
+| --- | --- |
+| `ui/online/OnlineLibraryScreen.kt` | 删除内部 `CloudSourceTabs` 调用与 `providers` 变量；`CloudSourceTabs` 改为公开顶级 Composable，参数 `selectedId: String?` 可空；选中背景/颜色/字重加入 animate*AsState |
+| `MainActivity.kt` | 在 status row 与 HorizontalPager 之间插入一段：根据 `pagerState.currentPage` 派生 `visualCloudProviderId`、`showCloudTabs`，用 `AnimatedVisibility` 承载固定的 `CloudSourceTabs`；点击回调走 `navigator.navigateTo("cloud.$id")` 且 `pagerBusy` 期间禁用 |
+
+核心片段：
+
+```kotlin
+val visualIndex = pagerState.currentPage.coerceIn(0, navigator.pages.lastIndex)
+val visualPage = navigator.pages.getOrNull(visualIndex)
+val visualCloudProviderId = when (visualPage) {
+    is ShelfPage.Cloud -> visualPage.providerId
+    else -> null
+}
+val showCloudTabs = visualPage?.tab == Tab.云端 &&
+    onlineVm.registry.enabled().isNotEmpty()
+
+AnimatedVisibility(
+    visible = showCloudTabs,
+    enter = fadeIn() + slideInVertically { it / 2 },
+    exit  = shrinkVertically() + fadeOut() + slideOutVertically { it / 2 },
+    label = "cloudTabs",
+) {
+    CloudSourceTabs(
+        providers = onlineVm.registry.enabled(),
+        selectedId = visualCloudProviderId,
+        onSelect = { providerId ->
+            if (!pagerBusy) navigator.navigateTo("cloud.$providerId")
+        },
+    )
+}
+```
+
+### 7.4 视觉状态与业务状态分离
+
+- **业务状态**：`navigator.committedKey` 仍然是唯一真源，驱动业务加载、顶栏标题、底栏选中、下载/搜索入口。
+- **视觉选中态**：完全由 `pagerState.currentPage` 派生。拖动过程中 `currentPage` 跟随，胶囊背景由 animateColorAsState 平滑过渡。
+- **手势取消**：Pager 会 snap 回原页，`currentPage` 自然回退到原下标，选中胶囊随之恢复，无需额外逻辑。
+- **无副作用**：点击二级 Tab 只调用 `navigateTo`，不直接触发网络请求；仍由 `committedKey` 监听链路驱动。
+
+### 7.5 验证记录（Samsung SM_S9360 / Android 14）
+
+#### 7.5.1 代码门禁
+
+| 项目 | 结果 |
+| --- | --- |
+| 单测 | 398 / 398 通过，0 failed，0 skipped（ttsTest 口径 348） |
+| Lint | `0 errors, 52 warnings, 3 hints` |
+| 编译 | `BUILD SUCCESSFUL` |
+| APK 安装 | `Success`（`lastUpdateTime=2026-11-25 16:52:xx`） |
+| 冷启动 | MainActivity 正停，无 `AndroidRuntime` 崩溃 |
+
+#### 7.5.2 滑动中途帧像素级验证
+
+Pixel 分析方法：抓取 10+ 帧（基线 + 慢速左滑 1/4、mid、3/4 + 慢速右滑 mid + 快速连滑 + 回到书库），对 nav bar 顶行（y ≈ 281）逐像素计算与静止参考帧的 MAE，同时扫描 content 区（y=500–1500）查找 nav bar 顶行特征。
+
+| 指标 | 结果 |
+| --- | --- |
+| nav bar 顶行 MAE（mid-swipe） | 0.00 – 5.70（参考帧自身 MAE=0.00） |
+| content 区重复 nav bar 匹配 | **0**（假阳性为全白背景行，已排除） |
+| 如 nav bar 随页面平移的 MAE | 应 > 100，实际 ≤ 5.7 |
+
+结论：**二级导航条固定在顶部，滑动中间帧无重复副本**。
+
+#### 7.5.3 关键交互回归
+
+| 场景 | 结果 |
+| --- | --- |
+| 云端内慢速左滑（baidu → webdav → zlibrary） | 二级导航固定，选中胶囊平滑过渡 |
+| 云端内慢速右滑（zlibrary → webdav → baidu） | 同上 |
+| 快速连滑 2 页 | 最后落页生效，nav bar 始终一条 |
+| 云端 → 书库（向右滑） | 二级 nav 平滑收缩淡出，Pager 剩余空间自然承接，无跳动 |
+| 书库 → 云端 | 二级 nav 渐入，顶栏/底栏正确切换 |
+| 云端 → 设置 → 云端 | 二级 nav 随云端页进出正确显隐 |
+| 连续点击二级 Tab + 手势打断 | requestedKey/clearRequest 链路已覆盖（阶段 A 单测 19 条） |
+| 全部书源禁用（CloudEmpty） | `registry.enabled().isNotEmpty()` 为 false → 二级 nav 不渲染，空态页独立呈现 |
+| 切换期间点击二级 Tab | `pagerBusy` 拦截，不产生重复导航 |
+
+#### 7.5.4 未验证项（环境/账号限制）
+
+| 项 | 原因 |
+| --- | --- |
+| WebDAV 真实后端连接 | 当前账号未配置可用 WebDAV 服务 |
+| Z-Library 额度查询 & 下载 | 受代理/网络环境限制（返回「安全连接失败」） |
+| Z-Library 网页搜索降级路径 | 同网络环境限制 |
+| 设置页滚动位置恢复截图级比对 | 代码路径已覆盖（ScrollState + onDispose），未做截图级验证 |
+| 长时重复切换内存增长采样 | 未单独跑长时间压测 |
+
+上述未验证项已按评审要求明确标记，不列为通过。
+
+### 7.6 修复后提交链
+
+| 提交 | 说明 |
+| --- | --- |
+| `fbc4d00` | **P0 修复提交**：抽离 CloudSourceTabs + 视觉态派生 + AnimatedVisibility |
+| `2e0dc40` → `09af5ef` | 阶段 A–E 核心提交链保持不变 |
+
+---
+
+## 8. 阶段交付状态
 
 | 阶段 | 提交 | 状态 |
 | --- | --- | --- |
@@ -150,4 +267,5 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 | B Pager 骨架与点击导航 | `d2320be` | 已完成 |
 | C 手势与滑动闸门 | `ee91ef8` | 已完成 |
 | D 状态恢复、动态书源与开关 | `f392949` | 已完成 |
-| E 网络收敛与全量回归 | `2e0dc40` | 已完成，APK 已安装 |
+| E 网络收敛与全量回归 | `2e0dc40` | 已完成 |
+| E 评审后 P0 修复 | `fbc4d00` | **已完成，像素级验证通过，APK 已重新安装** |
