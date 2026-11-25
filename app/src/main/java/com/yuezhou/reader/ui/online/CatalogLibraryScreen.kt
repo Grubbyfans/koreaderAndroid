@@ -466,6 +466,21 @@ private fun CatalogResults(
                         .padding(vertical = 12.dp),
                     horizontalArrangement = Arrangement.Center,
                 ) { CircularProgressIndicator(modifier = Modifier.height(22.dp)) }
+                state.loadMoreError != null -> Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        "加载更多失败：${state.loadMoreError}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFC0392B),
+                        textAlign = TextAlign.Center,
+                    )
+                    OutlinedButton(
+                        onClick = { vm.loadMore() },
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) { Text("重试") }
+                }
                 state.hasMore -> OutlinedButton(
                     onClick = { vm.loadMore() },
                     modifier = Modifier.fillMaxWidth(),

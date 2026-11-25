@@ -52,6 +52,8 @@ data class ProviderUiState(
     val nextCursor: String? = null,
     val hasMore: Boolean = false,
     val loadingMore: Boolean = false,
+    /** 分页追加失败的原因；只在列表底部展示，不覆盖已有结果。 */
+    val loadMoreError: String? = null,
     val searchError: String? = null,
     /** 当前列表的来源；热门书单无分页，刷新时按来源选择接口。 */
     val resultSource: CatalogSource = CatalogSource.NONE,
@@ -242,6 +244,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
                 hasMore = false,
                 loading = false,
                 loadingMore = false,
+                loadMoreError = null,
                 refreshing = false,
                 fetchedAt = page.fetchedAt,
                 searchError = null,
@@ -332,6 +335,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             notice = null,
             loading = true,
             loadingMore = false,
+            loadMoreError = null,
             refreshing = false,
             resultSource = CatalogSource.NONE,
             detail = null,
@@ -344,7 +348,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         val current = stateOf(id)
         if (current.loading || current.loadingMore || !current.hasMore || current.nextCursor == null) return
         val seq = nextRequestSeq(id)
-        states[id] = current.copy(loadingMore = true, error = null)
+        states[id] = current.copy(loadingMore = true, loadMoreError = null, error = null)
         jobs[id] = viewModelScope.launch { doSearch(id, current.submittedKeyword, append = true, seq = seq) }
     }
 
@@ -373,6 +377,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
                 hasMore = if (fallback) false else page.hasMore && page.nextCursor != null,
                 loading = false,
                 loadingMore = false,
+                loadMoreError = null,
                 refreshing = false,
                 fetchedAt = page.fetchedAt,
                 error = null,
@@ -385,12 +390,17 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             throw e
         } catch (e: Exception) {
             if (requestSeq[id] != seq) return
-            states[id] = stateOf(id).copy(
-                loading = false,
-                loadingMore = false,
-                refreshing = false,
-                searchError = readableError(e),
-            )
+            // 分页失败不影响已加载结果：错误只落在列表底部，由「重试」重新追加。
+            states[id] = if (append) {
+                stateOf(id).copy(loadingMore = false, loadMoreError = readableError(e))
+            } else {
+                stateOf(id).copy(
+                    loading = false,
+                    loadingMore = false,
+                    refreshing = false,
+                    searchError = readableError(e),
+                )
+            }
         }
     }
 
