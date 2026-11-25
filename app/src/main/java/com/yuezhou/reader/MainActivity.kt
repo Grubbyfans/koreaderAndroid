@@ -34,10 +34,12 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
@@ -122,6 +124,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.ui.LibraryUiPrefs
+import com.yuezhou.reader.ui.LibrarySort
+import com.yuezhou.reader.ui.LocalLibraryFilters
+import com.yuezhou.reader.ui.ReadingFilter
 import com.yuezhou.reader.ui.settings.SettingsPage
 import com.yuezhou.reader.ui.navigation.ShelfNavigator
 import com.yuezhou.reader.ui.navigation.ShelfPage
@@ -213,10 +218,26 @@ private fun BookshelfScreen() {
 
     val store = remember { LibraryStore(context) }
     var hiddenBooks by remember { mutableStateOf(store.hiddenBookIds()) }
-    // 书架排序：按最近阅读时间倒序（读过的书排最前），从未读过的书排最后
-    val visibleBooks = remember(books, hiddenBooks) {
-        books.filter { it.bookId !in hiddenBooks }
-            .sortedByDescending { it.lastReadAt ?: Long.MIN_VALUE }
+    var localQuery by rememberSaveable { mutableStateOf("") }
+    var readingFilter by rememberSaveable { mutableStateOf(ReadingFilter.ALL) }
+    var librarySort by rememberSaveable { mutableStateOf(LibrarySort.RECENT) }
+    val query = localQuery.trim()
+    val searching = query.isNotEmpty()
+    val shelfBooks = remember(books, hiddenBooks) { books.filter { it.bookId !in hiddenBooks } }
+    var shelfAuthors by remember(shelfBooks) { mutableStateOf<Map<String, List<String>>?>(null) }
+    LaunchedEffect(shelfBooks, searching) {
+        if (searching && shelfAuthors == null) shelfAuthors = store.shelfAuthors(shelfBooks)
+    }
+    val visibleBooks = remember(shelfBooks, query, readingFilter, librarySort, shelfAuthors) {
+        val matching = shelfBooks.filter { book ->
+            readingFilter.matches(book) && (!searching || book.title.contains(query, ignoreCase = true) ||
+                book.fileName.contains(query, ignoreCase = true) ||
+                shelfAuthors?.get(book.bookId).orEmpty().any { it.contains(query, ignoreCase = true) })
+        }
+        when (librarySort) {
+            LibrarySort.RECENT -> matching.sortedByDescending { it.lastReadAt ?: Long.MIN_VALUE }
+            LibrarySort.TITLE -> matching.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+        }
     }
     val removedBooks = books.filter { it.bookId in hiddenBooks }
     val cloudSync = remember { CloudSync(context) }
@@ -535,7 +556,7 @@ private fun BookshelfScreen() {
                         )
                     },
                     actions = {
-                        val allSelected = visibleBooks.isNotEmpty() && selected.size == visibleBooks.size
+                        val allSelected = visibleBooks.isNotEmpty() && visibleBooks.all { it.bookId in selected }
                         Text(
                             if (allSelected) "取消全选" else "全选",
                             style = MaterialTheme.typography.bodyMedium,
@@ -804,6 +825,17 @@ private fun BookshelfScreen() {
             ) { index ->
                 when (val page = navigator.pages.getOrNull(index)) {
                     ShelfPage.LocalShelf -> Column(Modifier.fillMaxSize()) {
+                        if (selecting == null) {
+                            LocalLibraryFilters(
+                                query = localQuery,
+                                onQueryChange = { localQuery = it },
+                                filter = readingFilter,
+                                onFilterChange = { readingFilter = it },
+                                sort = librarySort,
+                                onSortChange = { librarySort = it },
+                                swipeBlocker = swipeBlocker,
+                            )
+                        }
                         if (scanning) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -817,6 +849,10 @@ private fun BookshelfScreen() {
                         BookshelfContent(
                             books = visibleBooks,
                             loading = loading,
+                            query = query,
+                            readingFilter = readingFilter,
+                            librarySort = librarySort,
+                            authorSearchLoading = searching && shelfAuthors == null,
                             gridMode = localGridMode,
                             selecting = selecting,
                             navigationLocked = pagerBusy,
@@ -1621,6 +1657,10 @@ private fun formatSize(bytes: Long): String {
 private fun BookshelfContent(
     books: List<LibraryStore.Entry>,
     loading: Boolean,
+    query: String,
+    readingFilter: ReadingFilter,
+    librarySort: LibrarySort,
+    authorSearchLoading: Boolean,
     gridMode: Boolean,
     selecting: Set<String>?,
     navigationLocked: Boolean,
@@ -1630,8 +1670,16 @@ private fun BookshelfContent(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val localPrefs = remember(context) { LibraryUiPrefs(context) }
-    val gridState = rememberRestoredGridState("local", localPrefs)
-    val listState = rememberRestoredListState("local.list", localPrefs)
+    val filtering = query.isNotEmpty() || readingFilter != ReadingFilter.ALL
+    val temporaryResults = filtering || librarySort != LibrarySort.RECENT
+    val gridState = if (temporaryResults) rememberLazyGridState() else rememberRestoredGridState("local", localPrefs)
+    val listState = if (temporaryResults) rememberLazyListState() else rememberRestoredListState("local.list", localPrefs)
+    LaunchedEffect(query, readingFilter, librarySort) {
+        if (temporaryResults) {
+            gridState.scrollToItem(0)
+            listState.scrollToItem(0)
+        }
+    }
 
     fun openBook(book: LibraryStore.Entry) {
         if (selecting != null) {
@@ -1645,9 +1693,14 @@ private fun BookshelfContent(
     }
 
     when {
-        loading -> {
+        loading || (books.isEmpty() && authorSearchLoading) -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
+            }
+        }
+        books.isEmpty() && filtering -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("没有匹配的书籍", color = YuezhouColors.TextSecondary)
             }
         }
         books.isEmpty() -> {

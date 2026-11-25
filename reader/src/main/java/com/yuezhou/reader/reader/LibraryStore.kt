@@ -10,6 +10,7 @@ import com.yuezhou.reader.core.protocol.LibraryCatalog
 import com.yuezhou.reader.core.protocol.LibraryCatalogData
 import com.yuezhou.reader.core.protocol.ProgressRecords
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -98,6 +99,25 @@ class LibraryStore(private val context: Context) {
             emptyList()
         }
         Snapshot(entries)
+    }
+
+    suspend fun shelfAuthors(books: List<Entry>): Map<String, List<String>> = withContext(Dispatchers.IO) {
+        buildMap {
+            for (book in books) {
+                ensureActive()
+                val source = book.sourceUri
+                val authors = if (source == null) {
+                    CoverExtractor.extractAuthors(File(book.localPath))
+                } else {
+                    runCatching {
+                        context.contentResolver.openFileDescriptor(source, "r")?.use { descriptor ->
+                            CoverExtractor.extractAuthors(File("/proc/self/fd/${descriptor.fd}"))
+                        }.orEmpty()
+                    }.getOrDefault(emptyList())
+                }
+                if (authors.isNotEmpty()) put(book.bookId, authors)
+            }
+        }
     }
 
     private fun toEntry(book: LibraryBook): Entry? {

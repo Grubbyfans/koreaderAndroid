@@ -6,7 +6,10 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.util.Xml
+import org.xmlpull.v1.XmlPullParser
 import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -74,6 +77,35 @@ object CoverExtractor {
             require(container != null && container.size in 1..65536) { "EPUB 缺少有效的容器清单" }
             val opf = locateOpf(zip)?.let(zip::getEntry)
             require(opf != null && !opf.isDirectory && opf.size > 0) { "EPUB 缺少有效的书籍清单" }
+        }
+    }
+
+    internal fun extractAuthors(epubFile: File): List<String> {
+        return try {
+            ZipFile(epubFile).use { zip ->
+                val container = zip.getEntry("META-INF/container.xml")
+                if (container == null || container.size !in 1..65536) return emptyList()
+                val opf = locateOpf(zip)?.let(zip::getEntry) ?: return emptyList()
+                if (opf.size !in 1..(4L * 1024 * 1024)) return emptyList()
+
+                val bytes = ByteArray(opf.size.toInt())
+                DataInputStream(zip.getInputStream(opf)).use { it.readFully(bytes) }
+                val parser = Xml.newPullParser().apply {
+                    setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+                    setInput(bytes.inputStream(), null)
+                }
+                buildList {
+                    while (parser.next() != XmlPullParser.END_DOCUMENT) {
+                        if (parser.eventType == XmlPullParser.START_TAG && parser.name == "creator" &&
+                            parser.namespace == "http://purl.org/dc/elements/1.1/"
+                        ) {
+                            parser.nextText().trim().takeIf { it.isNotEmpty() }?.let(::add)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
