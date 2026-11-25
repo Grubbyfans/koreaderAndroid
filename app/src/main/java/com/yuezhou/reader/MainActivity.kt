@@ -17,6 +17,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -60,6 +63,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -224,6 +228,7 @@ private fun BookshelfScreen() {
     val query = localQuery.trim()
     val searching = query.isNotEmpty()
     val shelfBooks = remember(books, hiddenBooks) { books.filter { it.bookId !in hiddenBooks } }
+    val localBookIds = remember(books) { books.mapTo(mutableSetOf()) { it.bookId } }
     val visibleAuthorCache = remember(shelfBooks) { mutableMapOf<String, String?>() }
     var shelfAuthors by remember(shelfBooks) { mutableStateOf<Map<String, List<String>>?>(null) }
     LaunchedEffect(shelfBooks, searching) {
@@ -495,6 +500,8 @@ private fun BookshelfScreen() {
     var showSyncLogPage by rememberSaveable { mutableStateOf(false) }
     var showZLibrarySettings by rememberSaveable { mutableStateOf(false) }
     var showServerSettings by rememberSaveable { mutableStateOf(false) }
+    var cloudSetupProvider by rememberSaveable { mutableStateOf<String?>(null) }
+    var cloudSetupReturn by rememberSaveable { mutableStateOf<String?>(null) }
     val fullscreenSubPage = showSyncLogPage || showZLibrarySettings || showServerSettings
 
     // 系统返回键逐层退出二级页，恢复原有导航结构（方案 §3.1）。
@@ -883,12 +890,17 @@ private fun BookshelfScreen() {
                             providerId = provider,
                             interactionsEnabled = !pagerBusy && page.key == navigator.committedKey,
                             swipeBlocker = swipeBlocker,
+                            localBookIds = localBookIds,
                             onRefresh = {
                                 if (!pagerBusy && provider != null) refreshRemoteLibrary(provider)
                             },
                             onOpenDetail = { if (!pagerBusy) detailBook = it },
                             onOpenDownloads = { showOnlineDownloads = true },
                             onOpenSettings = {
+                                if (page is ShelfPage.Cloud) {
+                                    cloudSetupProvider = page.providerId
+                                    cloudSetupReturn = page.providerId
+                                }
                                 navigator.navigateTo(ShelfPage.Settings.key)
                                 showZLibrarySettings = page == ShelfPage.Discover
                             },
@@ -909,6 +921,15 @@ private fun BookshelfScreen() {
                         onZLibraryChange = { showZLibrarySettings = it },
                         showServerSettings = showServerSettings,
                         onServerSettingsChange = { showServerSettings = it },
+                        cloudSetupProvider = cloudSetupProvider,
+                        onCloudSetupHandled = { cloudSetupProvider = null },
+                        onCloudConfigured = { provider ->
+                            if (cloudSetupReturn == provider) {
+                                cloudSetupReturn = null
+                                navigator.navigateTo("cloud.$provider")
+                                loadRemote(provider, force = true)
+                            }
+                        },
                     )
                     null -> Unit
                 }
@@ -1016,7 +1037,9 @@ private fun BookshelfScreen() {
     }
 
     // 云端书籍详情弹窗：名称/大小/后端 + 下载（或已本地存在时打开）
-    val detail = detailBook
+    val detail = detailBook?.let { book ->
+        if (book.bookId in localBookIds && !book.local) book.copy(local = true) else book
+    }
     if (detail != null && confirmCloudDelete) {
         AlertDialog(
             onDismissRequest = { if (!deletingCloudBook) confirmCloudDelete = false },
@@ -1050,7 +1073,7 @@ private fun BookshelfScreen() {
         )
     } else if (detail != null) {
         val taskRunning = downloadTask?.status == DownloadStatus.Downloading
-        AlertDialog(
+        CloudBookDetailsSheet(
             onDismissRequest = { detailBook = null },
             title = { Text(detail.bookId, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text = {
@@ -1482,6 +1505,8 @@ internal fun CloudBookshelfContent(
     fetchedAt: Long,
     fromCache: Boolean,
     scrollKey: String,
+    setupLabel: String?,
+    onSetup: () -> Unit,
     onRefresh: () -> Unit,
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
 ) {
@@ -1497,10 +1522,10 @@ internal fun CloudBookshelfContent(
         error != null && books.isEmpty() -> {
             EmptyState(
                 icon = Icons.Filled.List,
-                title = "云端书库加载失败",
+                title = if (setupLabel == null) "云端书库加载失败" else "书源需要设置",
                 subtitle = error,
-                actionLabel = "重试",
-                onAction = onRefresh,
+                actionLabel = setupLabel ?: "重试",
+                onAction = if (setupLabel == null) onRefresh else onSetup,
             )
         }
         books.isEmpty() -> {
@@ -1645,6 +1670,33 @@ private fun CloudBookCard(
 }
 
 /** 格式化文件大小为可读字符串。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CloudBookDetailsSheet(
+    onDismissRequest: () -> Unit,
+    title: @Composable () -> Unit,
+    text: @Composable () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: @Composable () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismissRequest, containerColor = YuezhouColors.Surface) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleLarge, title)
+            text()
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                dismissButton()
+                confirmButton()
+            }
+        }
+    }
+}
+
 private fun formatSize(bytes: Long): String {
     val kb = 1024.0
     val mb = kb * 1024

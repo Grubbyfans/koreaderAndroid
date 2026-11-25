@@ -54,6 +54,7 @@ fun OnlineLibraryScreen(
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
     onOpenDownloads: () -> Unit,
     onOpenSettings: () -> Unit,
+    localBookIds: Set<String>,
     interactionsEnabled: Boolean = true,
     swipeBlocker: SwipeBlockRegistry? = null,
 ) {
@@ -89,7 +90,11 @@ fun OnlineLibraryScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     CloudBookshelfContent(
-                        books = vm.legacyBooks(state.items),
+                        books = remember(state.items, localBookIds) {
+                            vm.legacyBooks(state.items).map { book ->
+                                if (book.bookId in localBookIds && !book.local) book.copy(local = true) else book
+                            }
+                        },
                         loading = state.loading,
                         showRefreshBar = state.refreshing,
                         error = state.error,
@@ -97,6 +102,10 @@ fun OnlineLibraryScreen(
                         fetchedAt = state.fetchedAt,
                         fromCache = state.fromCache,
                         scrollKey = "cloud.$providerId",
+                        setupLabel = if (state.cloudSetupRequired) {
+                            if (providerId == "baidu") "去授权" else "去配置"
+                        } else null,
+                        onSetup = onOpenSettings,
                         onRefresh = onRefresh,
                         onOpenDetail = onOpenDetail,
                     )

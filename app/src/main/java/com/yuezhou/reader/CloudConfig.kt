@@ -43,7 +43,12 @@ import java.util.UUID
  * 无需再绕一道扫码）。
  */
 @Composable
-fun CloudConfigSection(store: CloudCredentialStore) {
+fun CloudConfigSection(
+    store: CloudCredentialStore,
+    requestedProvider: String? = null,
+    onRequestHandled: () -> Unit = {},
+    onConfigured: (String) -> Unit = {},
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var credentials by remember { mutableStateOf<CloudCredentials?>(null) }
@@ -54,6 +59,13 @@ fun CloudConfigSection(store: CloudCredentialStore) {
     // 加载已存凭据
     androidx.compose.runtime.LaunchedEffect(Unit) {
         credentials = store.load()
+    }
+    androidx.compose.runtime.LaunchedEffect(requestedProvider, credentials != null) {
+        if (requestedProvider != null && credentials != null) {
+            showWebdav = requestedProvider == "webdav"
+            showBaidu = requestedProvider == "baidu"
+            onRequestHandled()
+        }
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -175,6 +187,7 @@ fun CloudConfigSection(store: CloudCredentialStore) {
                     if (store.save(updated)) {
                         credentials = updated
                         message = "WebDAV 已保存"
+                        onConfigured("webdav")
                     } else {
                         message = "WebDAV 保存失败"
                     }
@@ -202,6 +215,7 @@ fun CloudConfigSection(store: CloudCredentialStore) {
                     if (store.save(updated)) {
                         credentials = updated
                         message = "百度网盘已授权：$accountName"
+                        onConfigured("baidu")
                     } else {
                         message = "百度授权信息保存失败"
                     }

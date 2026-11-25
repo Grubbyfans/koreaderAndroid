@@ -1,6 +1,8 @@
 package com.yuezhou.reader.ui.online
 
 import android.app.Application
+import com.yuezhou.reader.core.cloud.CloudException
+import com.yuezhou.reader.core.cloud.ErrorCode
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +36,7 @@ enum class CatalogSource { NONE, KEYWORD, POPULAR }
 
 /** 单个书源的页面状态：云书源保存列表，检索书源另存搜索词、筛选、分页、滚动与详情。 */
 data class ProviderUiState(
+    val cloudSetupRequired: Boolean = false,
     val items: List<OnlineBook> = emptyList(),
     val loading: Boolean = false,
     val refreshing: Boolean = false,
@@ -186,7 +189,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         val provider = registered as? CloudBookProvider
             ?: return current.copy(error = "该书源暂未接入").also { states[id] = it }
 
-        states[id] = current.copy(loading = true, refreshing = force, error = null)
+        states[id] = current.copy(loading = true, refreshing = force, error = null, cloudSetupRequired = false)
         return try {
             val page = provider.listBooks(force = force)
             if (!cloudListRequests.isLatest(id, request)) return stateOf(id)
@@ -217,7 +220,12 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         } catch (e: Exception) {
             if (!cloudListRequests.isLatest(id, request)) return stateOf(id)
             // 网络失败保留旧列表，只更新错误态（与原有云端书库行为一致）。
-            val failed = stateOf(id).copy(loading = false, refreshing = false, error = e.message ?: "书库加载失败")
+            val failed = stateOf(id).copy(
+                loading = false,
+                refreshing = false,
+                error = e.message ?: "书库加载失败",
+                cloudSetupRequired = e.requiresCloudSetup(),
+            )
             states[id] = failed
             failed
         }
@@ -252,7 +260,12 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             throw e
         } catch (e: Exception) {
             if (!cloudListRequests.isLatest(id, request)) return stateOf(id) to null
-            val failed = stateOf(id).copy(loading = false, refreshing = false, error = e.message ?: "更新书库失败")
+            val failed = stateOf(id).copy(
+                loading = false,
+                refreshing = false,
+                error = e.message ?: "更新书库失败",
+                cloudSetupRequired = e.requiresCloudSetup(),
+            )
             states[id] = failed
             return failed to "更新书库失败：${e.message ?: "未知错误"}"
         }
@@ -266,6 +279,9 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             states[id] = stateOf(id).copy(loading = false, refreshing = false)
         }
     }
+
+    private fun Exception.requiresCloudSetup(): Boolean =
+        this is CloudException && (code == ErrorCode.INVALID_INPUT || code == ErrorCode.AUTH)
 
     /** 下拉刷新/菜单刷新的非挂起入口。 */
     fun refreshCurrent(providerId: String = selectedProviderId) {

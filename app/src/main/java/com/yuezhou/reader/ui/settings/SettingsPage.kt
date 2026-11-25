@@ -96,6 +96,9 @@ internal fun SettingsPage(
     onZLibraryChange: (Boolean) -> Unit,
     showServerSettings: Boolean,
     onServerSettingsChange: (Boolean) -> Unit,
+    cloudSetupProvider: String? = null,
+    onCloudSetupHandled: () -> Unit = {},
+    onCloudConfigured: (String) -> Unit = {},
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -243,7 +246,12 @@ internal fun SettingsPage(
                 color = YuezhouColors.TextSecondary,
             )
             Spacer(Modifier.height(4.dp))
-            CloudConfigSection(store = credentialStore)
+            CloudConfigSection(
+                store = credentialStore,
+                requestedProvider = cloudSetupProvider,
+                onRequestHandled = onCloudSetupHandled,
+                onConfigured = onCloudConfigured,
+            )
 
             // Z-Library 为检索型书源，配置与云同步账号分开管理。
             Row(
