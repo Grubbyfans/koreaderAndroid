@@ -111,9 +111,17 @@ class ZLibraryBookProvider(context: Context) : CatalogBookProvider {
             sort = order,
             pageSize = config.preferences.pageSize.coerceIn(1, 30),
         )
-        // 服务端拒绝搜索（如 400 Access denied）时按拒绝状态上抛，由界面提示改用网页搜索；
-        // 不再自动请求「最热门」列表充当搜索结果，也不自动切换服务器。
-        return api().search(effective, session).getOrElse { throw asProviderException(it) }
+        val result = api().search(effective, session)
+        result.getOrNull()?.let { return it }
+        val error = result.exceptionOrNull() ?: ProviderException(ProviderErrorCode.NETWORK, "搜索失败")
+        // 方案 §2/§5：原生热门书单保留；搜索被服务端拒绝时展示热门书单并明确提示，
+        // 不冒充关键词搜索结果，也不自动切换服务器。
+        if ((error as? ProviderException)?.code == ProviderErrorCode.SERVER_REJECTED) {
+            return api().getMostPopular(effective.pageSize, session).getOrElse {
+                throw asProviderException(error)
+            }
+        }
+        throw asProviderException(error)
     }
 
     override suspend fun fetchCover(url: String): Result<ByteArray> = api().fetchCover(url)

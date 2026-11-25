@@ -121,7 +121,7 @@ class ZLibraryApi(
                 hasMore = false,
                 totalCount = findInt(element, "total"),
                 fetchedAt = System.currentTimeMillis(),
-                notice = "Z-Library 服务端暂未开放搜索，当前展示官方「最热门」书单；登录、详情与下载不受影响。",
+                notice = "原生搜索暂不可用，可使用网页搜索；以下展示官方「最热门」书单，并非关键词搜索结果。",
             )
         }
     }

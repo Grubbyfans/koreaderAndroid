@@ -301,11 +301,11 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             )
             if (requestSeq[id] != seq) return // 过期请求：不污染当前列表
             val merged = if (append) OnlinePageMerger.append(current.items, page.items) else page.items
-            // 服务端拒绝原生搜索时，适配器会降级为「最热门」书单并带 notice。
-            // 按方案 §5 不把热门列表冒充搜索结果：清空列表，只提示可用网页搜索。
+            // 原生搜索被拒时适配器返回官方「最热门」书单并带 notice；
+            // 界面按 notice 明确标注为热门书单，不冒充关键词搜索结果（方案 §2/§5）。
             val fallback = page.notice != null
             states[id] = stateOf(id).copy(
-                items = if (fallback) emptyList() else merged,
+                items = merged,
                 nextCursor = if (fallback) null else page.nextCursor,
                 hasMore = if (fallback) false else page.hasMore && page.nextCursor != null,
                 loading = false,
@@ -314,7 +314,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
                 fetchedAt = page.fetchedAt,
                 error = null,
                 searchError = null,
-                notice = if (fallback) NATIVE_SEARCH_UNAVAILABLE else page.notice,
+                notice = page.notice,
                 searched = true,
             )
         } catch (e: CancellationException) {

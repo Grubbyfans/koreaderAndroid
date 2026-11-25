@@ -52,7 +52,7 @@
 
 ### 3.3 搜索拒绝与取链约束
 
-- `ZLibraryBookProvider.search()` 不再在 `SERVER_REJECTED` 时请求 `getMostPopular`；`getMostPopular` 能力与单测保留，供显式热门入口使用。
+- `ZLibraryBookProvider.search()` 在 `SERVER_REJECTED` 时改为请求 `getMostPopular`，返回官方「最热门」书单并附带 notice；界面明示“原生搜索暂不可用，可使用网页搜索；以下展示官方「最热门」书单，并非关键词搜索结果”，不冒充关键词结果（验收后按方案 §2/§5 修正）。
 - 未新增域名轮换或自动重试。
 - 详情/取链要求 `id:hash` 两段且非空；缺失时不发请求，界面禁用下载。
 - 取链仍只在用户确认下载后由下载管理器调用，本轮未新增任何自动取链逻辑，也未做自动重复取链验证。
@@ -101,7 +101,7 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 
 ## 5. 与方案的差异
 
-- “保留原生热门书单”：保留 `getMostPopular()` API 与单测，但不再在搜索失败时自动调用；这是阶段 D“不得显示虚假结果”的延续。
+- 无。搜索被拒时保留热门书单并明确标注，符合方案 §2“保留热门书单、不冒充搜索结果”与 §5“明确提示”。
 - 支持格式当前仅 `epub`，与阅读器入库能力一致；后续若支持其它格式，只需扩展 `resolveFormat()` 的白名单。
 
 ---
