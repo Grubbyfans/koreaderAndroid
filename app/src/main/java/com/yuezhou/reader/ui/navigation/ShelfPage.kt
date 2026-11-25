@@ -1,8 +1,7 @@
 package com.yuezhou.reader.ui.navigation
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -11,30 +10,47 @@ import androidx.compose.ui.unit.dp
 
 /** 底部导航的一级栏目。页面模型只依赖此枚举，不反向依赖 MainActivity。 */
 enum class Tab(val label: String, val icon: ImageVector) {
-    书架("书库", Icons.AutoMirrored.Filled.List),
+    书架("书库", bookTabIcon()),
     云端("云端", cloudTabIcon()),
-    设置("设置", Icons.Filled.Settings),
+    设置("设置", Icons.Outlined.Settings),
 }
 
-/** icons-core 不包含 Cloud，使用标准 Material Cloud 24dp 路径，避免新增图标依赖。 */
-private fun cloudTabIcon(): ImageVector = ImageVector.Builder(
-    name = "CloudTab",
+private fun bookTabIcon() = tabOutline("OpenBook") {
+    moveTo(12f, 6f)
+    curveTo(9f, 4f, 6f, 4f, 3f, 5f)
+    lineTo(3f, 19f)
+    curveTo(6f, 18f, 9f, 18f, 12f, 20f)
+    curveTo(15f, 18f, 18f, 18f, 21f, 19f)
+    lineTo(21f, 5f)
+    curveTo(18f, 4f, 15f, 4f, 12f, 6f)
+    close()
+    moveTo(12f, 6f)
+    lineTo(12f, 20f)
+}
+
+private fun cloudTabIcon() = tabOutline("Cloud") {
+    moveTo(18.8f, 10f)
+    curveTo(18f, 6.8f, 15.4f, 4.5f, 12f, 4.5f)
+    curveTo(9.2f, 4.5f, 6.8f, 6f, 5.6f, 8.5f)
+    curveTo(3f, 8.8f, 1.5f, 11f, 1.5f, 13.6f)
+    curveTo(1.5f, 16.5f, 3.8f, 18.7f, 6.5f, 18.7f)
+    lineTo(18.6f, 18.7f)
+    curveTo(21f, 18.7f, 22.5f, 16.8f, 22.5f, 14.5f)
+    curveTo(22.5f, 12.2f, 21f, 10.4f, 18.8f, 10f)
+    close()
+}
+
+private fun tabOutline(
+    name: String,
+    pathBuilder: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit,
+): ImageVector = ImageVector.Builder(
+    name = name,
     defaultWidth = 24.dp,
     defaultHeight = 24.dp,
     viewportWidth = 24f,
     viewportHeight = 24f,
 ).apply {
-    path(fill = SolidColor(Color.Black)) {
-        moveTo(19.35f, 10.04f)
-        curveTo(18.67f, 6.59f, 15.64f, 4f, 12f, 4f)
-        curveTo(9.11f, 4f, 6.6f, 5.64f, 5.35f, 8.04f)
-        curveTo(2.34f, 8.36f, 0f, 10.91f, 0f, 14f)
-        curveTo(0f, 17.31f, 2.69f, 20f, 6f, 20f)
-        horizontalLineTo(19f)
-        curveTo(21.76f, 20f, 24f, 17.76f, 24f, 15f)
-        curveTo(24f, 12.37f, 21.95f, 10.22f, 19.35f, 10.04f)
-        close()
-    }
+    path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.6f, pathBuilder = pathBuilder)
 }.build()
 
 /**

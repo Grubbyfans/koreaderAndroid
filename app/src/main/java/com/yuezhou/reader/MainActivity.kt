@@ -124,6 +124,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.ui.LibraryUiPrefs
+import com.yuezhou.reader.ui.components.BookReadingProgress
+import com.yuezhou.reader.ui.components.LibraryPageHeading
 import com.yuezhou.reader.ui.LibrarySort
 import com.yuezhou.reader.ui.LocalLibraryFilters
 import com.yuezhou.reader.ui.ReadingFilter
@@ -611,12 +613,13 @@ private fun BookshelfScreen() {
             } else if (!fullscreenSubPage) {
                 TopAppBar(
                     title = {
-                        Text(
-                            when (currentTab) {
+                        LibraryPageHeading(
+                            title = when (currentTab) {
                                 Tab.书架 -> "书库"
                                 Tab.云端 -> "云端书库"
                                 Tab.设置 -> currentTab.label
                             },
+                            supportingText = if (currentTab == Tab.书架) "本地书籍 · ${shelfBooks.size} 本" else null,
                         )
                     },
                     actions = {
@@ -1762,17 +1765,17 @@ private fun BookCard(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.Start,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(0.75f)
-                .clip(RoundedCornerShape(10.dp))
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(YuezhouDimens.CoverRadius))
                 .background(CoverPlaceholder.color(book.bookId))
                 .then(
                     if (selecting && checked) {
-                        Modifier.border(2.dp, YuezhouColors.Brand, RoundedCornerShape(10.dp))
+                        Modifier.border(2.dp, YuezhouColors.Brand, RoundedCornerShape(YuezhouDimens.CoverRadius))
                     } else {
                         Modifier
                     },
@@ -1829,44 +1832,19 @@ private fun BookCard(
 
         Text(
             text = book.title,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
             color = YuezhouColors.TextPrimary,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(top = YuezhouDimens.Gap),
         )
 
-        if (book.percent != null) {
-            val p = book.percent!!.coerceIn(0.0, 1.0)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(1.5.dp))
-                        .background(YuezhouColors.Divider),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(p.coerceAtLeast(0.01).toFloat())
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(1.5.dp))
-                            .background(YuezhouColors.Brand),
-                    )
-                }
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = "${(p * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = YuezhouColors.TextSecondary,
-                )
-            }
+        book.percent?.let { progress ->
+            BookReadingProgress(
+                progress,
+                Modifier.fillMaxWidth().padding(top = YuezhouDimens.GapSmall),
+            )
         }
     }
 }
@@ -1889,12 +1867,12 @@ private fun BookListRow(
     ) {
         Box(
             modifier = Modifier
-                .size(width = 52.dp, height = 70.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .size(width = 52.dp, height = 78.dp)
+                .clip(RoundedCornerShape(YuezhouDimens.CoverRadius))
                 .background(CoverPlaceholder.color(book.bookId))
                 .then(
                     if (selecting && checked) {
-                        Modifier.border(2.dp, YuezhouColors.Brand, RoundedCornerShape(6.dp))
+                        Modifier.border(2.dp, YuezhouColors.Brand, RoundedCornerShape(YuezhouDimens.CoverRadius))
                     } else {
                         Modifier
                     },
@@ -1923,37 +1901,22 @@ private fun BookListRow(
             Text(
                 text = book.title,
                 style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
                 color = YuezhouColors.TextPrimary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(6.dp))
-            val percent = book.percent?.coerceIn(0.0, 1.0)
             Text(
-                text = buildString {
-                    append(formatSize(book.size))
-                    if (percent != null) append(" · 已读 ${(percent * 100).toInt()}%")
-                },
+                formatSize(book.size),
                 style = MaterialTheme.typography.bodySmall,
                 color = YuezhouColors.TextSecondary,
             )
-            if (percent != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(1.5.dp))
-                        .background(YuezhouColors.Divider),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(percent.coerceAtLeast(0.01).toFloat())
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(1.5.dp))
-                            .background(YuezhouColors.Brand),
-                    )
-                }
+            book.percent?.let { progress ->
+                BookReadingProgress(
+                    progress,
+                    Modifier.fillMaxWidth().padding(top = YuezhouDimens.GapSmall),
+                )
             }
         }
 
@@ -2122,6 +2085,7 @@ private fun EmptyState(
 private fun BottomNavBar(current: Tab, onSelect: (Tab) -> Unit) {
     NavigationBar(
         containerColor = YuezhouColors.Surface,
+        tonalElevation = 0.dp,
         // 只预留底部系统栏；safeDrawing 会把状态栏高度也算进来，导致导航栏明显变高。
         windowInsets = WindowInsets.navigationBars,
     ) {
@@ -2132,11 +2096,11 @@ private fun BottomNavBar(current: Tab, onSelect: (Tab) -> Unit) {
                 icon = { Icon(tab.icon, contentDescription = tab.label) },
                 label = { Text(tab.label) },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = YuezhouColors.Brand,
-                    selectedTextColor = YuezhouColors.Brand,
+                    selectedIconColor = YuezhouColors.BrandDark,
+                    selectedTextColor = YuezhouColors.BrandDark,
                     unselectedIconColor = YuezhouColors.TextSecondary,
                     unselectedTextColor = YuezhouColors.TextSecondary,
-                    indicatorColor = YuezhouColors.Brand.copy(alpha = 0.12f),
+                    indicatorColor = YuezhouColors.BrandContainer,
                 ),
             )
         }

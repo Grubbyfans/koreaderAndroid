@@ -1,43 +1,41 @@
 package com.yuezhou.reader
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
-/**
- * 静读全局主题：配色向微信读书靠齐。
- *
- * 微信读书视觉特征：以白色/极浅灰为底，天蓝色（#37A7FF 系）作为品牌点缀，
- * 冷色系、大面积留白、低饱和、去重边框，营造简洁轻盈的阅读氛围。
- */
+/** 应用浅色语义色。正文配色仍由阅读器的阅读主题管理。 */
 object YuezhouColors {
-    /** 品牌主色：微信读书标志性的天蓝色。 */
-    val Brand = Color(0xFF37A7FF)
+    val Brand = Color(0xFF526B53)
+    val BrandDark = Color(0xFF344E36)
+    val Background = Color(0xFFF7F3EB)
+    val Surface = Color(0xFFFFFCF7)
+    val BrandContainer = Color(0xFFDCE3CF)
+    val BrandContainerSoft = Color(0xFFF0F1E6)
+    val TextPrimary = Color(0xFF252821)
+    val TextSecondary = Color(0xFF62665D)
+    val Divider = Color(0xFFD8D5CA)
+    val Outline = Color(0xFF858879)
+    val Error = Color(0xFFA43E35)
+}
 
-    /** 主色深色变体（文字/按压/强调）。 */
-    val BrandDark = Color(0xFF1E8AE8)
-
-    /** 背景：微信读书的极浅灰底色。 */
-    val Background = Color(0xFFF7F8FA)
-
-    /** 卡片/表面：纯白。 */
-    val Surface = Color(0xFFFFFFFF)
-
-    /** 浅蓝容器（选中态/强调背景）。 */
-    val BrandContainer = Color(0xFFE8F4FF)
-
-    /** 更浅的蓝（次级选中背景，几乎无存在感）。 */
-    val BrandContainerSoft = Color(0xFFF2F8FF)
-
-    /** 主文字：近黑。 */
-    val TextPrimary = Color(0xFF1A1A1A)
-
-    /** 次要文字：中灰。 */
-    val TextSecondary = Color(0xFF8A8A8A)
-
-    /** 分隔线/描边：浅灰。 */
-    val Divider = Color(0xFFEBEBEB)
+internal object YuezhouDimens {
+    val GapSmall = 4.dp
+    val Gap = 8.dp
+    val GapMedium = 12.dp
+    val PageInset = 16.dp
+    val CoverRadius = 8.dp
+    val CardRadius = 16.dp
 }
 
 private val YuezhouColorScheme = lightColorScheme(
@@ -46,25 +44,58 @@ private val YuezhouColorScheme = lightColorScheme(
     primaryContainer = YuezhouColors.BrandContainer,
     onPrimaryContainer = YuezhouColors.BrandDark,
     secondary = YuezhouColors.Brand,
+    onSecondary = Color.White,
+    secondaryContainer = YuezhouColors.BrandContainer,
+    onSecondaryContainer = YuezhouColors.BrandDark,
+    tertiary = Color(0xFF786348),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFF0E4D1),
+    onTertiaryContainer = Color(0xFF493722),
     background = YuezhouColors.Background,
     onBackground = YuezhouColors.TextPrimary,
     surface = YuezhouColors.Surface,
     onSurface = YuezhouColors.TextPrimary,
-    surfaceVariant = Color(0xFFF0F0F0),
+    surfaceVariant = YuezhouColors.BrandContainerSoft,
     onSurfaceVariant = YuezhouColors.TextSecondary,
-    outline = YuezhouColors.Divider,
+    surfaceTint = YuezhouColors.Brand,
+    surfaceContainerLowest = YuezhouColors.Surface,
+    surfaceContainerLow = Color(0xFFFCF8F0),
+    surfaceContainer = Color(0xFFF4EFE5),
+    surfaceContainerHigh = Color(0xFFF0EADF),
+    surfaceContainerHighest = Color(0xFFECE7DB),
+    inverseSurface = Color(0xFF31352C),
+    inverseOnSurface = Color(0xFFF8F3E9),
+    inversePrimary = Color(0xFFB0C5A4),
+    outline = YuezhouColors.Outline,
     outlineVariant = YuezhouColors.Divider,
-    error = Color(0xFFFA5151),
+    error = YuezhouColors.Error,
     onError = Color.White,
-    errorContainer = Color(0xFFFFE7E7),
-    onErrorContainer = Color(0xFFC43D3D),
+    errorContainer = Color(0xFFF9E6E0),
+    onErrorContainer = Color(0xFF772A24),
 )
 
-/** 阅舟统一主题。所有界面共用，保证书架/阅读页/面板/抽屉配色一致。 */
+private val YuezhouShapes = Shapes(
+    extraSmall = RoundedCornerShape(YuezhouDimens.GapSmall),
+    small = RoundedCornerShape(YuezhouDimens.CoverRadius),
+    medium = RoundedCornerShape(YuezhouDimens.GapMedium),
+    large = RoundedCornerShape(YuezhouDimens.CardRadius),
+    extraLarge = RoundedCornerShape(20.dp),
+)
+
 @Composable
 fun YuezhouTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = YuezhouColorScheme,
-        content = content,
-    )
+    val assets = LocalContext.current.assets
+    val typography = remember(assets) {
+        // 复用已随阅读器打包的中文衬线字体，无额外字体资源。
+        val serif = FontFamily(Font("reader/fonts/noto-serif-sc.otf", assets))
+        val defaults = Typography()
+        Typography(
+            headlineLarge = defaults.headlineLarge.copy(fontFamily = serif, fontSize = 30.sp, lineHeight = 38.sp),
+            headlineMedium = defaults.headlineMedium.copy(fontFamily = serif),
+            headlineSmall = defaults.headlineSmall.copy(fontFamily = serif, fontSize = 26.sp, lineHeight = 34.sp),
+            titleLarge = defaults.titleLarge.copy(fontFamily = serif, fontSize = 20.sp, lineHeight = 28.sp),
+            titleMedium = defaults.titleMedium.copy(fontFamily = serif, fontSize = 18.sp, lineHeight = 26.sp),
+        )
+    }
+    MaterialTheme(colorScheme = YuezhouColorScheme, shapes = YuezhouShapes, typography = typography, content = content)
 }

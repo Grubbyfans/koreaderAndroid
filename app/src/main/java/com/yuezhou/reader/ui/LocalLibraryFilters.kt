@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -16,9 +17,11 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +37,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.reader.LibraryStore
+import com.yuezhou.reader.YuezhouColors
+import com.yuezhou.reader.YuezhouDimens
 import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
 
 internal enum class ReadingFilter(val label: String) {
@@ -66,7 +71,10 @@ internal fun LocalLibraryFilters(
     DisposableEffect(swipeBlocker) {
         onDispose { swipeBlocker.release("local:search") }
     }
-    Column(Modifier.padding(horizontal = 16.dp)) {
+    Column(
+        modifier = Modifier.padding(horizontal = YuezhouDimens.PageInset),
+        verticalArrangement = Arrangement.spacedBy(YuezhouDimens.GapSmall),
+    ) {
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
@@ -84,12 +92,18 @@ internal fun LocalLibraryFilters(
                 }
             },
             singleLine = true,
+            shape = RoundedCornerShape(YuezhouDimens.CardRadius),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = YuezhouColors.Surface,
+                unfocusedContainerColor = YuezhouColors.Surface,
+                unfocusedBorderColor = YuezhouColors.Divider,
+            ),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
         )
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(YuezhouDimens.Gap),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ReadingFilter.entries.forEach { option ->
@@ -97,6 +111,11 @@ internal fun LocalLibraryFilters(
                     selected = filter == option,
                     onClick = { onFilterChange(option) },
                     label = { Text(option.label) },
+                    shape = RoundedCornerShape(50),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = YuezhouColors.BrandContainer,
+                        selectedLabelColor = YuezhouColors.BrandDark,
+                    ),
                 )
             }
             Box {
