@@ -113,6 +113,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     }
     private val jobs = mutableMapOf<String, Job>()
     private val requestSeq = mutableMapOf<String, Int>()
+    private val cloudListRequests = CloudListRequests()
     private val detailSeq = mutableMapOf<String, Int>()
 
     /** 封面只在内存中缓存，失败的地址不再重复请求（账号退出或应用重启后自然清空）。 */
@@ -170,9 +171,13 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         force: Boolean = false,
         providerId: String = selectedProviderId,
     ): ProviderUiState {
-        val id = providerId
+        val current = stateOf(providerId)
+        if (!force && (current.loaded || current.loading)) return current
+        return loadCloudList(providerId, force, cloudListRequests.begin(providerId))
+    }
+
+    private suspend fun loadCloudList(id: String, force: Boolean, request: Long): ProviderUiState {
         val current = stateOf(id)
-        if (current.loaded && !force && !current.loading) return current
 
         val registered = registry.get(id) ?: return current.copy(error = "书源不存在").also { states[id] = it }
         if (registered is CatalogBookProvider) return current.copy(loaded = true)
@@ -182,7 +187,8 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         states[id] = current.copy(loading = true, refreshing = force, error = null)
         return try {
             val page = provider.listBooks(force = force)
-            val next = current.copy(
+            if (!cloudListRequests.isLatest(id, request)) return stateOf(id)
+            val next = stateOf(id).copy(
                 items = page.items,
                 loading = false,
                 refreshing = false,
@@ -197,11 +203,17 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
                 viewModelScope.launch {
                     val changed = runCatching { cloudSync.discoverExternalBooks(forced = backendKindOf(id)) }
                         .getOrDefault(0)
-                    if (changed > 0) loadSelected(force = true, providerId = id)
+                    if (changed > 0 && cloudListRequests.isLatest(id, request)) {
+                        loadSelected(force = true, providerId = id)
+                    }
                 }
             }
             next
+        } catch (e: CancellationException) {
+            finishCancelledCloudRequest(id, request)
+            throw e
         } catch (e: Exception) {
+            if (!cloudListRequests.isLatest(id, request)) return stateOf(id)
             // 网络失败保留旧列表，只更新错误态（与原有云端书库行为一致）。
             val failed = stateOf(id).copy(loading = false, refreshing = false, error = e.message ?: "书库加载失败")
             states[id] = failed
@@ -229,14 +241,28 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             return stateOf(id) to null
         }
         val kind = backendKindOf(id) ?: return stateOf(id) to "请先配置云同步后端"
+        val request = cloudListRequests.begin(id)
+        states[id] = stateOf(id).copy(loading = true, refreshing = true, error = null)
         val message = try {
             cloudSync.refreshLibrary(forced = kind)
+        } catch (e: CancellationException) {
+            finishCancelledCloudRequest(id, request)
+            throw e
         } catch (e: Exception) {
-            val failed = stateOf(id).copy(refreshing = false, error = e.message ?: "更新书库失败")
+            if (!cloudListRequests.isLatest(id, request)) return stateOf(id) to null
+            val failed = stateOf(id).copy(loading = false, refreshing = false, error = e.message ?: "更新书库失败")
             states[id] = failed
             return failed to "更新书库失败：${e.message ?: "未知错误"}"
         }
-        return loadSelected(force = true, providerId = id) to message
+        if (!cloudListRequests.isLatest(id, request)) return stateOf(id) to null
+        val result = loadCloudList(id, force = true, request = request)
+        return result to message.takeIf { cloudListRequests.isLatest(id, request) }
+    }
+
+    private fun finishCancelledCloudRequest(id: String, request: Long) {
+        if (cloudListRequests.isLatest(id, request)) {
+            states[id] = stateOf(id).copy(loading = false, refreshing = false)
+        }
     }
 
     /** 下拉刷新/菜单刷新的非挂起入口。 */
