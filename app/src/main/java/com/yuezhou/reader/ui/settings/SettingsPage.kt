@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.BookUploadControls
+import com.yuezhou.reader.AppearanceOptions
 import com.yuezhou.reader.BookUploadQueue
 import com.yuezhou.reader.BuildConfig
 import com.yuezhou.reader.CloudConfigSection
@@ -308,6 +309,7 @@ internal fun SettingsPage(
         }
 
         if (route == SettingsRoute.Appearance) {
+            SettingsCard("主题与动效") { AppearanceOptions() }
             SettingsCard("书架布局") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("使用网格", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)

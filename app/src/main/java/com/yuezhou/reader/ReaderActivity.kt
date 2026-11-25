@@ -149,7 +149,7 @@ class ReaderActivity : ComponentActivity() {
         }
         pickEpubLauncher = { launcher.launch(arrayOf("application/epub+zip")) }
         setContent {
-            YuezhouTheme {
+            YuezhouTheme(followsAppAppearance = false) {
                 ReaderScreen(
                     bookId = bookId,
                     onEpubReadySetter = { onEpubReady = it },

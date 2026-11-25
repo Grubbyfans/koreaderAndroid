@@ -94,6 +94,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
@@ -281,6 +283,7 @@ private fun BookshelfScreen() {
     )
     var shelfDragging by remember { mutableStateOf(false) }
     val pagerBusy = shelfDragging || pagerState.isScrollInProgress || navigator.isNavigating
+    val motionEnabled = LocalAppMotionEnabled.current
     // 点击导航：相邻页用原生 Pager 动画；非相邻页直接定位，避免逐页展示中间栏目。
     LaunchedEffect(navigator.requestedKey, pageKeys) {
         // 手势拖动不产生请求；只有点击/返回等程序化导航才在这里滚动。
@@ -293,9 +296,9 @@ private fun BookshelfScreen() {
         val currentIndex = pagerState.currentPage.coerceIn(0, (pageKeys.size - 1).coerceAtLeast(0))
         val currentKey = pageKeys.getOrNull(currentIndex)
         try {
-            if (currentKey != null && abs(targetIndex - currentIndex) <= 1) {
+            if (motionEnabled && currentKey != null && abs(targetIndex - currentIndex) <= 1) {
                 pagerState.animateScrollToPage(targetIndex)
-            } else if (currentKey != key) {
+            } else if (currentKey != key || pagerState.currentPageOffsetFraction != 0f) {
                 // 非相邻或页面列表变化导致下标错位：直接定位，不展示中间页。
                 pagerState.scrollToPage(targetIndex)
             }
@@ -732,7 +735,7 @@ private fun BookshelfScreen() {
                         if (!scanning && !importing) importOptionsOpen = true
                     },
                     containerColor = YuezhouColors.Brand,
-                    contentColor = Color.White,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = "导入书籍")
                 }
@@ -795,8 +798,8 @@ private fun BookshelfScreen() {
 
             AnimatedVisibility(
                 visible = showCloudTabs,
-                enter = fadeIn() + slideInVertically { it / 2 },
-                exit = shrinkVertically() + fadeOut() + slideOutVertically { it / 2 },
+                enter = if (motionEnabled) fadeIn() + slideInVertically { it / 2 } else EnterTransition.None,
+                exit = if (motionEnabled) shrinkVertically() + fadeOut() + slideOutVertically { it / 2 } else ExitTransition.None,
                 label = "cloudTabs",
             ) {
                 CloudSourceTabs(
@@ -1455,26 +1458,20 @@ private val DownloadIcon: ImageVector by lazy {
  */
 @Composable
 private fun AnimatedDownloadIcon(downloading: Boolean) {
-    val transition = rememberInfiniteTransition(label = "download")
-    val floatY by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 3f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 700, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "float",
-    )
-    val rotate by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "rotate",
-    )
-
+    val floatOffset = if (downloading && LocalAppMotionEnabled.current) {
+        val transition = rememberInfiniteTransition(label = "download")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 3f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 700, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "float",
+        )
+    } else {
+        null
+    }
     Box(contentAlignment = Alignment.Center) {
         // 下载中的旋转进度弧线
         if (downloading) {
@@ -1493,7 +1490,7 @@ private fun AnimatedDownloadIcon(downloading: Boolean) {
             tint = YuezhouColors.Brand,
             modifier = Modifier
                 .size(20.dp)
-                .graphicsLayer { translationY = if (downloading) floatY else 0f },
+                .graphicsLayer { translationY = floatOffset?.value ?: 0f },
         )
     }
 }
@@ -1885,7 +1882,7 @@ private fun BookCard(
                     if (checked) {
                         Text(
                             "✓",
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onPrimary,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                         )
@@ -2008,7 +2005,7 @@ private fun BookListRow(
                 if (checked) {
                     Text(
                         "✓",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                     )
