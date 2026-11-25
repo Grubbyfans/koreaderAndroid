@@ -2,6 +2,7 @@ package com.yuezhou.reader.web
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -88,6 +89,7 @@ class ZLibraryWebActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         onBackPressedDispatcher.addCallback(this, backCallback)
+        ZLibraryWebMemoryLog.record(this, "create")
 
         if (!ZLibraryWebSupport.isSupported()) {
             // API < 28：多进程无法安全隔离 WebView 数据目录，首版只用外部浏览器。
@@ -97,7 +99,9 @@ class ZLibraryWebActivity : ComponentActivity() {
         }
 
         allowedHosts = loadAllowedHosts()
-        val initial = intent.getStringExtra(EXTRA_INITIAL_URL)
+        // 仅恢复最小导航信息（当前地址）；不恢复完整历史，登录态依赖持久 Cookie。
+        val requested = intent.getStringExtra(EXTRA_INITIAL_URL)
+        val initial = savedInstanceState?.getString(KEY_LAST_URL) ?: requested
         if (initial == null || WebNavigationPolicy.classify(initial, allowedHosts) != WebNavigationPolicy.Decision.ALLOWED) {
             finish()
             return
@@ -109,15 +113,47 @@ class ZLibraryWebActivity : ComponentActivity() {
         openWebView(initial)
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (!::webView.isInitialized) return
+        webView.onResume()
+        // 后台期间不跑页面计时器；回到前台时对仍在加载的代次重新计时。
+        if (state.state == WebPageState.LOADING || state.state == WebPageState.VERIFICATION_OR_WAITING) {
+            armTimeout(state.generation)
+        }
+        ZLibraryWebMemoryLog.record(this, "start")
+    }
+
     override fun onStop() {
         super.onStop()
-        // 网页 Cookie 由独立数据目录管理；离页时落盘，避免进程被回收丢失登录态。
-        if (::webView.isInitialized) runCatching { CookieManager.getInstance().flush() }
+        cancelTimeout()
+        if (::webView.isInitialized) {
+            // 仅暂停本 WebView（约等于页面不可见），不使用全局 pauseTimers。
+            webView.onPause()
+            // 网页 Cookie 由独立数据目录管理；离页时落盘，避免进程被回收丢失登录态。
+            runCatching { CookieManager.getInstance().flush() }
+        }
+        ZLibraryWebMemoryLog.record(this, "stop")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        lastUrl?.let { outState.putString(KEY_LAST_URL, it) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val url = intent.getStringExtra(EXTRA_INITIAL_URL) ?: return
+        if (WebNavigationPolicy.classify(url, allowedHosts) != WebNavigationPolicy.Decision.ALLOWED) return
+        lastUrl = url
+        if (::webView.isInitialized) webView.loadUrl(url) else openWebView(url)
     }
 
     override fun onDestroy() {
         cancelTimeout()
         if (::webView.isInitialized) {
+            runCatching { webView.setDownloadListener(null) }
             (webView.parent as? ViewGroup)?.removeView(webView)
             runCatching {
                 webView.stopLoading()
@@ -559,6 +595,7 @@ class ZLibraryWebActivity : ComponentActivity() {
         override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
             state.markRendererGone()
             cancelTimeout()
+            ZLibraryWebMemoryLog.record(this@ZLibraryWebActivity, "renderer-gone")
             (view.parent as? ViewGroup)?.removeView(view)
             runCatching { view.destroy() }
             showRendererGone()
@@ -569,6 +606,7 @@ class ZLibraryWebActivity : ComponentActivity() {
     companion object {
         const val EXTRA_INITIAL_URL = "com.yuezhou.reader.extra.ZLIBRARY_WEB_URL"
 
+        private const val KEY_LAST_URL = "com.yuezhou.reader.state.ZLIBRARY_WEB_LAST_URL"
         private const val PAGE_TIMEOUT_MS = 30_000L
         private const val WEB_DATA_DIRECTORY = "zlibrary_web"
         private val dataDirectoryReady = AtomicBoolean(false)

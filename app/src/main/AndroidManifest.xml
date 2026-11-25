@@ -78,6 +78,7 @@
             android:name=".web.ZLibraryWebActivity"
             android:exported="false"
             android:process=":zlibraryweb"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.YuezhouReader"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density"
             android:windowSoftInputMode="adjustResize" />
