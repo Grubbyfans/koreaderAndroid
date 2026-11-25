@@ -528,6 +528,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             val text = if (account.isNullOrBlank()) {
                 "未登录 · 搜索免登录，下载需登录"
             } else {
+                states[id] = stateOf(id).copy(quotaText = "正在查询额度…")
                 provider.quota().fold(
                     onSuccess = {
                         val used = it.downloadsToday?.toString() ?: "未知"

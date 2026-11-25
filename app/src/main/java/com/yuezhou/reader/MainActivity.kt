@@ -541,10 +541,14 @@ private fun BookshelfScreen() {
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = YuezhouColors.TextSecondary,
                                                     )
+                                                    Text(
+                                                        "点击刷新额度",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = YuezhouColors.Brand,
+                                                    )
                                                 }
                                             },
-                                            enabled = false,
-                                            onClick = {},
+                                            onClick = { onlineVm.loadQuota() },
                                         )
                                         DropdownMenuItem(
                                             text = { Text("账户管理") },
