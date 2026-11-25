@@ -137,22 +137,24 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             if (prefs.lastCloudProvider != null) return@launch
             val active = CloudCredentialStore(context).load().activeBackend
-            if (active == "webdav" && registry.get("webdav") != null) {
+            if (active == "webdav" && selectedProviderId == "baidu" &&
+                prefs.lastCloudProvider == null && registry.get("webdav") != null
+            ) {
                 selectedProviderId = "webdav"
-                loadSelected()
             }
         }
     }
 
     fun selectProvider(providerId: String) {
-        if (providerId == selectedProviderId || registry.get(providerId) == null) return
+        if (registry.get(providerId) == null) return
+        val changed = providerId != selectedProviderId
         selectedProviderId = providerId
-        prefs.lastCloudProvider = providerId
         if (registry.get(providerId) is CatalogBookProvider) {
             // 登录状态是页面常驻信息：仅首次进入时预热一次，已查询过则不重复请求；
             // 打开「更多」菜单时仍会主动刷新额度。
             if (stateOf(providerId).quotaText == null) loadQuota(providerId)
-        } else {
+        } else if (changed) {
+            prefs.lastCloudProvider = providerId
             viewModelScope.launch { loadSelected(providerId = providerId) }
         }
     }

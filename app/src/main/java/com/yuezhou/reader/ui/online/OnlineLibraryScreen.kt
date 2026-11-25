@@ -50,7 +50,6 @@ import kotlin.math.abs
 fun OnlineLibraryScreen(
     vm: OnlineLibraryViewModel,
     providerId: String?,
-    onSelectProvider: (String) -> Unit,
     onRefresh: () -> Unit,
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
     onOpenDownloads: () -> Unit,

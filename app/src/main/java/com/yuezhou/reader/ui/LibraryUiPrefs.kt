@@ -52,6 +52,12 @@ class LibraryUiPrefs(context: Context) {
             prefs.edit { putString("last_shelf_key", value) }
         }
 
+    var lastSectionPage: String?
+        get() = prefs.getString("last_section_page", null)
+        set(value) {
+            prefs.edit { putString("last_section_page", value) }
+        }
+
     /** 是否允许左右滑动切换栏目。 */
     var tabSwipeEnabled: Boolean
         get() = prefs.getBoolean("tab_swipe_enabled", true)

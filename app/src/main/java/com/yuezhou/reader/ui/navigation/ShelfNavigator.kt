@@ -38,16 +38,13 @@ class ShelfNavigator(
 
     /** 一级栏目由 committed key 派生，不再单独维护 currentTab。 */
     val tab: Tab
-        get() = when {
-            committedKey == ShelfPage.LocalShelf.key -> Tab.书架
-            committedKey.startsWith(CLOUD_PREFIX) -> Tab.云端
-            else -> Tab.设置
-        }
+        get() = pages.first { it.key == committedKey }.tab
 
     /** 云端具体书源 id；空态页返回 null。 */
     val providerId: String?
         get() = when {
             committedKey == ShelfPage.CloudEmpty.key -> null
+            committedKey == ShelfPage.Discover.key -> ShelfPage.Discover.PROVIDER_ID
             committedKey.startsWith(CLOUD_PREFIX) -> committedKey.removePrefix(CLOUD_PREFIX).ifBlank { null }
             else -> null
         }
@@ -107,6 +104,7 @@ class ShelfNavigator(
     }
 
     private fun resolve(pages: List<ShelfPage>, key: String): String {
+        if (key == LEGACY_DISCOVER_KEY) return ShelfPage.Discover.key
         if (pages.any { it.key == key }) return key
         if (key.startsWith(CLOUD_PREFIX)) {
             return pages.firstOrNull { it is ShelfPage.Cloud }?.key ?: ShelfPage.CloudEmpty.key
@@ -118,5 +116,6 @@ class ShelfNavigator(
 
     private companion object {
         const val CLOUD_PREFIX = "cloud."
+        const val LEGACY_DISCOVER_KEY = "cloud.zlibrary"
     }
 }

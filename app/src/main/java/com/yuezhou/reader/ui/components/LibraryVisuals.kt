@@ -10,10 +10,28 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.YuezhouDimens
+
+internal val LibraryGridIcon = ImageVector.Builder("LibraryGrid", 24.dp, 24.dp, 24f, 24f).apply {
+    path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.7f) {
+        for (x in listOf(3.5f, 13.5f)) {
+            for (y in listOf(3.5f, 13.5f)) {
+                moveTo(x, y)
+                horizontalLineTo(x + 7f)
+                verticalLineTo(y + 7f)
+                horizontalLineTo(x)
+                close()
+            }
+        }
+    }
+}.build()
 
 @Composable
 internal fun LibraryPageHeading(title: String, supportingText: String? = null) {

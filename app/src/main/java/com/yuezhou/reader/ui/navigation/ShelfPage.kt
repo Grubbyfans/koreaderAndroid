@@ -12,7 +12,22 @@ import androidx.compose.ui.unit.dp
 enum class Tab(val label: String, val icon: ImageVector) {
     书架("书库", bookTabIcon()),
     云端("云端", cloudTabIcon()),
+    发现("发现", discoverTabIcon()),
     设置("设置", Icons.Outlined.Settings),
+}
+
+private fun discoverTabIcon() = tabOutline("Discover") {
+    moveTo(22f, 12f)
+    curveTo(22f, 17.5f, 17.5f, 22f, 12f, 22f)
+    curveTo(6.5f, 22f, 2f, 17.5f, 2f, 12f)
+    curveTo(2f, 6.5f, 6.5f, 2f, 12f, 2f)
+    curveTo(17.5f, 2f, 22f, 6.5f, 22f, 12f)
+    close()
+    moveTo(15.8f, 8.2f)
+    lineTo(13.7f, 13.7f)
+    lineTo(8.2f, 15.8f)
+    lineTo(10.3f, 10.3f)
+    close()
 }
 
 private fun bookTabIcon() = tabOutline("OpenBook") {
@@ -78,6 +93,12 @@ sealed interface ShelfPage {
         override val tab = Tab.云端
     }
 
+    data object Discover : ShelfPage {
+        const val PROVIDER_ID = "zlibrary"
+        override val key = "discover.zlibrary"
+        override val tab = Tab.发现
+    }
+
     data object Settings : ShelfPage {
         override val key = "settings"
         override val tab = Tab.设置
@@ -87,7 +108,9 @@ sealed interface ShelfPage {
         /** 书源只以 id 参与导航，新增/移除书源无需改动此模型。 */
         fun build(providerIds: List<String>): List<ShelfPage> = buildList {
             add(LocalShelf)
-            if (providerIds.isEmpty()) add(CloudEmpty) else providerIds.forEach { add(Cloud(it)) }
+            val cloud = providerIds.filterNot { it == Discover.PROVIDER_ID }
+            if (cloud.isEmpty()) add(CloudEmpty) else cloud.forEach { add(Cloud(it)) }
+            add(Discover)
             add(Settings)
         }
     }

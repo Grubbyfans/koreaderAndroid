@@ -42,8 +42,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
-import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -85,7 +83,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -126,6 +123,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.ui.LibraryUiPrefs
 import com.yuezhou.reader.ui.components.BookReadingProgress
 import com.yuezhou.reader.ui.components.LibraryPageHeading
+import com.yuezhou.reader.ui.components.LibraryGridIcon
 import com.yuezhou.reader.ui.LibrarySort
 import com.yuezhou.reader.ui.LocalLibraryFilters
 import com.yuezhou.reader.ui.ReadingFilter
@@ -134,6 +132,7 @@ import com.yuezhou.reader.ui.navigation.ShelfNavigator
 import com.yuezhou.reader.ui.navigation.ShelfPage
 import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
 import com.yuezhou.reader.ui.navigation.Tab
+import com.yuezhou.reader.ui.navigation.shelfSwipe
 import com.yuezhou.reader.ui.rememberRestoredGridState
 import com.yuezhou.reader.ui.rememberRestoredListState
 import com.yuezhou.reader.ui.online.DownloadManagerScreen
@@ -143,7 +142,6 @@ import com.yuezhou.reader.ui.online.CloudSourceTabs
 import com.yuezhou.reader.web.ZLibraryWebEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -226,6 +224,7 @@ private fun BookshelfScreen() {
     val query = localQuery.trim()
     val searching = query.isNotEmpty()
     val shelfBooks = remember(books, hiddenBooks) { books.filter { it.bookId !in hiddenBooks } }
+    val visibleAuthorCache = remember(shelfBooks) { mutableMapOf<String, String?>() }
     var shelfAuthors by remember(shelfBooks) { mutableStateOf<Map<String, List<String>>?>(null) }
     LaunchedEffect(shelfBooks, searching) {
         if (searching && shelfAuthors == null) shelfAuthors = store.shelfAuthors(shelfBooks)
@@ -250,9 +249,10 @@ private fun BookshelfScreen() {
     // 优先恢复上次落页的稳定 key；没有记录时再按一级栏目兜底。
     val navigator = remember {
         ShelfNavigator(
-            initialKey = uiPrefs.lastShelfKey ?: when (restoredTab) {
+            initialKey = uiPrefs.lastSectionPage ?: uiPrefs.lastShelfKey ?: when (restoredTab) {
                 Tab.书架 -> ShelfPage.LocalShelf.key
-                Tab.云端 -> "cloud.${onlineVm.selectedProviderId}"
+                Tab.云端 -> "cloud.${uiPrefs.lastCloudProvider ?: "baidu"}"
+                Tab.发现 -> ShelfPage.Discover.key
                 Tab.设置 -> ShelfPage.Settings.key
             },
             providerIds = onlineVm.registry.enabled().map { it.id },
@@ -273,14 +273,8 @@ private fun BookshelfScreen() {
         initialPage = navigator.indexOf(navigator.committedKey).coerceAtLeast(0),
         pageCount = { navigator.pages.size },
     )
-    // 手势期间一次最多只走一页，避免长距离 fling 跨过多个栏目。
-    val pagerFling = PagerDefaults.flingBehavior(
-        state = pagerState,
-        pagerSnapDistance = PagerSnapDistance.atMost(1),
-    )
-    // 页面切换期间（动画/程序化导航/手势拖动）禁止详情、打开书籍、下载及顶栏业务操作。
-    val pagerBusy = pagerState.isScrollInProgress || navigator.isNavigating
-
+    var shelfDragging by remember { mutableStateOf(false) }
+    val pagerBusy = shelfDragging || pagerState.isScrollInProgress || navigator.isNavigating
     // 点击导航：相邻页用原生 Pager 动画；非相邻页直接定位，避免逐页展示中间栏目。
     LaunchedEffect(navigator.requestedKey, pageKeys) {
         // 手势拖动不产生请求；只有点击/返回等程序化导航才在这里滚动。
@@ -293,7 +287,7 @@ private fun BookshelfScreen() {
         val currentIndex = pagerState.currentPage.coerceIn(0, (pageKeys.size - 1).coerceAtLeast(0))
         val currentKey = pageKeys.getOrNull(currentIndex)
         try {
-            if (currentKey != null && abs(targetIndex - currentIndex) == 1) {
+            if (currentKey != null && abs(targetIndex - currentIndex) <= 1) {
                 pagerState.animateScrollToPage(targetIndex)
             } else if (currentKey != key) {
                 // 非相邻或页面列表变化导致下标错位：直接定位，不展示中间页。
@@ -307,22 +301,11 @@ private fun BookshelfScreen() {
     }
 
     // 书源增删导致下标错位时，按已提交 key 重新定位 Pager（不触发业务加载）。
-    LaunchedEffect(pageKeys, navigator.committedKey) {
+    LaunchedEffect(pageKeys) {
         val targetIndex = pageKeys.indexOf(navigator.committedKey)
         if (targetIndex >= 0 && pageKeys.getOrNull(pagerState.currentPage) != navigator.committedKey) {
             pagerState.scrollToPage(targetIndex)
         }
-    }
-
-    // 落页（动画/手势结束）才提交 committedKey；业务加载仍只由 committedKey 驱动。
-    LaunchedEffect(pagerState, pageKeys) {
-        snapshotFlow { pagerState.isScrollInProgress to pagerState.currentPage }
-            .distinctUntilChanged()
-            .collect { (scrolling, page) ->
-                if (scrolling) return@collect
-                val landed = pageKeys.getOrNull(page) ?: return@collect
-                if (!navigator.isNavigating) navigator.commit(landed)
-            }
     }
 
     // —— 云端书库状态（由 onlineVm 的当前书源状态同步，供既有详情/下载弹窗复用）——
@@ -489,10 +472,12 @@ private fun BookshelfScreen() {
     LaunchedEffect(navigator.committedKey) {
         // 进程重建时把当前页写回保存状态，保证下次恢复仍停在原位置。
         restoredTab = navigator.tab
-        uiPrefs.lastShelfKey = navigator.committedKey
-        val active = navigator.providerId
-        if (navigator.tab == Tab.云端 && active != null) {
-            if (active == onlineVm.selectedProviderId) {
+        uiPrefs.lastSectionPage = navigator.committedKey
+        uiPrefs.lastShelfKey = if (currentTab == Tab.发现) "cloud.zlibrary" else navigator.committedKey
+        val active = navigator.providerId?.takeIf { it in providerIds }
+        if ((navigator.tab == Tab.云端 || navigator.tab == Tab.发现) && active != null) {
+            if (currentTab == Tab.云端) uiPrefs.lastCloudProvider = active
+            if (active == onlineVm.selectedProviderId && currentTab == Tab.云端) {
                 loadRemote(active)
             } else {
                 // selectProvider 是 selectedProviderId 的唯一写入点，仅 committed 页驱动。
@@ -527,7 +512,7 @@ private fun BookshelfScreen() {
         onDispose { if (hostSwipeBlocked) swipeBlocker.release("host:overlay") }
     }
     // 云端是一级页：无浮层时返回键先回到「书库」，不直接退出应用。
-    BackHandler(enabled = currentTab == Tab.云端 && !fullscreenSubPage && !showOnlineDownloads) {
+    BackHandler(enabled = (currentTab == Tab.云端 || currentTab == Tab.发现) && !fullscreenSubPage && !showOnlineDownloads) {
         navigator.navigateTo(ShelfPage.LocalShelf.key)
     }
     // 设置同样是一级页：无全屏子页时返回键回到「书库」。
@@ -616,7 +601,8 @@ private fun BookshelfScreen() {
                         LibraryPageHeading(
                             title = when (currentTab) {
                                 Tab.书架 -> "书库"
-                                Tab.云端 -> "云端书库"
+                                Tab.云端 -> "云端"
+                                Tab.发现 -> "发现"
                                 Tab.设置 -> currentTab.label
                             },
                             supportingText = if (currentTab == Tab.书架) "本地书籍 · ${shelfBooks.size} 本" else null,
@@ -628,24 +614,29 @@ private fun BookshelfScreen() {
                             TextButton(enabled = !pagerBusy, onClick = { showHiddenBooks = true }) { Text("已移除") }
                         }
                         if (currentTab == Tab.书架 && selecting == null) {
-                            TextButton(
+                            IconButton(
                                 enabled = !pagerBusy,
                                 onClick = {
                                     localGridMode = !localGridMode
                                     uiPrefs.localGridMode = localGridMode
                                 },
-                            ) { Text(if (localGridMode) "列表" else "网格") }
+                            ) {
+                                Icon(
+                                    if (localGridMode) Icons.Filled.List else LibraryGridIcon,
+                                    contentDescription = if (localGridMode) "列表" else "网格",
+                                )
+                            }
                         }
                         // 下载任务入口：书库与云端都保留；设置页不显示。
-                        if (currentTab == Tab.书架 || currentTab == Tab.云端) {
+                        if (currentTab == Tab.书架 || currentTab == Tab.云端 || currentTab == Tab.发现) {
                             IconButton(enabled = !pagerBusy, onClick = { showOnlineDownloads = true }) {
                                 AnimatedDownloadIcon(
                                     downloading = downloadTask?.status == DownloadStatus.Downloading,
                                 )
                             }
                         }
-                        val cloudProviderId = navigator.providerId
-                        if (currentTab == Tab.云端 && cloudProviderId != null) {
+                        val cloudProviderId = navigator.providerId?.takeIf { it in providerIds }
+                        if ((currentTab == Tab.云端 || currentTab == Tab.发现) && cloudProviderId != null) {
                             Box {
                                 IconButton(
                                     enabled = !pagerBusy,
@@ -699,7 +690,7 @@ private fun BookshelfScreen() {
                                         )
                                     }
                                     DropdownMenuItem(
-                                        text = { Text("刷新云端书库") },
+                                        text = { Text(if (catalog) "刷新搜索结果" else "刷新云端书库") },
                                         // 检索书源必须已有提交词才可刷新，避免用输入框草稿触发请求。
                                         enabled = !cloudState.refreshing &&
                                             (!catalog || submitted.isNotBlank()),
@@ -750,7 +741,8 @@ private fun BookshelfScreen() {
                         navigator.navigateTo(
                             when (tab) {
                                 Tab.书架 -> ShelfPage.LocalShelf.key
-                                Tab.云端 -> navigator.cloudKey(onlineVm.selectedProviderId)
+                                Tab.云端 -> navigator.cloudKey(uiPrefs.lastCloudProvider ?: onlineVm.selectedProviderId)
+                                Tab.发现 -> ShelfPage.Discover.key
                                 Tab.设置 -> ShelfPage.Settings.key
                             },
                         )
@@ -794,9 +786,7 @@ private fun BookshelfScreen() {
                     }
                 }
             }
-            val visualIndex = pagerState.currentPage.coerceIn(0, pages.lastIndex)
-            val visualPage = pages.getOrNull(visualIndex)
-            val showCloudTabs = visualPage?.tab == Tab.云端 && cloudPageIndices.isNotEmpty()
+            val showCloudTabs = currentTab == Tab.云端 && cloudPageIndices.isNotEmpty()
 
             AnimatedVisibility(
                 visible = showCloudTabs,
@@ -805,7 +795,7 @@ private fun BookshelfScreen() {
                 label = "cloudTabs",
             ) {
                 CloudSourceTabs(
-                    providers = onlineVm.registry.enabled(),
+                    providers = onlineVm.registry.enabled().filter { it.id in cloudPageIndices },
                     pageIndices = cloudPageIndices,
                     pagerState = pagerState,
                     onSelect = { providerId ->
@@ -814,15 +804,22 @@ private fun BookshelfScreen() {
                 )
             }
 
-            // 单层扁平 Pager：书库 + 各云端书源（或空态）+ 设置，页面 key 为稳定标识。
+            // 同一个 Pager 承载一级和二级内容，每次手势只预览起点的相邻页。
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
-                // 阶段 C 开启横滑；详情/筛选/输入聚焦/宿主浮层期间由闸门临时关闭。
-                userScrollEnabled = tabSwipeEnabled && !swipeBlocker.blocked,
-                flingBehavior = pagerFling,
+                    .weight(1f)
+                    .shelfSwipe(
+                        enabled = tabSwipeEnabled && !swipeBlocker.blocked && !navigator.isNavigating,
+                        pager = pagerState,
+                        layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current,
+                        pageKeys = pageKeys,
+                        committedKey = { navigator.committedKey },
+                        onDragging = { shelfDragging = it },
+                        onSettle = navigator::navigateTo,
+                    ),
+                userScrollEnabled = false,
                 beyondViewportPageCount = 0,
                 key = { index -> pageKeys.getOrNull(index) ?: index },
             ) { index ->
@@ -856,6 +853,14 @@ private fun BookshelfScreen() {
                             readingFilter = readingFilter,
                             librarySort = librarySort,
                             authorSearchLoading = searching && shelfAuthors == null,
+                            authors = shelfAuthors.orEmpty(),
+                            lookupAuthor = { book ->
+                                if (book.bookId !in visibleAuthorCache) {
+                                    visibleAuthorCache[book.bookId] = store.shelfAuthors(listOf(book))
+                                        .get(book.bookId)?.joinToString("、")
+                                }
+                                visibleAuthorCache[book.bookId]
+                            },
                             gridMode = localGridMode,
                             selecting = selecting,
                             navigationLocked = pagerBusy,
@@ -867,34 +872,28 @@ private fun BookshelfScreen() {
                             },
                         )
                     }
-                    is ShelfPage.Cloud -> OnlineLibraryScreen(
-                        vm = onlineVm,
-                        providerId = page.providerId,
-                        interactionsEnabled = !pagerBusy,
-                        swipeBlocker = swipeBlocker,
-                        onSelectProvider = { navigator.navigateTo("cloud.$it") },
-                        onRefresh = { if (!pagerBusy) refreshRemoteLibrary(page.providerId) },
-                        onOpenDetail = { if (!pagerBusy) detailBook = it },
-                        onOpenDownloads = { showOnlineDownloads = true },
-                        onOpenSettings = {
-                            navigator.navigateTo(ShelfPage.Settings.key)
-                            showZLibrarySettings = true
-                        },
-                    )
-                    ShelfPage.CloudEmpty -> OnlineLibraryScreen(
-                        vm = onlineVm,
-                        providerId = null,
-                        interactionsEnabled = !pagerBusy,
-                        swipeBlocker = swipeBlocker,
-                        onSelectProvider = { navigator.navigateTo("cloud.$it") },
-                        onRefresh = {},
-                        onOpenDetail = { if (!pagerBusy) detailBook = it },
-                        onOpenDownloads = { showOnlineDownloads = true },
-                        onOpenSettings = {
-                            navigator.navigateTo(ShelfPage.Settings.key)
-                            showZLibrarySettings = true
-                        },
-                    )
+                    is ShelfPage.Cloud, ShelfPage.CloudEmpty, ShelfPage.Discover -> {
+                        val provider = when (page) {
+                            is ShelfPage.Cloud -> page.providerId
+                            ShelfPage.Discover -> ShelfPage.Discover.PROVIDER_ID.takeIf { it in providerIds }
+                            else -> null
+                        }
+                        OnlineLibraryScreen(
+                            vm = onlineVm,
+                            providerId = provider,
+                            interactionsEnabled = !pagerBusy && page.key == navigator.committedKey,
+                            swipeBlocker = swipeBlocker,
+                            onRefresh = {
+                                if (!pagerBusy && provider != null) refreshRemoteLibrary(provider)
+                            },
+                            onOpenDetail = { if (!pagerBusy) detailBook = it },
+                            onOpenDownloads = { showOnlineDownloads = true },
+                            onOpenSettings = {
+                                navigator.navigateTo(ShelfPage.Settings.key)
+                                showZLibrarySettings = page == ShelfPage.Discover
+                            },
+                        )
+                    }
                     ShelfPage.Settings -> SettingsPage(
                         cloudSync = cloudSync,
                         uploadQueue = uploadQueue,
@@ -1664,6 +1663,8 @@ private fun BookshelfContent(
     readingFilter: ReadingFilter,
     librarySort: LibrarySort,
     authorSearchLoading: Boolean,
+    authors: Map<String, List<String>>,
+    lookupAuthor: suspend (LibraryStore.Entry) -> String?,
     gridMode: Boolean,
     selecting: Set<String>?,
     navigationLocked: Boolean,
@@ -1717,8 +1718,13 @@ private fun BookshelfContent(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 lazyItems(books, key = { it.bookId }) { book ->
+                    val indexed = authors[book.bookId]?.joinToString("、")
+                    val author by produceState(indexed, book, indexed) {
+                        value = indexed ?: lookupAuthor(book)
+                    }
                     BookListRow(
                         book = book,
+                        author = author,
                         selecting = selecting != null,
                         checked = selecting?.contains(book.bookId) == true,
                         onClick = { openBook(book) },
@@ -1730,7 +1736,9 @@ private fun BookshelfContent(
         else -> {
             LazyVerticalGrid(
                 state = gridState,
-                columns = GridCells.Fixed(3),
+                columns = GridCells.Adaptive(
+                    minSize = 96.dp * androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceIn(1f, 1.5f),
+                ),
                 contentPadding = PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -1853,6 +1861,7 @@ private fun BookCard(
 @Composable
 private fun BookListRow(
     book: LibraryStore.Entry,
+    author: String?,
     selecting: Boolean,
     checked: Boolean,
     onClick: () -> Unit,
@@ -1907,11 +1916,17 @@ private fun BookListRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(6.dp))
-            Text(
-                formatSize(book.size),
-                style = MaterialTheme.typography.bodySmall,
-                color = YuezhouColors.TextSecondary,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(YuezhouDimens.Gap)) {
+                Text(
+                    author.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YuezhouColors.TextSecondary,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(formatSize(book.size), style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+            }
             book.percent?.let { progress ->
                 BookReadingProgress(
                     progress,

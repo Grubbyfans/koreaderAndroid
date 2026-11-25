@@ -14,7 +14,7 @@ class ShelfNavigatorTest {
     fun `页面顺序为书库 各书源 设置`() {
         val pages = ShelfPage.build(providers)
         assertEquals(
-            listOf("shelf.local", "cloud.baidu", "cloud.webdav", "cloud.zlibrary", "settings"),
+            listOf("shelf.local", "cloud.baidu", "cloud.webdav", "discover.zlibrary", "settings"),
             pages.map { it.key },
         )
     }
@@ -22,7 +22,7 @@ class ShelfNavigatorTest {
     @Test
     fun `没有启用书源时保留云端空态页`() {
         val pages = ShelfPage.build(emptyList())
-        assertEquals(listOf("shelf.local", "cloud.empty", "settings"), pages.map { it.key })
+        assertEquals(listOf("shelf.local", "cloud.empty", "discover.zlibrary", "settings"), pages.map { it.key })
         assertEquals(Tab.云端, pages[1].tab)
     }
 
@@ -86,7 +86,7 @@ class ShelfNavigatorTest {
     @Test
     fun `云端入口优先恢复上次书源`() {
         val navigator = ShelfNavigator(initialKey = ShelfPage.LocalShelf.key, providerIds = providers)
-        assertEquals("cloud.zlibrary", navigator.cloudKey("zlibrary"))
+        assertEquals("cloud.baidu", navigator.cloudKey("zlibrary"))
         // 上次书源已不存在时回退首个可用书源。
         assertEquals("cloud.baidu", navigator.cloudKey("removed"))
         assertEquals("cloud.baidu", navigator.cloudKey(null))
@@ -181,7 +181,7 @@ class ShelfNavigatorTest {
         navigator.navigateTo("cloud.zlibrary")
         // 旧任务结束时不能清掉新目标。
         navigator.clearRequest("cloud.webdav")
-        assertEquals("cloud.zlibrary", navigator.requestedKey)
+        assertEquals("discover.zlibrary", navigator.requestedKey)
         assertTrue(navigator.isNavigating)
     }
 
@@ -192,5 +192,25 @@ class ShelfNavigatorTest {
         assertEquals("cloud.webdav", navigator.committedKey)
         assertNull(navigator.requestedKey)
         assertFalse(navigator.isNavigating)
+    }
+
+    @Test
+    fun legacyZLibraryKeyRestoresDiscoverWithoutChangingCloudChoice() {
+        val navigator = ShelfNavigator(initialKey = "cloud.zlibrary", providerIds = providers)
+        assertEquals(ShelfPage.Discover.key, navigator.committedKey)
+        assertEquals(Tab.发现, navigator.tab)
+        assertEquals("zlibrary", navigator.providerId)
+        assertEquals("cloud.webdav", navigator.cloudKey("webdav"))
+    }
+
+    @Test
+    fun dragCannotCrossBothACloudSourceAndADestination() {
+        val swipe = ShelfSwipe(origin = 1, neighbor = 2, pageSize = 360f)
+        assertEquals(360f, swipe.clamp(900f), 0f)
+        assertEquals(0f, swipe.clamp(-100f), 0f)
+        assertEquals(1, swipe.destination(90f, 0f, 500f))
+        assertEquals(2, swipe.destination(360f, 5000f, 500f))
+        val boundary = ShelfSwipe(origin = 2, neighbor = 3, pageSize = 360f)
+        assertEquals(3, boundary.destination(260f, 0f, 500f))
     }
 }
