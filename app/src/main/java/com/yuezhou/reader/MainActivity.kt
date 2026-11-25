@@ -127,6 +127,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yuezhou.reader.ui.LibraryUiPrefs
+import com.yuezhou.reader.ui.rememberRestoredGridState
 import com.yuezhou.reader.ui.online.DownloadManagerScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryViewModel
@@ -1251,9 +1253,12 @@ internal fun CloudBookshelfContent(
     backendLabel: String?,
     fetchedAt: Long,
     fromCache: Boolean,
+    scrollKey: String,
     onRefresh: () -> Unit,
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
 ) {
+    val cloudContext = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember(cloudContext) { LibraryUiPrefs(cloudContext) }
     when {
         // 仅首次加载（尚无任何数据）时显示转圈；已有列表时静默刷新，避免切 tab 闪烁
         loading && books.isEmpty() -> {
@@ -1317,6 +1322,7 @@ internal fun CloudBookshelfContent(
                     )
                 }
                 LazyVerticalGrid(
+                    state = rememberRestoredGridState(scrollKey, prefs),
                     columns = GridCells.Fixed(3),
                     contentPadding = PaddingValues(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1431,6 +1437,8 @@ private fun BookshelfContent(
     onToggleSelect: (String) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val localPrefs = remember { LibraryUiPrefs(context) }
+    val gridState = rememberRestoredGridState("local", localPrefs)
     when {
         loading -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1442,6 +1450,7 @@ private fun BookshelfContent(
         }
         else -> {
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(3),
                 contentPadding = PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),

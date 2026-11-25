@@ -67,6 +67,7 @@ fun OnlineLibraryScreen(
                         backendLabel = state.backendLabel.ifBlank { null },
                         fetchedAt = state.fetchedAt,
                         fromCache = state.fromCache,
+                        scrollKey = "cloud.${vm.selectedProviderId}",
                         onRefresh = onRefresh,
                         onOpenDetail = onOpenDetail,
                     )

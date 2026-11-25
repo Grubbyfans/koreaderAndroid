@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -71,6 +70,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.model.OnlineBook
+import com.yuezhou.reader.ui.LibraryUiPrefs
+import com.yuezhou.reader.ui.rememberRestoredGridState
 import com.yuezhou.reader.web.ZLibraryWebEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -112,10 +113,15 @@ fun CatalogLibraryScreen(
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
-    val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = state.scrollIndex)
-    LaunchedEffect(gridState.firstVisibleItemIndex) { vm.saveScroll(gridState.firstVisibleItemIndex) }
+    val prefs = remember(context) { LibraryUiPrefs(context) }
+    val gridState = rememberRestoredGridState("catalog.${vm.selectedProviderId}", prefs)
+    // 仅当「已提交关键词」真正变化时回到顶部；从其他页签返回或打开详情再回来不重置位置。
+    var lastSubmitted by remember { mutableStateOf(state.submittedKeyword) }
     LaunchedEffect(state.submittedKeyword) {
-        if (state.submittedKeyword.isNotEmpty()) gridState.scrollToItem(0)
+        if (state.submittedKeyword != lastSubmitted) {
+            lastSubmitted = state.submittedKeyword
+            gridState.scrollToItem(0, 0)
+        }
     }
     var filterSheetOpen by remember { mutableStateOf(false) }
 

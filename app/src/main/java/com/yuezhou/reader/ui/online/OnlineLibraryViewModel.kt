@@ -21,6 +21,7 @@ import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
 import com.yuezhou.reader.reader.CloudCredentialStore
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.online.zlibrary.ZLibraryBookProvider
+import com.yuezhou.reader.ui.LibraryUiPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -57,7 +58,6 @@ data class ProviderUiState(
     /** 降级等非错误提示（如服务端拒绝搜索后展示热门书单）。 */
     val notice: String? = null,
     val gridMode: Boolean = true,
-    val scrollIndex: Int = 0,
     val detail: OnlineBook? = null,
     val detailLoading: Boolean = false,
     val detailMessage: String? = null,
@@ -75,6 +75,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
 
     private val context = application.applicationContext
     private val cloudSync = CloudSync(context)
+    private val prefs = LibraryUiPrefs(context)
     private val runtime = DownloadManagerHolder.runtime(context)
     private val zLibraryProvider = runtime.zLibraryProvider
 
@@ -84,7 +85,10 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     /** 统一下载管理器：并发 2、进度节流、恢复与覆盖确认由 reader 层负责，恢复只在 Holder 首次创建时执行。 */
     val downloadManager = runtime.manager
 
-    var selectedProviderId: String by mutableStateOf("baidu")
+    var selectedProviderId: String by mutableStateOf(
+        // 上次选中的书源同步恢复，避免进入云端页先按默认书源发一次请求。
+        prefs.lastCloudProvider?.takeIf { registry.get(it) != null } ?: "baidu",
+    )
         private set
 
     private val states = mutableStateMapOf<String, ProviderUiState>()
@@ -97,7 +101,11 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             "en", "english" -> "english" to "英文"
             else -> null to "全部语言"
         }
-        states["zlibrary"] = ProviderUiState(language = language, languageLabel = label)
+        states["zlibrary"] = ProviderUiState(
+            language = language,
+            languageLabel = label,
+            gridMode = prefs.catalogGridMode,
+        )
     }
     private val jobs = mutableMapOf<String, Job>()
     private val requestSeq = mutableMapOf<String, Int>()
@@ -117,10 +125,11 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         get() = registry.get(selectedProviderId) is CatalogBookProvider
 
     init {
-        // 沿用用户已有的同步后端选择，避免切换入口后目标云端发生变化。
+        // 没有任何书源记录时，沿用用户已有的同步后端选择，避免切换入口后目标云端发生变化。
         viewModelScope.launch {
+            if (prefs.lastCloudProvider != null) return@launch
             val active = CloudCredentialStore(context).load().activeBackend
-            if (active == "webdav") {
+            if (active == "webdav" && registry.get("webdav") != null) {
                 selectedProviderId = "webdav"
                 loadSelected()
             }
@@ -136,6 +145,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     fun selectProvider(providerId: String) {
         if (providerId == selectedProviderId || registry.get(providerId) == null) return
         selectedProviderId = providerId
+        prefs.lastCloudProvider = providerId
         if (registry.get(providerId) is CatalogBookProvider) {
             loadQuota()
         } else {
@@ -281,12 +291,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     fun setGridMode(value: Boolean) {
         val id = selectedProviderId
         states[id] = stateOf(id).copy(gridMode = value)
-    }
-
-    fun saveScroll(index: Int) {
-        val id = selectedProviderId
-        if (stateOf(id).scrollIndex == index) return
-        states[id] = stateOf(id).copy(scrollIndex = index)
+        prefs.catalogGridMode = value
     }
 
     fun clearSearch() {
@@ -329,7 +334,6 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             loadingMore = false,
             refreshing = false,
             resultSource = CatalogSource.NONE,
-            scrollIndex = 0,
             detail = null,
         )
         jobs[id] = viewModelScope.launch { doSearch(id, keyword, append = false, seq = seq) }
