@@ -2144,6 +2144,19 @@ private fun SettingsPage(
                 }
             }
         }
+        SettingsCard("关于") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("当前版本", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    BuildConfig.VERSION_NAME,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YuezhouColors.TextSecondary,
+                )
+            }
+        }
     }
 }
 
