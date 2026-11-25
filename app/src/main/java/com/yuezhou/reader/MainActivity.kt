@@ -91,6 +91,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
@@ -780,17 +781,25 @@ private fun BookshelfScreen() {
                 )
             }
 
-            // —— 抽离到 Pager 外层的云端二级书源切换条（阶段 E 评审 P0 修复）——
-            // 视觉选中态完全由 Pager 当前页驱动，拖动过程中跟随最新落页方向平滑切换；
-            // 但 committedKey 仍是唯一业务真源，这里不触发任何网络/下载/搜索副作用。
+            // —— 抽离到 Pager 外层的云端二级书源切换条 ——
+            // 选中态由 Pager 连续浮点位置 currentPage + currentPageOffsetFraction 驱动，
+            // 每个云 tab 按与当前位置的距离 lerp 颜色，与手指/页面 100% 同步，
+            // 消除原 currentPage 在中点离散翻转 + spring 追赶导致的「一闪一闪」。
+            // committedKey 仍是唯一业务真源，这里只做视觉，不触发任何网络/下载副作用。
+            val cloudPages = navigator.pages.mapIndexedNotNull { idx, page ->
+                if (page is ShelfPage.Cloud) idx to page.providerId else null
+            }
+            // 用 derivedStateOf 读 FrequentlyChangingValue，避免逐帧直接组合读取触发 lint；
+            // 颜色随 floatPage 连续插值，与手指/页面运动完全同步。
+            val floatPage by remember(cloudPages) {
+                derivedStateOf { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+            }
+            val selectedProgress = cloudPages.associate { (idx, id) ->
+                id to (1f - abs(floatPage - idx)).coerceIn(0f, 1f)
+            }
             val visualIndex = pagerState.currentPage.coerceIn(0, navigator.pages.lastIndex)
             val visualPage = navigator.pages.getOrNull(visualIndex)
-            val visualCloudProviderId = when (visualPage) {
-                is ShelfPage.Cloud -> visualPage.providerId
-                else -> null
-            }
-            val showCloudTabs = visualPage?.tab == Tab.云端 &&
-                onlineVm.registry.enabled().isNotEmpty()
+            val showCloudTabs = visualPage?.tab == Tab.云端 && cloudPages.isNotEmpty()
 
             AnimatedVisibility(
                 visible = showCloudTabs,
@@ -800,7 +809,7 @@ private fun BookshelfScreen() {
             ) {
                 CloudSourceTabs(
                     providers = onlineVm.registry.enabled(),
-                    selectedId = visualCloudProviderId,
+                    selectedProgress = selectedProgress,
                     onSelect = { providerId ->
                         if (!pagerBusy) navigator.navigateTo("cloud.$providerId")
                     },

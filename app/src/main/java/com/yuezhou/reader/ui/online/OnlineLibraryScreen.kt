@@ -20,9 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -150,13 +148,14 @@ private fun CloudEmptyState(onOpenSettings: () -> Unit) {
  * 已抽离到 Pager 外层，由 MainActivity 统一渲染一份，避免随页面整体滑动（阶段 E 评审 P0 修复）。
  *
  * @param providers 当前可用书源列表。
- * @param selectedId 当前选中的书源 id；为空或与 providers 无匹配时所有项都不高亮。
+ * @param selectedProgress 每个书源 id → 选中进度（0~1）。由外层按 Pager 连续浮点位置计算，
+ *   使选中背景/文字色/字重与手指滑动 100% 同步，消除中点离散翻转导致的闪烁。
  * @param onSelect 点击某书源后的回调；由外层负责发起导航（如 `navigateTo("cloud.$id")`）。
  */
 @Composable
 fun CloudSourceTabs(
     providers: List<BookProvider>,
-    selectedId: String?,
+    selectedProgress: Map<String, Float>,
     onSelect: (String) -> Unit,
 ) {
     // 书源较多时等宽分段会挤压名称，改为可横向滚动且保留最小宽度。
@@ -172,19 +171,10 @@ fun CloudSourceTabs(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         providers.forEach { provider ->
-            val selected = provider.id == selectedId
-            val backgroundColor by animateColorAsState(
-                targetValue = if (selected) YuezhouColors.BrandContainer else Color.Transparent,
-                label = "cloudTabBg",
-            )
-            val textColor by animateColorAsState(
-                targetValue = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
-                label = "cloudTabFg",
-            )
-            val fontWeightFactor by animateFloatAsState(
-                targetValue = if (selected) 600f else 400f,
-                label = "cloudTabWeight",
-            )
+            val progress = (selectedProgress[provider.id] ?: 0f).coerceIn(0f, 1f)
+            val backgroundColor = lerp(Color.Transparent, YuezhouColors.BrandContainer, progress)
+            val textColor = lerp(YuezhouColors.TextSecondary, YuezhouColors.BrandDark, progress)
+            val weight = (400 + (600 - 400) * progress).toInt().coerceIn(400, 600)
             Box(
                 modifier = Modifier
                     .then(if (scrollable) Modifier.widthIn(min = 96.dp) else Modifier.weight(1f))
@@ -197,7 +187,7 @@ fun CloudSourceTabs(
                 Text(
                     provider.displayName,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        fontWeight = FontWeight(fontWeightFactor.toInt()),
+                        fontWeight = FontWeight(weight),
                     ),
                     color = textColor,
                     maxLines = 1,
