@@ -3,6 +3,7 @@ package com.yuezhou.reader.ui.online
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -94,12 +97,15 @@ private fun CloudSourceTabs(
     selectedId: String,
     onSelect: (String) -> Unit,
 ) {
+    // 书源较多时等宽分段会挤压名称，改为可横向滚动且保留最小宽度。
+    val scrollable = providers.size > 3
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(YuezhouColors.Surface)
+            .then(if (scrollable) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -107,11 +113,11 @@ private fun CloudSourceTabs(
             val selected = provider.id == selectedId
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .then(if (scrollable) Modifier.widthIn(min = 96.dp) else Modifier.weight(1f))
                     .clip(RoundedCornerShape(17.dp))
                     .background(if (selected) YuezhouColors.BrandContainer else Color.Transparent)
                     .clickable { onSelect(provider.id) }
-                    .padding(vertical = 7.dp),
+                    .padding(horizontal = if (scrollable) 14.dp else 0.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
