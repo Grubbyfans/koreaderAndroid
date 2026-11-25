@@ -812,6 +812,10 @@ private fun ReaderScreen(
                         webView = wv
                     }
                 },
+                onRelease = { releasedView ->
+                    if (webView === releasedView) webView = null
+                    releasedView.release()
+                },
                 modifier = Modifier.fillMaxSize(),
             )
 

@@ -2,6 +2,8 @@ package com.yuezhou.reader.reader
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -32,6 +34,9 @@ import java.util.UUID
 class ReaderWebView(context: Context) : WebView(context) {
 
     @Volatile private var externalSource: Uri? = null
+    @Volatile private var released = false
+    private val callbacks = Handler(Looper.getMainLooper())
+    private val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     /** 资产加载器：负责把 assets/reader 目录映射为受控 HTTPS URL。 */
     private val assetLoader: WebViewAssetLoader = WebViewAssetLoader.Builder()
@@ -110,9 +115,9 @@ class ReaderWebView(context: Context) : WebView(context) {
 
     init {
         // debug 构建开启 WebView 远程调试，便于用 Chrome chrome://inspect 排查白屏
-        val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (debuggable) {
             WebView.setWebContentsDebuggingEnabled(true)
+            Log.d(LIFECYCLE_TAG, "created ${System.identityHashCode(this)}")
         }
         // Use system tap thresholds and leave drag, pinch and selection events with WebView.
         val taps = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -128,7 +133,7 @@ class ReaderWebView(context: Context) : WebView(context) {
             override fun onSingleTapUp(event: MotionEvent): Boolean {
                 if (width <= 0) return false
                 val position = event.x / width
-                post {
+                callbacks.post {
                     when {
                         !verticalMode && position < 1f / 3f -> onPageTap?.invoke(-1)
                         !verticalMode && position > 2f / 3f -> onPageTap?.invoke(1)
@@ -245,15 +250,42 @@ class ReaderWebView(context: Context) : WebView(context) {
         // 关键：必须在 loadUrl 之前注入桥接对象，否则 ES module 顶层代码执行时
         // window.ReaderBridge 尚不可用，导致所有事件回传静默丢失（bookOpened/relocate/toc 等）。
         addJavascriptInterface(
-            JsBridge { type, data -> post { dispatchEvent(type, data) } },
+            JsBridge { type, data ->
+                if (!released) callbacks.post {
+                    if (!released) dispatchEvent(type, data)
+                }
+            },
             "ReaderBridge",
         )
         // 加载宿主页面
         loadUrl("https://appassets.androidplatform.net/assets/reader/index.html")
     }
 
+    /** Called once the reader's AndroidView leaves composition for good. */
+    fun release() {
+        if (released) return
+        released = true
+        eventListener = null
+        onTap = null
+        onPageTap = null
+        onBrightnessScroll = null
+        externalSource = null
+        callbacks.removeCallbacksAndMessages(null)
+        val conversions = pendingConversions.values.toList()
+        pendingConversions.clear()
+        conversions.forEach { it.complete(null) }
+        stopLoading()
+        removeJavascriptInterface("ReaderBridge")
+        // Let Compose detach the native view before WebView.destroy().
+        callbacks.post {
+            destroy()
+            if (debuggable) Log.d(LIFECYCLE_TAG, "destroyed ${System.identityHashCode(this)}")
+        }
+    }
+
     companion object {
         private const val TAG = "ReaderWebView"
+        private const val LIFECYCLE_TAG = "ReaderWebViewLifecycle"
 
         /** 方向锁定判定阈值（px）：累计位移超过此值才判定主导方向，避免轻触/抖动误判。 */
         private const val TOUCH_SLOP = 24f
@@ -335,6 +367,7 @@ class ReaderWebView(context: Context) : WebView(context) {
     suspend fun xPointerToCfi(xpointer: String): String? = convertPosition("xPointerToCfi", xpointer)
 
     private suspend fun convertPosition(method: String, position: String): String? {
+        if (released) return null
         val requestId = UUID.randomUUID().toString()
         val result = CompletableDeferred<String?>()
         pendingConversions[requestId] = result
@@ -396,6 +429,7 @@ class ReaderWebView(context: Context) : WebView(context) {
      * 覆盖冷启动下 WebView + ES module 的加载耗时。
      */
     private fun whenReaderReady(remaining: Int = 200, action: () -> Unit) {
+        if (released) return
         if (remaining <= 0) {
             Log.e(TAG, "等待 reader 就绪超时，放弃执行动作")
             eventListener?.invoke(ReaderEvent.Error("阅读器初始化超时"))
@@ -404,10 +438,11 @@ class ReaderWebView(context: Context) : WebView(context) {
         evaluateJavascript(
             "window.__readerReady === true",
         ) { ready ->
+            if (released) return@evaluateJavascript
             if (ready == "true") {
                 action()
             } else {
-                postDelayed({ whenReaderReady(remaining - 1, action) }, 50)
+                callbacks.postDelayed({ whenReaderReady(remaining - 1, action) }, 50)
             }
         }
     }
