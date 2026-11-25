@@ -1,0 +1,20 @@
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  h_7f20b2a03eb3b6 106,135,196,371-381,404-405,412,482-490,492,495-496,503-535,545,547-554,592-599,602-612,614-622,1092,1095,1099-1118,2252-2266
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryScreen.kt
+  h_7f20b2a03eb3b6 21,24
+"docs/04-在线书库统一化/静读书库导航及 Z-Library UI 改造技术评审报告.md"
+  h_7f20b2a03eb3b6 1-455
+"docs/04-在线书库统一化/静读书库导航及Z-Library UI改造阶段A实施报告.md"
+  h_7f20b2a03eb3b6 1-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f57ad6d8805cbc88bba4ba08e54df11054f2aeb0",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
