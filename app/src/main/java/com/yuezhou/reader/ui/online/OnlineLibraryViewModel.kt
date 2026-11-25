@@ -88,8 +88,10 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     val downloadManager = runtime.manager
 
     var selectedProviderId: String by mutableStateOf(
-        // 上次选中的书源同步恢复，避免进入云端页先按默认书源发一次请求。
-        prefs.lastCloudProvider?.takeIf { registry.get(it) != null } ?: "baidu",
+        // 上次选中的书源同步恢复；已禁用的书源回退到首个可用书源，避免初始化到不可见页。
+        prefs.lastCloudProvider?.takeIf { id -> registry.enabled().any { it.id == id } }
+            ?: registry.enabled().firstOrNull()?.id
+            ?: "baidu",
     )
         private set
 

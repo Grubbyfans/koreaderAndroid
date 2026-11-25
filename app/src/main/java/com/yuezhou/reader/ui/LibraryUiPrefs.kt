@@ -45,6 +45,20 @@ class LibraryUiPrefs(context: Context) {
             prefs.edit { putString("last_cloud_provider", value) }
         }
 
+    /** 上次已提交的导航页 key，用于进程重建后恢复到原页面。 */
+    var lastShelfKey: String?
+        get() = prefs.getString("last_shelf_key", null)
+        set(value) {
+            prefs.edit { putString("last_shelf_key", value) }
+        }
+
+    /** 是否允许左右滑动切换栏目。 */
+    var tabSwipeEnabled: Boolean
+        get() = prefs.getBoolean("tab_swipe_enabled", true)
+        set(value) {
+            prefs.edit { putBoolean("tab_swipe_enabled", value) }
+        }
+
     var catalogGridMode: Boolean
         get() = prefs.getBoolean("catalog_grid_mode", true)
         set(value) {

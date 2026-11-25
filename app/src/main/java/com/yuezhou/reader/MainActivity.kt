@@ -45,6 +45,7 @@ import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -145,6 +146,8 @@ import com.yuezhou.reader.ui.online.ZLibrarySettingsScreen
 import com.yuezhou.reader.web.ZLibraryWebEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -233,9 +236,10 @@ private fun BookshelfScreen() {
     val onlineVm: OnlineLibraryViewModel = viewModel()
 
     // 唯一的已提交导航状态：currentTab / 当前书源均由页面 key 派生。
+    // 优先恢复上次落页的稳定 key；没有记录时再按一级栏目兜底。
     val navigator = remember {
         ShelfNavigator(
-            initialKey = when (restoredTab) {
+            initialKey = uiPrefs.lastShelfKey ?: when (restoredTab) {
                 Tab.书架 -> ShelfPage.LocalShelf.key
                 Tab.云端 -> "cloud.${onlineVm.selectedProviderId}"
                 Tab.设置 -> ShelfPage.Settings.key
@@ -249,6 +253,8 @@ private fun BookshelfScreen() {
 
     // 横滑闸门：页面内详情/筛选/输入聚焦或宿主浮层期间临时关闭手势（阶段 C）。
     val swipeBlocker = remember { SwipeBlockRegistry() }
+    // 栏目横滑开关：设置页修改后立即生效并持久化。
+    var tabSwipeEnabled by remember { mutableStateOf(uiPrefs.tabSwipeEnabled) }
 
     // Pager 只承载视觉与手势；committedKey 仍是唯一业务真源（方案 §2.1）。
     val pageKeys = navigator.pages.map { it.key }
@@ -472,6 +478,7 @@ private fun BookshelfScreen() {
     LaunchedEffect(navigator.committedKey) {
         // 进程重建时把当前页写回保存状态，保证下次恢复仍停在原位置。
         restoredTab = navigator.tab
+        uiPrefs.lastShelfKey = navigator.committedKey
         val active = navigator.providerId
         if (navigator.tab == Tab.云端 && active != null) {
             if (active == onlineVm.selectedProviderId) {
@@ -510,6 +517,10 @@ private fun BookshelfScreen() {
     }
     // 云端是一级页：无浮层时返回键先回到「书库」，不直接退出应用。
     BackHandler(enabled = currentTab == Tab.云端 && !fullscreenSubPage && !showOnlineDownloads) {
+        navigator.navigateTo(ShelfPage.LocalShelf.key)
+    }
+    // 设置同样是一级页：无全屏子页时返回键回到「书库」。
+    BackHandler(enabled = currentTab == Tab.设置 && !fullscreenSubPage && !showOnlineDownloads) {
         navigator.navigateTo(ShelfPage.LocalShelf.key)
     }
     // 云端一级页右上角「更多」：刷新与网页搜索；额度/账户在后续阶段迁入。
@@ -769,7 +780,7 @@ private fun BookshelfScreen() {
                     .fillMaxWidth()
                     .weight(1f),
                 // 阶段 C 开启横滑；详情/筛选/输入聚焦/宿主浮层期间由闸门临时关闭。
-                userScrollEnabled = !swipeBlocker.blocked,
+                userScrollEnabled = tabSwipeEnabled && !swipeBlocker.blocked,
                 flingBehavior = pagerFling,
                 beyondViewportPageCount = 0,
                 key = { index -> pageKeys.getOrNull(index) ?: index },
@@ -830,6 +841,11 @@ private fun BookshelfScreen() {
                         cloudSync = cloudSync,
                         uploadQueue = uploadQueue,
                         cloudLoading = remoteLoading,
+                        tabSwipeEnabled = tabSwipeEnabled,
+                        onTabSwipeChange = {
+                            tabSwipeEnabled = it
+                            uiPrefs.tabSwipeEnabled = it
+                        },
                         showSyncLogPage = showSyncLogPage,
                         onSyncLogChange = { showSyncLogPage = it },
                         showZLibrarySettings = showZLibrarySettings,
@@ -1658,6 +1674,8 @@ private fun SettingsPage(
     cloudSync: CloudSync,
     uploadQueue: BookUploadQueue,
     cloudLoading: Boolean,
+    tabSwipeEnabled: Boolean,
+    onTabSwipeChange: (Boolean) -> Unit,
     showSyncLogPage: Boolean,
     onSyncLogChange: (Boolean) -> Unit,
     showZLibrarySettings: Boolean,
@@ -1672,6 +1690,23 @@ private fun SettingsPage(
     )
 
     val downloadDirectory = remember(context) { DownloadDirectory(context) }
+    // Pager 组合销毁后设置页滚动位置仍保留（跨页切换/进程重建）。
+    val settingsPrefs = remember(context) { LibraryUiPrefs(context) }
+    val settingsScroll = remember {
+        ScrollState(settingsPrefs.scroll("settings").offset)
+    }
+    LaunchedEffect(settingsScroll) {
+        snapshotFlow { settingsScroll.value }
+            .distinctUntilChanged()
+            .collectLatest { value ->
+                delay(150)
+                settingsPrefs.saveScroll("settings", 0, value)
+            }
+    }
+    // Pager 销毁该页时立即落盘，避免少于防抖时长的最后一次滚动丢失。
+    DisposableEffect(settingsScroll) {
+        onDispose { settingsPrefs.saveScroll("settings", 0, settingsScroll.value) }
+    }
     var downloadLabel by remember { mutableStateOf(downloadDirectory.label()) }
     var downloadError by remember { mutableStateOf<String?>(null) }
     val chooseDownloadDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -1738,7 +1773,7 @@ private fun SettingsPage(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(settingsScroll)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1767,6 +1802,23 @@ private fun SettingsPage(
             // 同步记录入口：点击进入独立页面
             TextButton(onClick = { onSyncLogChange(true) }) {
                 Text("查看最近 20 次同步记录")
+            }
+        }
+
+        SettingsCard("栏目切换") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("左右滑动切换栏目", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "关闭后仅能点击底部导航与书源标签切换",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                }
+                Switch(
+                    checked = tabSwipeEnabled,
+                    onCheckedChange = onTabSwipeChange,
+                )
             }
         }
 
