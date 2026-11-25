@@ -1,0 +1,16 @@
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  h_7f20b2a03eb3b6 411-414
+app/src/main/java/com/yuezhou/reader/ui/online/CatalogLibraryScreen.kt
+  h_7f20b2a03eb3b6 5,130-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8a4825b6c673fc0797f73868eca230bf8f8c4ab8",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
