@@ -1,0 +1,20 @@
+app/src/main/AndroidManifest.xml
+  h_7f20b2a03eb3b6 81
+app/src/main/java/com/yuezhou/reader/web/ZLibraryWebActivity.kt
+  h_7f20b2a03eb3b6 5,92,102-104,116-126,129-150,156,598,609
+app/src/main/java/com/yuezhou/reader/web/ZLibraryWebMemoryLog.kt
+  h_7f20b2a03eb3b6 1-43
+docs/04-在线书库统一化/Z-Library混合架构阶段F实施报告.md
+  h_7f20b2a03eb3b6 1-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "00f90e3e0ac3fb760a58fca08b41a8b4143f2437",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
