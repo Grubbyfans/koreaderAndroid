@@ -174,8 +174,8 @@ fun CatalogLibraryScreen(
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 非默认筛选时高亮摘要，避免用户忘记当前仍带着语言/排序条件。
-            val filterActive = state.language != null || state.sort != "bestmatch"
+            // 与书源设置的默认条件比较：只有偏离默认时才高亮，避免默认语言一直呈激活态。
+            val filterActive = state.language != vm.defaultLanguage() || state.sort != "bestmatch"
             Text(
                 text = "${state.languageLabel} · ${sortLabel(state.sort)} · EPUB",
                 style = MaterialTheme.typography.bodySmall.copy(

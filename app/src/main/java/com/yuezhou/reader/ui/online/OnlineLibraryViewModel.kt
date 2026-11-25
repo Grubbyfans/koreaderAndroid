@@ -570,6 +570,14 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     /** 网页搜索使用当前生效服务器；未配置时返回 null，由入口提示先配置。 */
     fun webBaseUrl(): String? = ZLibraryConfigStore(context).load().servers.baseUrls.firstOrNull()
 
+    /** 书源设置里的默认语言；用于判断筛选是否偏离默认条件，而不是只要设了语言就算激活。 */
+    fun defaultLanguage(): String? =
+        when (ZLibraryConfigStore(context).load().preferences.defaultLanguage) {
+            "zh", "chinese" -> "chinese"
+            "en", "english" -> "english"
+            else -> null
+        }
+
     private fun nextRequestSeq(id: String): Int {
         val seq = (requestSeq[id] ?: 0) + 1
         requestSeq[id] = seq
