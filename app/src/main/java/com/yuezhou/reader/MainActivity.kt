@@ -103,6 +103,12 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -141,6 +147,7 @@ import com.yuezhou.reader.ui.rememberRestoredListState
 import com.yuezhou.reader.ui.online.DownloadManagerScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryViewModel
+import com.yuezhou.reader.ui.online.CloudSourceTabs
 import com.yuezhou.reader.ui.online.ServerSettingsScreen
 import com.yuezhou.reader.ui.online.ZLibrarySettingsScreen
 import com.yuezhou.reader.web.ZLibraryWebEntry
@@ -770,6 +777,33 @@ private fun BookshelfScreen() {
                     style = MaterialTheme.typography.bodyMedium,
                     color = YuezhouColors.TextSecondary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
+            // —— 抽离到 Pager 外层的云端二级书源切换条（阶段 E 评审 P0 修复）——
+            // 视觉选中态完全由 Pager 当前页驱动，拖动过程中跟随最新落页方向平滑切换；
+            // 但 committedKey 仍是唯一业务真源，这里不触发任何网络/下载/搜索副作用。
+            val visualIndex = pagerState.currentPage.coerceIn(0, navigator.pages.lastIndex)
+            val visualPage = navigator.pages.getOrNull(visualIndex)
+            val visualCloudProviderId = when (visualPage) {
+                is ShelfPage.Cloud -> visualPage.providerId
+                else -> null
+            }
+            val showCloudTabs = visualPage?.tab == Tab.云端 &&
+                onlineVm.registry.enabled().isNotEmpty()
+
+            AnimatedVisibility(
+                visible = showCloudTabs,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = shrinkVertically() + fadeOut() + slideOutVertically { it / 2 },
+                label = "cloudTabs",
+            ) {
+                CloudSourceTabs(
+                    providers = onlineVm.registry.enabled(),
+                    selectedId = visualCloudProviderId,
+                    onSelect = { providerId ->
+                        if (!pagerBusy) navigator.navigateTo("cloud.$providerId")
+                    },
                 )
             }
 

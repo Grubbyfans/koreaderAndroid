@@ -20,6 +20,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,7 +55,6 @@ fun OnlineLibraryScreen(
     interactionsEnabled: Boolean = true,
     swipeBlocker: SwipeBlockRegistry? = null,
 ) {
-    val providers = vm.registry.enabled()
     val state = providerId?.let { vm.stateOf(it) }
 
     // 详情展开时关闭横滑：避免从详情页开始拖动导致误切栏目。
@@ -63,16 +65,9 @@ fun OnlineLibraryScreen(
         onDispose { swipeBlocker?.release(token) }
     }
 
+    // 二级导航栏已抽离到 MainActivity 外层，整个云端栏目共用一份固定的切换条（阶段 E 评审 P0 修复）。
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            if (providers.isNotEmpty()) {
-                CloudSourceTabs(
-                    providers = providers,
-                    selectedId = providerId.orEmpty(),
-                    onSelect = onSelectProvider,
-                )
-            }
-
             if (providerId == null || state == null) {
                 // 全部书源被禁用：仍保留「云端」一级入口，给出明确的恢复路径。
                 CloudEmptyState(onOpenSettings)
@@ -150,11 +145,18 @@ private fun CloudEmptyState(onOpenSettings: () -> Unit) {
     }
 }
 
-/** 紧凑书源切换：等宽分段控件，避免占用过多纵向空间。 */
+/**
+ * 云端二级书源切换条：等宽分段控件，书源多时改为横向滚动保留最小宽度。
+ * 已抽离到 Pager 外层，由 MainActivity 统一渲染一份，避免随页面整体滑动（阶段 E 评审 P0 修复）。
+ *
+ * @param providers 当前可用书源列表。
+ * @param selectedId 当前选中的书源 id；为空或与 providers 无匹配时所有项都不高亮。
+ * @param onSelect 点击某书源后的回调；由外层负责发起导航（如 `navigateTo("cloud.$id")`）。
+ */
 @Composable
-private fun CloudSourceTabs(
+fun CloudSourceTabs(
     providers: List<BookProvider>,
-    selectedId: String,
+    selectedId: String?,
     onSelect: (String) -> Unit,
 ) {
     // 书源较多时等宽分段会挤压名称，改为可横向滚动且保留最小宽度。
@@ -171,11 +173,23 @@ private fun CloudSourceTabs(
     ) {
         providers.forEach { provider ->
             val selected = provider.id == selectedId
+            val backgroundColor by animateColorAsState(
+                targetValue = if (selected) YuezhouColors.BrandContainer else Color.Transparent,
+                label = "cloudTabBg",
+            )
+            val textColor by animateColorAsState(
+                targetValue = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
+                label = "cloudTabFg",
+            )
+            val fontWeightFactor by animateFloatAsState(
+                targetValue = if (selected) 600f else 400f,
+                label = "cloudTabWeight",
+            )
             Box(
                 modifier = Modifier
                     .then(if (scrollable) Modifier.widthIn(min = 96.dp) else Modifier.weight(1f))
                     .clip(RoundedCornerShape(17.dp))
-                    .background(if (selected) YuezhouColors.BrandContainer else Color.Transparent)
+                    .background(backgroundColor)
                     .clickable { onSelect(provider.id) }
                     .padding(horizontal = if (scrollable) 14.dp else 0.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center,
@@ -183,9 +197,9 @@ private fun CloudSourceTabs(
                 Text(
                     provider.displayName,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = FontWeight(fontWeightFactor.toInt()),
                     ),
-                    color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
+                    color = textColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
