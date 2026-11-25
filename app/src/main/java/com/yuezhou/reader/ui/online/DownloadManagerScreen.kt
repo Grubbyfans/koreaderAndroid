@@ -61,7 +61,7 @@ private enum class DownloadFilter(val label: String) {
 fun DownloadManagerScreen(
     vm: OnlineLibraryViewModel,
     onBack: () -> Unit,
-    onOpenBook: (String) -> Unit,
+    onOpenBook: suspend (String) -> Boolean,
     onOpenLegacyDownloads: () -> Unit,
 ) {
     val tasks by vm.downloadManager.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -79,6 +79,8 @@ fun DownloadManagerScreen(
     var uploading by remember { mutableStateOf(false) }
     var uploadReport by remember { mutableStateOf<CloudUploadBridge.Report?>(null) }
     var uploadError by remember { mutableStateOf<String?>(null) }
+    var openingBook by remember { mutableStateOf(false) }
+    var missingBook by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = YuezhouColors.Background,
@@ -155,15 +157,26 @@ fun DownloadManagerScreen(
                             task = task,
                             onCancel = { vm.downloadManager.cancel(task.taskId) },
                             onRetry = {
-                                if (task.status == DownloadStatus.IMPORT_FAILED &&
-                                    task.errorMessage?.contains("同名") == true
-                                ) {
+                                if (task.errorMessage?.contains("同名") == true) {
                                     confirmTask = task
                                 } else {
                                     vm.downloadManager.retry(task.taskId)
                                 }
                             },
-                            onRead = task.localBookId?.let { id -> { onOpenBook(id) } },
+                            onRead = task.localBookId?.takeIf { task.status == DownloadStatus.COMPLETED }?.let { id ->
+                                {
+                                    if (!openingBook) {
+                                        openingBook = true
+                                        scope.launch {
+                                            try {
+                                                missingBook = !onOpenBook(id)
+                                            } finally {
+                                                openingBook = false
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                             onName = if (task.status == DownloadStatus.AWAITING_NAME) {
                                 {
                                     nameInput = ""
@@ -188,6 +201,15 @@ fun DownloadManagerScreen(
                 }
             }
         }
+    }
+
+    if (missingBook) {
+        AlertDialog(
+            onDismissRequest = { missingBook = false },
+            title = { Text("无法打开书籍") },
+            text = { Text("本地找不到这本书，文件可能已移除。可回到书源重新下载。") },
+            confirmButton = { TextButton(onClick = { missingBook = false }) { Text("关闭") } },
+        )
     }
 
     confirmTask?.let { task ->
@@ -368,7 +390,7 @@ private fun DownloadTaskRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { if (task.status == DownloadStatus.COMPLETED) onRead?.invoke() }
+            .then(if (onRead != null) Modifier.clickable(onClick = onRead) else Modifier)
             .padding(12.dp),
     ) {
         Text(task.bookTitle, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -403,10 +425,12 @@ private fun DownloadTaskRow(
                 Button(onClick = it) { Text("命名") }
             }
             if (task.status == DownloadStatus.FAILED || task.status == DownloadStatus.IMPORT_FAILED) {
-                Button(onClick = onRetry) { Text(if (task.status == DownloadStatus.IMPORT_FAILED) "重试导入" else "重试") }
+                Button(onClick = onRetry) {
+                    Text(if (task.status == DownloadStatus.IMPORT_FAILED) "重新导入" else "重试下载")
+                }
             }
             onRead?.let {
-                TextButton(onClick = it) { Text("阅读") }
+                Button(onClick = it) { Text("打开阅读") }
             }
             if (task.status == DownloadStatus.COMPLETED) {
                 onUpload?.let {
@@ -425,8 +449,8 @@ private fun statusLabel(status: DownloadStatus): String = when (status) {
     DownloadStatus.IMPORTING -> "导入中"
     DownloadStatus.COMPLETED -> "已导入"
     DownloadStatus.AWAITING_NAME -> "待命名"
-    DownloadStatus.IMPORT_FAILED -> "导入失败"
-    DownloadStatus.FAILED -> "失败"
+    DownloadStatus.IMPORT_FAILED -> "已下载 · 导入失败"
+    DownloadStatus.FAILED -> "任务失败"
     DownloadStatus.CANCELLED -> "已取消"
 }
 

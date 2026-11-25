@@ -53,6 +53,7 @@ fun OnlineLibraryScreen(
     onSelectProvider: (String) -> Unit,
     onRefresh: () -> Unit,
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
+    onOpenDownloads: () -> Unit,
     onOpenSettings: () -> Unit,
     interactionsEnabled: Boolean = true,
     swipeBlocker: SwipeBlockRegistry? = null,
@@ -116,6 +117,10 @@ fun OnlineLibraryScreen(
                     providerId = providerId,
                     interactionsEnabled = interactionsEnabled,
                     onBack = { vm.closeDetail(providerId) },
+                    onDownloadQueued = {
+                        vm.closeDetail(providerId)
+                        onOpenDownloads()
+                    },
                 )
             }
         }

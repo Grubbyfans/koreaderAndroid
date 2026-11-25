@@ -409,7 +409,8 @@ class BookDownloadManager(
         scope.launch {
             val current = repository.find(taskId) ?: return@launch
             if (current.status.active || current.status == DownloadStatus.AWAITING_NAME) return@launch
-            if (current.providerId == ZLIBRARY_WEB_PROVIDER_ID && !hasValidPending(current)) {
+            val importOnly = current.status == DownloadStatus.IMPORT_FAILED
+            if ((importOnly || current.providerId == ZLIBRARY_WEB_PROVIDER_ID) && !hasValidPending(current)) {
                 repository.save(
                     current.copy(
                         status = DownloadStatus.FAILED,
@@ -442,7 +443,7 @@ class BookDownloadManager(
                 updatedAt = System.currentTimeMillis(),
             )
             repository.save(next)
-            launch(next)
+            launch(next, importOnly = importOnly)
         }
     }
 
@@ -529,11 +530,11 @@ class BookDownloadManager(
         return total
     }
 
-    private fun launch(task: OnlineDownloadTask) {
-        jobs[task.taskId] = scope.launch { run(task) }
+    private fun launch(task: OnlineDownloadTask, importOnly: Boolean = false) {
+        jobs[task.taskId] = scope.launch { run(task, importOnly) }
     }
 
-    private suspend fun run(initial: OnlineDownloadTask) {
+    private suspend fun run(initial: OnlineDownloadTask, importOnly: Boolean) {
         running.incrementAndGet()
         semaphore.withPermit {
             var task = initial
@@ -546,7 +547,7 @@ class BookDownloadManager(
                     val pending = pendingFile(task)
                     if (!pending.isFile) {
                         // 网页任务没有可复用暂存文件时只能提示重新下载，不解析网页书源、不重新申请链接。
-                        if (task.providerId == ZLIBRARY_WEB_PROVIDER_ID) {
+                        if (importOnly || task.providerId == ZLIBRARY_WEB_PROVIDER_ID) {
                             throw ProviderException(ProviderErrorCode.IO, "暂存文件已失效，请重新下载")
                         }
                         val provider = registry.get(task.providerId) as? CatalogBookProvider

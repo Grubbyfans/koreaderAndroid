@@ -63,7 +63,7 @@ data class ProviderUiState(
     val detail: OnlineBook? = null,
     val detailLoading: Boolean = false,
     val detailMessage: String? = null,
-    val autoImport: Boolean = true,
+    val downloadEnqueuing: Boolean = false,
     val quotaText: String? = null,
 )
 
@@ -509,7 +509,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     }
 
     /** 从详情页发起下载：文件名唯一性检查与覆盖确认在管理器/导入协调器中完成。 */
-    fun enqueueDownload(book: OnlineBook, providerId: String = selectedProviderId) {
+    fun enqueueDownload(book: OnlineBook, providerId: String, onQueued: () -> Unit) {
         val id = providerId
         // 详情页已按格式/标识状态禁用按钮，这里再兜底一次，避免任何调用路径误入下载。
         if (book.formatState != BookFormatState.CONFIRMED) return
@@ -519,23 +519,33 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
                 com.yuezhou.reader.core.online.provider.ProviderCapability.DOWNLOAD,
             )
         ) return
+        val current = stateOf(id)
+        if (current.downloadEnqueuing) return
+        states[id] = current.copy(downloadEnqueuing = true, detailMessage = null)
         viewModelScope.launch {
-            downloadManager.enqueue(
-                BookDownloadRequest(
-                    providerId = id,
-                    accountScope = zLibraryProvider.currentAccount().orEmpty(),
-                    remoteId = book.remoteId,
-                    fileName = book.fileName,
-                    expectedSize = book.fileSize,
-                ),
-                title = book.title,
-            )
+            try {
+                downloadManager.enqueue(
+                    BookDownloadRequest(
+                        providerId = id,
+                        accountScope = zLibraryProvider.currentAccount().orEmpty(),
+                        remoteId = book.remoteId,
+                        fileName = book.fileName,
+                        expectedSize = book.fileSize,
+                    ),
+                    title = book.title,
+                )
+                if (stateOf(id).detail?.remoteId == book.remoteId) onQueued()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val latest = stateOf(id)
+                if (latest.detail?.remoteId == book.remoteId) {
+                    states[id] = latest.copy(detailMessage = "无法创建下载任务：${e.message ?: "请重试"}")
+                }
+            } finally {
+                states[id] = stateOf(id).copy(downloadEnqueuing = false)
+            }
         }
-    }
-
-    fun setAutoImport(value: Boolean, providerId: String = selectedProviderId) {
-        val id = providerId
-        states[id] = stateOf(id).copy(autoImport = value)
     }
 
     /** 登录状态与额度只用于展示；凭证查询在 reader 层加密存储中进行。 */

@@ -836,6 +836,7 @@ private fun BookshelfScreen() {
                         onSelectProvider = { navigator.navigateTo("cloud.$it") },
                         onRefresh = { if (!pagerBusy) refreshRemoteLibrary(page.providerId) },
                         onOpenDetail = { if (!pagerBusy) detailBook = it },
+                        onOpenDownloads = { showOnlineDownloads = true },
                         onOpenSettings = {
                             navigator.navigateTo(ShelfPage.Settings.key)
                             showZLibrarySettings = true
@@ -849,6 +850,7 @@ private fun BookshelfScreen() {
                         onSelectProvider = { navigator.navigateTo("cloud.$it") },
                         onRefresh = {},
                         onOpenDetail = { if (!pagerBusy) detailBook = it },
+                        onOpenDownloads = { showOnlineDownloads = true },
                         onOpenSettings = {
                             navigator.navigateTo(ShelfPage.Settings.key)
                             showZLibrarySettings = true
@@ -882,12 +884,18 @@ private fun BookshelfScreen() {
             vm = onlineVm,
             onBack = { showOnlineDownloads = false },
             onOpenBook = { bookId ->
-                showOnlineDownloads = false
-                context.startActivity(
-                    Intent(context, ReaderActivity::class.java).apply {
-                        putExtra(ReaderActivity.EXTRA_BOOK_ID, bookId)
-                    },
-                )
+                val location = store.bookLocation(bookId)
+                val available = location != null && withContext(Dispatchers.IO) {
+                    location.uri != null || EpubImporter.epubDir(context).resolve(location.fileName).isFile
+                }
+                if (available) {
+                    context.startActivity(
+                        Intent(context, ReaderActivity::class.java).apply {
+                            putExtra(ReaderActivity.EXTRA_BOOK_ID, bookId)
+                        },
+                    )
+                }
+                available
             },
             onOpenLegacyDownloads = {
                 showOnlineDownloads = false

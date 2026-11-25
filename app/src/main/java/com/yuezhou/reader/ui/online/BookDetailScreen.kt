@@ -28,7 +28,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -61,6 +60,7 @@ fun BookDetailScreen(
     vm: OnlineLibraryViewModel,
     providerId: String,
     onBack: () -> Unit,
+    onDownloadQueued: () -> Unit,
     interactionsEnabled: Boolean = true,
 ) {
     var descriptionExpanded by remember(book.remoteId) { mutableStateOf(false) }
@@ -194,25 +194,7 @@ fun BookDetailScreen(
             Spacer(Modifier.height(16.dp))
             HorizontalDivider(color = YuezhouColors.Divider)
             Spacer(Modifier.height(12.dp))
-            Text("保存位置：本地书库", style = MaterialTheme.typography.bodyMedium)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("下载后自动导入", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "下载功能接入后生效",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YuezhouColors.TextSecondary,
-                    )
-                }
-                Switch(
-                    checked = state.autoImport,
-                    enabled = interactionsEnabled,
-                    onCheckedChange = { vm.setAutoImport(it, providerId) },
-                )
-            }
+            Text("下载完成后自动导入本地书库", style = MaterialTheme.typography.bodyMedium)
 
             state.detailMessage?.let { message ->
                 Spacer(Modifier.height(8.dp))
@@ -241,13 +223,12 @@ fun BookDetailScreen(
                     ) {
                         requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
-                    vm.enqueueDownload(book, providerId)
-                    vm.closeDetail(providerId)
+                    vm.enqueueDownload(book, providerId, onDownloadQueued)
                 },
-                enabled = downloadBlockedReason == null && interactionsEnabled,
+                enabled = downloadBlockedReason == null && interactionsEnabled && !state.downloadEnqueuing,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("下载书籍")
+                Text(if (state.downloadEnqueuing) "正在创建下载任务…" else "下载书籍")
             }
             Spacer(Modifier.height(6.dp))
             Text(

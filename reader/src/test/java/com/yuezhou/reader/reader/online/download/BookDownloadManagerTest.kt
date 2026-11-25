@@ -400,6 +400,19 @@ class BookDownloadManagerTest {
     // —— 11. 已完成任务防止重复导入 ——
 
     @Test
+    fun `原生任务重新导入时暂存文件丢失不会请求重新下载`() = runTest {
+        val f = fixture(UnconfinedTestDispatcher(testScheduler))
+        f.store.save(task("native-lost", DownloadStatus.IMPORT_FAILED, null, "三体.epub", "zlibrary"))
+
+        f.manager.retry("native-lost")
+
+        val restored = f.store.find("native-lost")!!
+        assertEquals(DownloadStatus.FAILED, restored.status)
+        assertEquals("暂存文件已失效，请重新下载", restored.errorMessage)
+        assertEquals(0, f.importer.importCalls.size)
+    }
+
+    @Test
     fun `已完成任务的重复交接不再次导入`() = runTest {
         val f = fixture(UnconfinedTestDispatcher(testScheduler))
         val receipt = f.receipt(TRANSFER_T, name = "三体.epub")
