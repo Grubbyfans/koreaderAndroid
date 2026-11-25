@@ -1,0 +1,44 @@
+app/src/main/java/com/yuezhou/reader/ui/online/DownloadManagerHolder.kt
+  h_7f20b2a03eb3b6 1-68
+app/src/main/java/com/yuezhou/reader/ui/online/DownloadManagerScreen.kt
+  h_7f20b2a03eb3b6 28,70-72,131,167-174,210-255,366,399,402-404,427
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryViewModel.kt
+  h_7f20b2a03eb3b6 69-70,72-73,75-76
+core/src/main/java/com/yuezhou/reader/core/online/download/DownloadStatus.kt
+  h_7f20b2a03eb3b6 11-12,24-25,27,29-30
+docs/04-在线书库统一化/Z-Library混合架构阶段B实施报告.md
+  h_7f20b2a03eb3b6 1-199
+reader/build.gradle.kts
+  h_7f20b2a03eb3b6 42
+reader/src/main/java/com/yuezhou/reader/reader/db/OnlineDownloadTaskEntity.kt
+  h_7f20b2a03eb3b6 41,50
+reader/src/main/java/com/yuezhou/reader/reader/online/download/BookDownloadManager.kt
+  h_7f20b2a03eb3b6 25,27,31-32,37,48,50-51,55-60,62,64-65,67-68,71,79-82,84,86-110,112-163,174,195-368,372-385,411,414-424,430,432,437-492,509-515,547-548,556,597-604,609,660-687,691,695-725
+reader/src/main/java/com/yuezhou/reader/reader/online/download/DownloadFileStore.kt
+  h_7f20b2a03eb3b6 1-21
+reader/src/main/java/com/yuezhou/reader/reader/online/download/DownloadHandoffStore.kt
+  h_7f20b2a03eb3b6 1-139
+reader/src/main/java/com/yuezhou/reader/reader/online/download/DownloadImporter.kt
+  h_7f20b2a03eb3b6 1-59
+reader/src/main/java/com/yuezhou/reader/reader/online/download/DownloadNamePolicy.kt
+  h_7f20b2a03eb3b6 1-38
+reader/src/main/java/com/yuezhou/reader/reader/online/download/ExternalDownloadReceipt.kt
+  h_7f20b2a03eb3b6 1-30
+reader/src/main/java/com/yuezhou/reader/reader/online/download/ExternalDownloadSource.kt
+  h_7f20b2a03eb3b6 1-76
+reader/src/main/java/com/yuezhou/reader/reader/online/download/OnlineDownloadRepository.kt
+  h_7f20b2a03eb3b6 12-22,24,29,31,33,35,37,39,41
+reader/src/test/java/com/yuezhou/reader/reader/online/download/BookDownloadManagerTest.kt
+  h_7f20b2a03eb3b6 1-645
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7f9b35af2ac1bebe4bfcd9fdba9eeadc7dea55be",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
