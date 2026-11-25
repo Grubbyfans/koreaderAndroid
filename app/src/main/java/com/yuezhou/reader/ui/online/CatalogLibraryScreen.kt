@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -73,6 +75,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.model.OnlineBook
 import com.yuezhou.reader.ui.LibraryUiPrefs
+import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
 import com.yuezhou.reader.ui.rememberRestoredGridState
 import com.yuezhou.reader.web.ZLibraryWebEntry
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +115,7 @@ fun CatalogLibraryScreen(
     providerId: String,
     onOpenSettings: () -> Unit,
     interactionsEnabled: Boolean = true,
+    swipeBlocker: SwipeBlockRegistry? = null,
 ) {
     val downloadedIds by vm.downloadManager.activeRemoteIds.collectAsStateWithLifecycle(initialValue = emptySet())
     val context = LocalContext.current
@@ -128,6 +132,15 @@ fun CatalogLibraryScreen(
         }
     }
     var filterSheetOpen by remember { mutableStateOf(false) }
+    var searchFocused by remember { mutableStateOf(false) }
+
+    // 筛选弹层或输入框聚焦时关闭横滑，避免拖动与弹层/光标选择冲突。
+    val swipeBlocked = filterSheetOpen || searchFocused || state.detail != null
+    DisposableEffect(swipeBlocker, providerId, swipeBlocked) {
+        val token = "catalog:$providerId"
+        if (swipeBlocked) swipeBlocker?.hold(token)
+        onDispose { swipeBlocker?.release(token) }
+    }
 
     // 返回层级：详情 > 筛选弹窗 > 清空当前检索 > 回到「书库」页（由外层处理）。
     // 页面切换期间不接管返回键，避免滑出中的页面误清检索或拦截返回。
@@ -157,6 +170,7 @@ fun CatalogLibraryScreen(
                 value = state.keyword,
                 onValueChange = { vm.setKeyword(it, providerId) },
                 enabled = !state.loading,
+                onFocusChange = { searchFocused = it },
                 onSearch = {
                     keyboardController?.hide()
                     focusManager.clearFocus()
@@ -300,6 +314,7 @@ private fun CompactSearchField(
     onValueChange: (String) -> Unit,
     enabled: Boolean,
     onSearch: () -> Unit,
+    onFocusChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -317,7 +332,8 @@ private fun CompactSearchField(
                     onValueChange = onValueChange,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 14.dp, end = 4.dp),
+                        .padding(start = 14.dp, end = 4.dp)
+                        .onFocusChanged { onFocusChange(it.isFocused) },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = YuezhouColors.TextPrimary),
                     cursorBrush = SolidColor(YuezhouColors.Brand),

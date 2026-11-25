@@ -103,7 +103,7 @@ class ShelfNavigatorTest {
         val navigator = ShelfNavigator(initialKey = "cloud.baidu", providerIds = providers)
         navigator.navigateTo("unknown.page")
         assertEquals("cloud.baidu", navigator.committedKey)
-        assertEquals("cloud.baidu", navigator.requestedKey)
+        assertNull(navigator.requestedKey)
         assertFalse(navigator.isNavigating)
     }
 
@@ -156,10 +156,10 @@ class ShelfNavigatorTest {
         navigator.navigateTo("cloud.webdav")
         assertTrue(navigator.isNavigating)
 
-        // 目标书源被禁用：取消该次导航，请求退回已提交页。
+        // 目标书源被禁用：取消该次导航，不留下悬空请求。
         navigator.syncPages(listOf("baidu", "zlibrary"))
         assertEquals("cloud.baidu", navigator.committedKey)
-        assertEquals("cloud.baidu", navigator.requestedKey)
+        assertNull(navigator.requestedKey)
         assertFalse(navigator.isNavigating)
     }
 
@@ -170,7 +170,7 @@ class ShelfNavigatorTest {
         // 动画被手势取消：未落页，只清理请求。
         navigator.clearRequest("cloud.webdav")
         assertEquals("cloud.baidu", navigator.committedKey)
-        assertEquals("cloud.baidu", navigator.requestedKey)
+        assertNull(navigator.requestedKey)
         assertFalse(navigator.isNavigating)
     }
 
@@ -183,5 +183,14 @@ class ShelfNavigatorTest {
         navigator.clearRequest("cloud.webdav")
         assertEquals("cloud.zlibrary", navigator.requestedKey)
         assertTrue(navigator.isNavigating)
+    }
+
+    @Test
+    fun `手势落页直接提交且不产生导航请求`() {
+        val navigator = ShelfNavigator(initialKey = "cloud.baidu", providerIds = providers)
+        navigator.commit("cloud.webdav")
+        assertEquals("cloud.webdav", navigator.committedKey)
+        assertNull(navigator.requestedKey)
+        assertFalse(navigator.isNavigating)
     }
 }

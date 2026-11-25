@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +33,7 @@ import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.provider.BookProvider
 import com.yuezhou.reader.core.online.provider.CatalogBookProvider
 import com.yuezhou.reader.reader.CloudSync
+import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
 
 /**
  * 在线书库统一入口：作为底部一级「云端」页，顶部书源 Tab 切换。
@@ -48,9 +50,18 @@ fun OnlineLibraryScreen(
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
     onOpenSettings: () -> Unit,
     interactionsEnabled: Boolean = true,
+    swipeBlocker: SwipeBlockRegistry? = null,
 ) {
     val providers = vm.registry.enabled()
     val state = providerId?.let { vm.stateOf(it) }
+
+    // 详情展开时关闭横滑：避免从详情页开始拖动导致误切栏目。
+    val detailOpen = state?.detail != null
+    DisposableEffect(swipeBlocker, providerId, detailOpen) {
+        val token = "detail:${providerId.orEmpty()}"
+        if (detailOpen) swipeBlocker?.hold(token)
+        onDispose { swipeBlocker?.release(token) }
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -72,6 +83,7 @@ fun OnlineLibraryScreen(
                     providerId = providerId,
                     onOpenSettings = onOpenSettings,
                     interactionsEnabled = interactionsEnabled,
+                    swipeBlocker = swipeBlocker,
                 )
             } else {
                 PullToRefreshBox(

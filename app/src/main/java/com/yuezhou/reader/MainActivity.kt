@@ -41,6 +41,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -131,6 +133,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.ui.LibraryUiPrefs
 import com.yuezhou.reader.ui.navigation.ShelfNavigator
 import com.yuezhou.reader.ui.navigation.ShelfPage
+import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
 import com.yuezhou.reader.ui.navigation.Tab
 import com.yuezhou.reader.ui.rememberRestoredGridState
 import com.yuezhou.reader.ui.rememberRestoredListState
@@ -244,18 +247,27 @@ private fun BookshelfScreen() {
     val providerIds = onlineVm.registry.enabled().map { it.id }
     LaunchedEffect(providerIds) { navigator.syncPages(providerIds) }
 
+    // 横滑闸门：页面内详情/筛选/输入聚焦或宿主浮层期间临时关闭手势（阶段 C）。
+    val swipeBlocker = remember { SwipeBlockRegistry() }
+
     // Pager 只承载视觉与手势；committedKey 仍是唯一业务真源（方案 §2.1）。
     val pageKeys = navigator.pages.map { it.key }
     val pagerState = rememberPagerState(
         initialPage = navigator.indexOf(navigator.committedKey).coerceAtLeast(0),
         pageCount = { navigator.pages.size },
     )
+    // 手势期间一次最多只走一页，避免长距离 fling 跨过多个栏目。
+    val pagerFling = PagerDefaults.flingBehavior(
+        state = pagerState,
+        pagerSnapDistance = PagerSnapDistance.atMost(1),
+    )
     // 页面切换期间（动画/程序化导航/手势拖动）禁止详情、打开书籍、下载及顶栏业务操作。
     val pagerBusy = pagerState.isScrollInProgress || navigator.isNavigating
 
     // 点击导航：相邻页用原生 Pager 动画；非相邻页直接定位，避免逐页展示中间栏目。
     LaunchedEffect(navigator.requestedKey, pageKeys) {
-        val key = navigator.requestedKey
+        // 手势拖动不产生请求；只有点击/返回等程序化导航才在这里滚动。
+        val key = navigator.requestedKey ?: return@LaunchedEffect
         val targetIndex = pageKeys.indexOf(key)
         if (targetIndex < 0) {
             navigator.clearRequest(key)
@@ -264,9 +276,7 @@ private fun BookshelfScreen() {
         val currentIndex = pagerState.currentPage.coerceIn(0, (pageKeys.size - 1).coerceAtLeast(0))
         val currentKey = pageKeys.getOrNull(currentIndex)
         try {
-            if (key != navigator.committedKey && currentKey != null &&
-                abs(targetIndex - currentIndex) == 1
-            ) {
+            if (currentKey != null && abs(targetIndex - currentIndex) == 1) {
                 pagerState.animateScrollToPage(targetIndex)
             } else if (currentKey != key) {
                 // 非相邻或页面列表变化导致下标错位：直接定位，不展示中间页。
@@ -276,6 +286,14 @@ private fun BookshelfScreen() {
         } finally {
             // 动画被新的点击/手势取消时也要清理请求，避免 isNavigating 残留。
             navigator.clearRequest(key)
+        }
+    }
+
+    // 书源增删导致下标错位时，按已提交 key 重新定位 Pager（不触发业务加载）。
+    LaunchedEffect(pageKeys, navigator.committedKey) {
+        val targetIndex = pageKeys.indexOf(navigator.committedKey)
+        if (targetIndex >= 0 && pageKeys.getOrNull(pagerState.currentPage) != navigator.committedKey) {
+            pagerState.scrollToPage(targetIndex)
         }
     }
 
@@ -483,6 +501,13 @@ private fun BookshelfScreen() {
     // 统一下载管理页：覆盖在主界面之上，返回键逐层退出。
     var showOnlineDownloads by rememberSaveable { mutableStateOf(false) }
     BackHandler(enabled = showOnlineDownloads) { showOnlineDownloads = false }
+
+    // 宿主级浮层（全屏子页/下载管理/本地管理态）期间禁止横滑，避免与内部交互冲突。
+    val hostSwipeBlocked = fullscreenSubPage || showOnlineDownloads || selecting != null
+    DisposableEffect(hostSwipeBlocked) {
+        if (hostSwipeBlocked) swipeBlocker.hold("host:overlay")
+        onDispose { if (hostSwipeBlocked) swipeBlocker.release("host:overlay") }
+    }
     // 云端是一级页：无浮层时返回键先回到「书库」，不直接退出应用。
     BackHandler(enabled = currentTab == Tab.云端 && !fullscreenSubPage && !showOnlineDownloads) {
         navigator.navigateTo(ShelfPage.LocalShelf.key)
@@ -743,8 +768,9 @@ private fun BookshelfScreen() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                // 阶段 B 仅允许点击导航；用户手势在阶段 C 开启。
-                userScrollEnabled = false,
+                // 阶段 C 开启横滑；详情/筛选/输入聚焦/宿主浮层期间由闸门临时关闭。
+                userScrollEnabled = !swipeBlocker.blocked,
+                flingBehavior = pagerFling,
                 beyondViewportPageCount = 0,
                 key = { index -> pageKeys.getOrNull(index) ?: index },
             ) { index ->
@@ -778,6 +804,7 @@ private fun BookshelfScreen() {
                         vm = onlineVm,
                         providerId = page.providerId,
                         interactionsEnabled = !pagerBusy,
+                        swipeBlocker = swipeBlocker,
                         onSelectProvider = { navigator.navigateTo("cloud.$it") },
                         onRefresh = { if (!pagerBusy) refreshRemoteLibrary(page.providerId) },
                         onOpenDetail = { if (!pagerBusy) detailBook = it },
@@ -790,6 +817,7 @@ private fun BookshelfScreen() {
                         vm = onlineVm,
                         providerId = null,
                         interactionsEnabled = !pagerBusy,
+                        swipeBlocker = swipeBlocker,
                         onSelectProvider = { navigator.navigateTo("cloud.$it") },
                         onRefresh = {},
                         onOpenDetail = { if (!pagerBusy) detailBook = it },

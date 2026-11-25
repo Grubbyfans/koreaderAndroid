@@ -24,18 +24,17 @@ class ShelfNavigator(
     var committedKey: String by mutableStateOf(initialKey)
         private set
 
-    /** 当前导航请求 key；与 committedKey 不同表示 Pager 正在或即将滚动。 */
-    var requestedKey: String by mutableStateOf(initialKey)
+    /** 当前导航请求 key；null 表示没有未完成的程序化导航（手势拖动不算请求）。 */
+    var requestedKey: String? by mutableStateOf(null)
         private set
 
     init {
         committedKey = resolve(pages, initialKey)
-        requestedKey = committedKey
     }
 
-    /** 程序化导航是否尚未落页。手势拖动请配合 PagerState.isScrollInProgress 判断。 */
+    /** 是否仍有未落页的程序化导航。手势拖动请配合 PagerState.isScrollInProgress 判断。 */
     val isNavigating: Boolean
-        get() = requestedKey != committedKey
+        get() = requestedKey != null
 
     /** 一级栏目由 committed key 派生，不再单独维护 currentTab。 */
     val tab: Tab
@@ -65,7 +64,8 @@ class ShelfNavigator(
     fun syncPages(providerIds: List<String>) {
         pages = ShelfPage.build(providerIds)
         committedKey = resolve(pages, committedKey)
-        requestedKey = if (pages.any { it.key == requestedKey }) requestedKey else committedKey
+        val pending = requestedKey
+        if (pending != null && pages.none { it.key == pending }) requestedKey = null
     }
 
     /**
@@ -87,11 +87,13 @@ class ShelfNavigator(
     fun commit(key: String) {
         if (pages.none { it.key == key }) return
         committedKey = key
+        // 目标已通过本次落页完成，清掉请求；手势落页时本就没有请求。
+        if (requestedKey == key) requestedKey = null
     }
 
     /** 程序化滚动结束（含被手势取消）后清理该次请求，避免 isNavigating 残留。 */
     fun clearRequest(key: String) {
-        if (requestedKey == key && committedKey != key) requestedKey = committedKey
+        if (requestedKey == key) requestedKey = null
     }
 
     /** 点击「云端」时恢复上次访问的有效书源；不存在则回退首个可用书源/空态。 */
