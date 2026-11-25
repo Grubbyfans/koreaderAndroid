@@ -64,6 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -162,10 +163,14 @@ fun CatalogLibraryScreen(
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // 非默认筛选时高亮摘要，避免用户忘记当前仍带着语言/排序条件。
+            val filterActive = state.language != null || state.sort != "bestmatch"
             Text(
                 text = "${state.languageLabel} · ${sortLabel(state.sort)} · EPUB",
-                style = MaterialTheme.typography.bodySmall,
-                color = YuezhouColors.TextSecondary,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = if (filterActive) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+                color = if (filterActive) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
                 modifier = Modifier
                     .weight(1f)
                     .clickable { filterSheetOpen = true }
