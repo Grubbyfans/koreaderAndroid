@@ -72,6 +72,7 @@ import com.yuezhou.reader.speech.SpeechDiagnosticsState
 import com.yuezhou.reader.speech.SpeechRuntime
 import com.yuezhou.reader.SpeechBackgroundSettings
 import com.yuezhou.reader.ui.LibraryUiPrefs
+import com.yuezhou.reader.ui.components.LibraryPageHeading
 import com.yuezhou.reader.ui.online.ServerSettingsScreen
 import com.yuezhou.reader.ui.online.ZLibrarySettingsScreen
 import com.yuezhou.reader.YuezhouColors
@@ -83,6 +84,32 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+internal enum class SettingsRoute(val title: String, val description: String = "") {
+    Home("设置"),
+    Reading("阅读偏好", "字体、字号、行距、页边距和翻页"),
+    Appearance("外观与主题", "书架布局和栏目滑动"),
+    Sync("同步与备份", "书籍同步、进度、任务和诊断"),
+    Sources("书库与书源", "百度网盘、WebDAV 和 Z-Library"),
+    Speech("语音朗读", "后台权限与可用朗读模型"),
+    Downloads("存储与下载", "下载目录与任务"),
+    About("关于静读", "版本信息"),
+    SyncLog("同步记录"),
+    ZLibrary("Z-Library 设置"),
+    Servers("服务器管理");
+
+    val parent: SettingsRoute
+        get() = when (this) {
+            SyncLog -> Sync
+            ZLibrary -> Sources
+            Servers -> ZLibrary
+            else -> Home
+        }
+
+    companion object {
+        val groups = listOf(Reading, Appearance, Sync, Sources, Speech, Downloads, About)
+    }
+}
+
 @Composable
 internal fun SettingsPage(
     cloudSync: CloudSync,
@@ -90,12 +117,11 @@ internal fun SettingsPage(
     cloudLoading: Boolean,
     tabSwipeEnabled: Boolean,
     onTabSwipeChange: (Boolean) -> Unit,
-    showSyncLogPage: Boolean,
-    onSyncLogChange: (Boolean) -> Unit,
-    showZLibrarySettings: Boolean,
-    onZLibraryChange: (Boolean) -> Unit,
-    showServerSettings: Boolean,
-    onServerSettingsChange: (Boolean) -> Unit,
+    route: SettingsRoute,
+    onNavigate: (SettingsRoute) -> Unit,
+    localGridMode: Boolean,
+    onLocalGridMode: (Boolean) -> Unit,
+    onOpenDownloads: () -> Unit,
     cloudSetupProvider: String? = null,
     onCloudSetupHandled: () -> Unit = {},
     onCloudConfigured: (String) -> Unit = {},
@@ -109,20 +135,21 @@ internal fun SettingsPage(
     val downloadDirectory = remember(context) { DownloadDirectory(context) }
     // Pager 组合销毁后设置页滚动位置仍保留（跨页切换/进程重建）。
     val settingsPrefs = remember(context) { LibraryUiPrefs(context) }
-    val settingsScroll = remember {
-        ScrollState(settingsPrefs.scroll("settings").offset)
+    val scrollKey = if (route == SettingsRoute.Home) "settings" else "settings.${route.name}"
+    val settingsScroll = remember(scrollKey) {
+        ScrollState(settingsPrefs.scroll(scrollKey).offset)
     }
     LaunchedEffect(settingsScroll) {
         snapshotFlow { settingsScroll.value }
             .distinctUntilChanged()
             .collectLatest { value ->
                 delay(150)
-                settingsPrefs.saveScroll("settings", 0, value)
+                settingsPrefs.saveScroll(scrollKey, 0, value)
             }
     }
     // Pager 销毁该页时立即落盘，避免少于防抖时长的最后一次滚动丢失。
     DisposableEffect(settingsScroll) {
-        onDispose { settingsPrefs.saveScroll("settings", 0, settingsScroll.value) }
+        onDispose { settingsPrefs.saveScroll(scrollKey, 0, settingsScroll.value) }
     }
     var downloadLabel by remember { mutableStateOf(downloadDirectory.label()) }
     var downloadError by remember { mutableStateOf<String?>(null) }
@@ -149,12 +176,11 @@ internal fun SettingsPage(
     var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
     var marginPreview by remember { mutableStateOf<Int?>(null) }
 
-    var showReading by rememberSaveable { mutableStateOf(false) }
     val credentialStore = remember(context) { CloudCredentialStore(context) }
 
     var modelBusy by remember { mutableStateOf(false) }
     var modelMessage by remember { mutableStateOf<String?>(null) }
-    var modelInfos by remember { mutableStateOf(SpeechRuntime.kokoro?.modelInfos().orEmpty()) }
+    var modelInfos by remember(route) { mutableStateOf(if (route == SettingsRoute.Speech) SpeechRuntime.kokoro?.modelInfos().orEmpty() else emptyList()) }
     var modelManagerOpen by rememberSaveable { mutableStateOf(false) }
     val speechDiagnostics by SpeechDiagnosticsState.snapshot.collectAsStateWithLifecycle()
     val importProgress by KokoroImportState.progress.collectAsStateWithLifecycle()
@@ -171,20 +197,15 @@ internal fun SettingsPage(
         }
     }
 
-    if (showSyncLogPage) {
-        SyncLogPage(onBack = { onSyncLogChange(false) })
-        return
-    }
-    if (showServerSettings) {
-        ServerSettingsScreen(onBack = { onServerSettingsChange(false) })
-        return
-    }
-    if (showZLibrarySettings) {
-        ZLibrarySettingsScreen(
-            onBack = { onZLibraryChange(false) },
-            onOpenServerSettings = { onServerSettingsChange(true) },
-        )
-        return
+    when (route) {
+        SettingsRoute.SyncLog -> { SyncLogPage(onBack = { onNavigate(route.parent) }); return }
+        SettingsRoute.Servers -> { ServerSettingsScreen(onBack = { onNavigate(route.parent) }); return }
+        SettingsRoute.ZLibrary -> {
+            ZLibrarySettingsScreen(onBack = { onNavigate(route.parent) },
+                onOpenServerSettings = { onNavigate(SettingsRoute.Servers) })
+            return
+        }
+        else -> Unit
     }
 
     Column(
@@ -194,346 +215,387 @@ internal fun SettingsPage(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SettingsCard("书籍同步", highlighted = true) {
-            BookUploadControls(cloudSync, uploadQueue, cloudLoading)
+        if (route == SettingsRoute.Home) {
+            SettingsRoute.groups.forEach { group ->
+                Surface(
+                    Modifier.fillMaxWidth().clickable { onNavigate(group) },
+                    shape = MaterialTheme.shapes.large,
+                    color = YuezhouColors.Surface,
+                    border = BorderStroke(1.dp, YuezhouColors.Divider),
+                ) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(group.title, style = MaterialTheme.typography.titleMedium)
+                            Text(group.description, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+                        }
+                        Text("›", style = MaterialTheme.typography.titleLarge, color = YuezhouColors.BrandDark)
+                    }
+                }
+            }
+        } else {
+            TextButton(onClick = { onNavigate(route.parent) }) { Text("返回") }
+            LibraryPageHeading(route.title)
         }
 
-        SettingsCard("自动同步进度") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("自动同步", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "进入书籍自动拉取云端进度覆盖本地；退出或切出时自动上传覆盖云端",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YuezhouColors.TextSecondary,
+        if (route == SettingsRoute.Sync) {
+            SettingsCard("书籍同步", highlighted = true) {
+                BookUploadControls(cloudSync, uploadQueue, cloudLoading)
+            }
+
+            SettingsCard("自动同步进度") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("自动同步", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "进入书籍自动拉取云端进度覆盖本地；退出或切出时自动上传覆盖云端",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                        )
+                    }
+                    Switch(
+                        checked = prefs.autoSync,
+                        onCheckedChange = { enabled ->
+                            scope.launch { ReaderSettings.save(context, prefs, prefs.copy(autoSync = enabled)) }
+                        },
                     )
                 }
-                Switch(
-                    checked = prefs.autoSync,
-                    onCheckedChange = { enabled ->
-                        scope.launch { ReaderSettings.save(context, prefs, prefs.copy(autoSync = enabled)) }
+                Spacer(Modifier.height(8.dp))
+                // 同步记录入口：点击进入独立页面
+                TextButton(onClick = { onNavigate(SettingsRoute.SyncLog) }) {
+                    Text("查看最近 20 次同步记录")
+                }
+            }
+
+            SettingsCard("同步诊断") {
+                // 诊断摘要（方案 §13.2：最近 20 次同步/刷新任务的可执行诊断）
+                var diagnostics by remember { mutableStateOf<List<Pair<Long, Pair<String, com.yuezhou.reader.core.cloud.DiagnosticSummary>>>>(emptyList()) }
+                var showDiagnostics by remember { mutableStateOf(false) }
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            diagnostics = cloudSync.diagnosticSummaries()
+                            showDiagnostics = !showDiagnostics
+                        }
                     },
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            // 同步记录入口：点击进入独立页面
-            TextButton(onClick = { onSyncLogChange(true) }) {
-                Text("查看最近 20 次同步记录")
+                ) {
+                    Text(if (showDiagnostics) "收起诊断" else "查看诊断")
+                }
+                if (showDiagnostics) {
+                    if (diagnostics.isEmpty()) {
+                        Text(
+                            "暂无诊断记录（完成一次同步或刷新书库后生成）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                        )
+                    } else {
+                        // 倒序展示最近的在前面
+                        diagnostics.reversed().forEach { (at, pair) ->
+                            val (kind, s) = pair
+                            val time = formatLocalTime("HH:mm:ss", at)
+                            val phaseText = s.phasesMs.entries.joinToString(" ") { "${it.key}=${it.value}ms" }
+                            Text(
+                                "[$time] $kind · 请求${s.totalRequests} · ↑${s.bytesUp}B ↓${s.bytesDown}B · 缓存${s.cacheHits}" +
+                                    (s.errorKind?.let { " · $it" } ?: "") + "\n$phaseText",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = YuezhouColors.TextSecondary,
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        SettingsCard("栏目切换") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("左右滑动切换栏目", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "关闭后仅能点击底部导航与书源标签切换",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YuezhouColors.TextSecondary,
+        if (route == SettingsRoute.Appearance) {
+            SettingsCard("书架布局") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("使用网格", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = localGridMode, onCheckedChange = onLocalGridMode)
+                }
+            }
+            SettingsCard("栏目切换") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("左右滑动切换栏目", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "关闭后仅能点击底部导航与书源标签切换",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                        )
+                    }
+                    Switch(
+                        checked = tabSwipeEnabled,
+                        onCheckedChange = onTabSwipeChange,
                     )
                 }
-                Switch(
-                    checked = tabSwipeEnabled,
-                    onCheckedChange = onTabSwipeChange,
-                )
             }
         }
 
-        SettingsCard("书源设置") {
-            Text(
-                "配置百度网盘、WebDAV 等云端书源账号。",
-                style = MaterialTheme.typography.bodySmall,
-                color = YuezhouColors.TextSecondary,
-            )
-            Spacer(Modifier.height(4.dp))
-            CloudConfigSection(
-                store = credentialStore,
-                requestedProvider = cloudSetupProvider,
-                onRequestHandled = onCloudSetupHandled,
-                onConfigured = onCloudConfigured,
-            )
-
-            // Z-Library 为检索型书源，配置与云同步账号分开管理。
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onZLibraryChange(true) }
-                    .padding(vertical = 12.dp, horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Z-Library", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "检索型书源 · 配置、登录与额度",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YuezhouColors.TextSecondary,
-                    )
-                }
-                Text("去配置", style = MaterialTheme.typography.bodyMedium, color = YuezhouColors.Brand)
-            }
-        }
-
-        if (SpeechRuntime.kokoro != null) {
-            SettingsCard("Kokoro 朗读模型") {
-                val selectedModel = modelInfos.firstOrNull { it.id == prefs.kokoroModel }
+        if (route == SettingsRoute.Sources) {
+            SettingsCard("书源设置") {
                 Text(
-                    selectedModel?.label ?: "未选择模型",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    if (modelInfos.isEmpty()) "暂无可用模型，请导入 ZIP 或 tar.bz2 模型包。" else "在此管理模型、试音和诊断信息。",
+                    "配置百度网盘、WebDAV 等云端书源账号。",
                     style = MaterialTheme.typography.bodySmall,
                     color = YuezhouColors.TextSecondary,
                 )
-                Row {
-                    TextButton(onClick = {
-                        modelInfos = SpeechRuntime.kokoro?.modelInfos().orEmpty()
-                        modelMessage = null
-                        modelManagerOpen = true
-                    }) {
-                        Text("管理模型")
+                Spacer(Modifier.height(4.dp))
+                CloudConfigSection(
+                    store = credentialStore,
+                    requestedProvider = cloudSetupProvider,
+                    onRequestHandled = onCloudSetupHandled,
+                    onConfigured = onCloudConfigured,
+                )
+
+                // Z-Library 为检索型书源，配置与云同步账号分开管理。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onNavigate(SettingsRoute.ZLibrary) }
+                        .padding(vertical = 12.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Z-Library", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "检索型书源 · 配置、登录与额度",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                        )
                     }
+                    Text("去配置", style = MaterialTheme.typography.bodyMedium, color = YuezhouColors.Brand)
                 }
             }
         }
 
-        SettingsCard("后台朗读") {
-            SpeechBackgroundSettings()
-        }
-
-        SettingsCard("下载目录") {
-            Text(downloadLabel, style = MaterialTheme.typography.bodyMedium)
-            Text("新下载的书会直接从所选目录打开。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
-            Row {
-                TextButton(onClick = { chooseDownloadDirectory.launch(downloadDirectory.uri) }) {
-                    Text("选择目录")
-                }
-                if (downloadDirectory.uri != null) {
-                    TextButton(onClick = {
-                        downloadDirectory.reset()
-                        downloadLabel = downloadDirectory.label()
-                        downloadError = null
-                    }) {
-                        Text("恢复默认")
-                    }
-                }
-            }
-            downloadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        }
-
-        SettingsCard(
-            title = "默认阅读排版",
-            expanded = showReading,
-            onToggle = { showReading = !showReading },
-        ) {
-            // 主题
-            Text("主题", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("light" to "浅色", "sepia" to "护眼", "dark" to "深色", "green" to "青绿", "night-blue" to "夜蓝").forEach { (value, label) ->
-                    val selected = prefs.theme == value
+        if (route == SettingsRoute.Speech) {
+            if (SpeechRuntime.kokoro != null) {
+                SettingsCard("Kokoro 朗读模型") {
+                    val selectedModel = modelInfos.firstOrNull { it.id == prefs.kokoroModel }
                     Text(
-                        label,
+                        selectedModel?.label ?: "未选择模型",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                            .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(theme = value)) } }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-
-            // 翻页模式
-            Text("翻页模式", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(false to "左右翻页", true to "上下滚动").forEach { (value, label) ->
-                    val selected = prefs.vertical == value
                     Text(
-                        label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                            .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(vertical = value)) } }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-
-            // 翻页动画方式
-            Text("翻页动画", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(
-                    "none" to "无动画",
-                    "slide" to "平滑滑动",
-                ).forEach { (value, label) ->
-                    val selected = prefs.pageAnimation == value
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                            .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(pageAnimation = value)) } }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-
-            ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
-                scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontWeight = w)) }
-            })
-
-            // 字号
-            Text("默认字号：${fontSizePreview ?: prefs.fontSize}", style = MaterialTheme.typography.bodyMedium)
-            Slider(
-                value = (fontSizePreview ?: prefs.fontSize).toFloat(),
-                onValueChange = { fontSizePreview = it.toInt() },
-                onValueChangeFinished = {
-                    val v = fontSizePreview
-                    if (v != null) {
-                        scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontSize = v)) }
-                        fontSizePreview = null
-                    }
-                },
-                valueRange = 12f..30f,
-            )
-
-            // 行距
-            Text("默认行距：${String.format("%.1f", lineHeightPreview ?: prefs.lineHeight)}", style = MaterialTheme.typography.bodyMedium)
-            Slider(
-                value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
-                onValueChange = { lineHeightPreview = it.toDouble() },
-                onValueChangeFinished = {
-                    val v = lineHeightPreview
-                    if (v != null) {
-                        scope.launch { ReaderSettings.save(context, prefs, prefs.copy(lineHeight = v)) }
-                        lineHeightPreview = null
-                    }
-                },
-                valueRange = 1.2f..2.5f,
-            )
-
-            // 页边距
-            Text("默认页边距：${marginPreview ?: prefs.pageMargin}", style = MaterialTheme.typography.bodyMedium)
-            Slider(
-                value = (marginPreview ?: prefs.pageMargin).toFloat(),
-                onValueChange = { marginPreview = it.toInt() },
-                onValueChangeFinished = {
-                    val v = marginPreview
-                    if (v != null) {
-                        scope.launch { ReaderSettings.save(context, prefs, prefs.copy(pageMargin = v)) }
-                        marginPreview = null
-                    }
-                },
-                valueRange = 0f..48f,
-            )
-        }
-
-        if (modelManagerOpen) {
-            KokoroModelManagerDialog(
-                models = modelInfos,
-                diagnostics = speechDiagnostics,
-                busy = modelBusy || importProgress?.running == true,
-                progress = importProgress,
-                message = modelMessage,
-                onImport = { modelImportLauncher.launch(arrayOf("*/*")) },
-                onAudition = { info ->
-                    modelBusy = true
-                    modelMessage = "正在试音 ${info.id}…"
-                    scope.launch {
-                        val error = runCatching {
-                            SpeechRuntime.kokoro?.auditionModel(
-                                info.id,
-                                prefs.kokoroSpeaker,
-                                "你好，这是 ${info.id} 模型的试音。",
-                            )
-                        }.getOrNull()
-                        modelBusy = false
-                        modelMessage = error ?: "${info.id} 试音完成"
-                    }
-                },
-                onDelete = { info ->
-                    modelBusy = true
-                    modelMessage = "正在删除 ${info.id}…"
-                    scope.launch {
-                        val deleted = runCatching { SpeechRuntime.kokoro?.deleteModel(info.id) }.getOrNull() == true
-                        modelInfos = runCatching { SpeechRuntime.kokoro?.modelInfos() }.getOrNull().orEmpty()
-                        modelBusy = false
-                        modelMessage = if (deleted) "已删除 ${info.id}" else "删除失败：模型可能正在使用"
-                        if (deleted && prefs.kokoroModel == info.id) {
-                            ReaderSettings.save(context, prefs, prefs.copy(kokoroModel = ""))
-                        }
-                    }
-                },
-                onDismiss = {
-                    if (!modelBusy) {
-                        modelManagerOpen = false
-                        modelMessage = null
-                    }
-                },
-            )
-        }
-
-        SettingsCard("同步诊断") {
-            // 诊断摘要（方案 §13.2：最近 20 次同步/刷新任务的可执行诊断）
-            var diagnostics by remember { mutableStateOf<List<Pair<Long, Pair<String, com.yuezhou.reader.core.cloud.DiagnosticSummary>>>>(emptyList()) }
-            var showDiagnostics by remember { mutableStateOf(false) }
-            TextButton(
-                onClick = {
-                    scope.launch {
-                        diagnostics = cloudSync.diagnosticSummaries()
-                        showDiagnostics = !showDiagnostics
-                    }
-                },
-            ) {
-                Text(if (showDiagnostics) "收起诊断" else "查看诊断")
-            }
-            if (showDiagnostics) {
-                if (diagnostics.isEmpty()) {
-                    Text(
-                        "暂无诊断记录（完成一次同步或刷新书库后生成）",
+                        if (modelInfos.isEmpty()) "暂无可用模型，请导入 ZIP 或 tar.bz2 模型包。" else "在此管理模型、试音和诊断信息。",
                         style = MaterialTheme.typography.bodySmall,
                         color = YuezhouColors.TextSecondary,
                     )
-                } else {
-                    // 倒序展示最近的在前面
-                    diagnostics.reversed().forEach { (at, pair) ->
-                        val (kind, s) = pair
-                        val time = formatLocalTime("HH:mm:ss", at)
-                        val phaseText = s.phasesMs.entries.joinToString(" ") { "${it.key}=${it.value}ms" }
-                        Text(
-                            "[$time] $kind · 请求${s.totalRequests} · ↑${s.bytesUp}B ↓${s.bytesDown}B · 缓存${s.cacheHits}" +
-                                (s.errorKind?.let { " · $it" } ?: "") + "\n$phaseText",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = YuezhouColors.TextSecondary,
-                            modifier = Modifier.padding(vertical = 2.dp),
-                        )
+                    Row {
+                        TextButton(onClick = {
+                            modelInfos = SpeechRuntime.kokoro?.modelInfos().orEmpty()
+                            modelMessage = null
+                            modelManagerOpen = true
+                        }) {
+                            Text("管理模型")
+                        }
                     }
                 }
             }
-        }
-        SettingsCard("关于") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("当前版本", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    BuildConfig.VERSION_NAME,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = YuezhouColors.TextSecondary,
+
+            SettingsCard("后台朗读") {
+                SpeechBackgroundSettings()
+            }
+
+            if (modelManagerOpen) {
+                KokoroModelManagerDialog(
+                    models = modelInfos,
+                    diagnostics = speechDiagnostics,
+                    busy = modelBusy || importProgress?.running == true,
+                    progress = importProgress,
+                    message = modelMessage,
+                    onImport = { modelImportLauncher.launch(arrayOf("*/*")) },
+                    onAudition = { info ->
+                        modelBusy = true
+                        modelMessage = "正在试音 ${info.id}…"
+                        scope.launch {
+                            val error = runCatching {
+                                SpeechRuntime.kokoro?.auditionModel(
+                                    info.id,
+                                    prefs.kokoroSpeaker,
+                                    "你好，这是 ${info.id} 模型的试音。",
+                                )
+                            }.getOrNull()
+                            modelBusy = false
+                            modelMessage = error ?: "${info.id} 试音完成"
+                        }
+                    },
+                    onDelete = { info ->
+                        modelBusy = true
+                        modelMessage = "正在删除 ${info.id}…"
+                        scope.launch {
+                            val deleted = runCatching { SpeechRuntime.kokoro?.deleteModel(info.id) }.getOrNull() == true
+                            modelInfos = runCatching { SpeechRuntime.kokoro?.modelInfos() }.getOrNull().orEmpty()
+                            modelBusy = false
+                            modelMessage = if (deleted) "已删除 ${info.id}" else "删除失败：模型可能正在使用"
+                            if (deleted && prefs.kokoroModel == info.id) {
+                                ReaderSettings.save(context, prefs, prefs.copy(kokoroModel = ""))
+                            }
+                        }
+                    },
+                    onDismiss = {
+                        if (!modelBusy) {
+                            modelManagerOpen = false
+                            modelMessage = null
+                        }
+                    },
                 )
+            }
+        }
+
+        if (route == SettingsRoute.Downloads) {
+            SettingsCard("下载目录") {
+                Text(downloadLabel, style = MaterialTheme.typography.bodyMedium)
+                Text("新下载的书会直接从所选目录打开。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+                Row {
+                    TextButton(onClick = { chooseDownloadDirectory.launch(downloadDirectory.uri) }) {
+                        Text("选择目录")
+                    }
+                    if (downloadDirectory.uri != null) {
+                        TextButton(onClick = {
+                            downloadDirectory.reset()
+                            downloadLabel = downloadDirectory.label()
+                            downloadError = null
+                        }) {
+                            Text("恢复默认")
+                        }
+                    }
+                }
+                downloadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+            TextButton(onClick = onOpenDownloads) { Text("下载管理") }
+        }
+
+        if (route == SettingsRoute.Reading) {
+            SettingsCard("默认阅读排版") {
+                // 主题
+                Text("主题", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("light" to "浅色", "sepia" to "护眼", "dark" to "深色", "green" to "青绿", "night-blue" to "夜蓝").forEach { (value, label) ->
+                        val selected = prefs.theme == value
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
+                                .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(theme = value)) } }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+
+                // 翻页模式
+                Text("翻页模式", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(false to "左右翻页", true to "上下滚动").forEach { (value, label) ->
+                        val selected = prefs.vertical == value
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
+                                .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(vertical = value)) } }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+
+                // 翻页动画方式
+                Text("翻页动画", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        "none" to "无动画",
+                        "slide" to "平滑滑动",
+                    ).forEach { (value, label) ->
+                        val selected = prefs.pageAnimation == value
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
+                                .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(pageAnimation = value)) } }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+
+                ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
+                    scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontWeight = w)) }
+                })
+
+                // 字号
+                Text("默认字号：${fontSizePreview ?: prefs.fontSize}", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = (fontSizePreview ?: prefs.fontSize).toFloat(),
+                    onValueChange = { fontSizePreview = it.toInt() },
+                    onValueChangeFinished = {
+                        val v = fontSizePreview
+                        if (v != null) {
+                            scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontSize = v)) }
+                            fontSizePreview = null
+                        }
+                    },
+                    valueRange = 12f..30f,
+                )
+
+                // 行距
+                Text("默认行距：${String.format("%.1f", lineHeightPreview ?: prefs.lineHeight)}", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
+                    onValueChange = { lineHeightPreview = it.toDouble() },
+                    onValueChangeFinished = {
+                        val v = lineHeightPreview
+                        if (v != null) {
+                            scope.launch { ReaderSettings.save(context, prefs, prefs.copy(lineHeight = v)) }
+                            lineHeightPreview = null
+                        }
+                    },
+                    valueRange = 1.2f..2.5f,
+                )
+
+                // 页边距
+                Text("默认页边距：${marginPreview ?: prefs.pageMargin}", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = (marginPreview ?: prefs.pageMargin).toFloat(),
+                    onValueChange = { marginPreview = it.toInt() },
+                    onValueChangeFinished = {
+                        val v = marginPreview
+                        if (v != null) {
+                            scope.launch { ReaderSettings.save(context, prefs, prefs.copy(pageMargin = v)) }
+                            marginPreview = null
+                        }
+                    },
+                    valueRange = 0f..48f,
+                )
+            }
+        }
+
+        if (route == SettingsRoute.About) {
+            SettingsCard("关于") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("当前版本", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        BuildConfig.VERSION_NAME,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                }
             }
         }
     }

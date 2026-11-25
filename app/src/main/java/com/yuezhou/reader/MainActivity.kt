@@ -132,6 +132,7 @@ import com.yuezhou.reader.ui.LibrarySort
 import com.yuezhou.reader.ui.LocalLibraryFilters
 import com.yuezhou.reader.ui.ReadingFilter
 import com.yuezhou.reader.ui.settings.SettingsPage
+import com.yuezhou.reader.ui.settings.SettingsRoute
 import com.yuezhou.reader.ui.navigation.ShelfNavigator
 import com.yuezhou.reader.ui.navigation.ShelfPage
 import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
@@ -497,17 +498,14 @@ private fun BookshelfScreen() {
     }
 
     // 二级设置页：以独立全屏页面呈现，隐藏外层顶栏、底部导航与悬浮按钮（方案 §3.1）。
-    var showSyncLogPage by rememberSaveable { mutableStateOf(false) }
-    var showZLibrarySettings by rememberSaveable { mutableStateOf(false) }
-    var showServerSettings by rememberSaveable { mutableStateOf(false) }
+    var settingsRoute by rememberSaveable { mutableStateOf(SettingsRoute.Home) }
     var cloudSetupProvider by rememberSaveable { mutableStateOf<String?>(null) }
     var cloudSetupReturn by rememberSaveable { mutableStateOf<String?>(null) }
-    val fullscreenSubPage = showSyncLogPage || showZLibrarySettings || showServerSettings
+    val fullscreenSubPage = currentTab == Tab.设置 && settingsRoute != SettingsRoute.Home
 
     // 系统返回键逐层退出二级页，恢复原有导航结构（方案 §3.1）。
-    BackHandler(enabled = showServerSettings) { showServerSettings = false }
-    BackHandler(enabled = !showServerSettings && showZLibrarySettings) { showZLibrarySettings = false }
-    BackHandler(enabled = !showServerSettings && !showZLibrarySettings && showSyncLogPage) { showSyncLogPage = false }
+    BackHandler(enabled = fullscreenSubPage) { settingsRoute = settingsRoute.parent }
+
     // 统一下载管理页：覆盖在主界面之上，返回键逐层退出。
     var showOnlineDownloads by rememberSaveable { mutableStateOf(false) }
     BackHandler(enabled = showOnlineDownloads) { showOnlineDownloads = false }
@@ -685,7 +683,7 @@ private fun BookshelfScreen() {
                                             onClick = {
                                                 cloudMenuOpen = false
                                                 navigator.navigateTo(ShelfPage.Settings.key)
-                                                showZLibrarySettings = true
+                                                settingsRoute = SettingsRoute.ZLibrary
                                             },
                                         )
                                         DropdownMenuItem(
@@ -902,7 +900,7 @@ private fun BookshelfScreen() {
                                     cloudSetupReturn = page.providerId
                                 }
                                 navigator.navigateTo(ShelfPage.Settings.key)
-                                showZLibrarySettings = page == ShelfPage.Discover
+                                settingsRoute = if (page == ShelfPage.Discover) SettingsRoute.ZLibrary else SettingsRoute.Sources
                             },
                         )
                     }
@@ -915,17 +913,23 @@ private fun BookshelfScreen() {
                             tabSwipeEnabled = it
                             uiPrefs.tabSwipeEnabled = it
                         },
-                        showSyncLogPage = showSyncLogPage,
-                        onSyncLogChange = { showSyncLogPage = it },
-                        showZLibrarySettings = showZLibrarySettings,
-                        onZLibraryChange = { showZLibrarySettings = it },
-                        showServerSettings = showServerSettings,
-                        onServerSettingsChange = { showServerSettings = it },
+                        route = settingsRoute,
+                        onNavigate = { route ->
+                            settingsRoute = route
+                            if (route == SettingsRoute.Home) cloudSetupReturn = null
+                        },
+                        localGridMode = localGridMode,
+                        onLocalGridMode = {
+                            localGridMode = it
+                            uiPrefs.localGridMode = it
+                        },
+                        onOpenDownloads = { showOnlineDownloads = true },
                         cloudSetupProvider = cloudSetupProvider,
                         onCloudSetupHandled = { cloudSetupProvider = null },
                         onCloudConfigured = { provider ->
                             if (cloudSetupReturn == provider) {
                                 cloudSetupReturn = null
+                                settingsRoute = SettingsRoute.Home
                                 navigator.navigateTo("cloud.$provider")
                                 loadRemote(provider, force = true)
                             }
