@@ -1,0 +1,36 @@
+app/src/main/AndroidManifest.xml
+  h_7f20b2a03eb3b6 72-83
+app/src/main/java/com/yuezhou/reader/ReaderApplication.kt
+  h_7f20b2a03eb3b6 4,11-14,20,25
+app/src/main/java/com/yuezhou/reader/process/AppProcess.kt
+  h_7f20b2a03eb3b6 1-62
+app/src/main/java/com/yuezhou/reader/web/WebNavigationPolicy.kt
+  h_7f20b2a03eb3b6 1-48
+app/src/main/java/com/yuezhou/reader/web/WebPageStateMachine.kt
+  h_7f20b2a03eb3b6 1-83
+app/src/main/java/com/yuezhou/reader/web/ZLibraryWebActivity.kt
+  h_7f20b2a03eb3b6 1-424
+app/src/main/java/com/yuezhou/reader/web/ZLibraryWebSupport.kt
+  h_7f20b2a03eb3b6 1-30
+app/src/test/java/com/yuezhou/reader/process/AppProcessTest.kt
+  h_7f20b2a03eb3b6 1-41
+app/src/test/java/com/yuezhou/reader/web/WebNavigationPolicyTest.kt
+  h_7f20b2a03eb3b6 1-88
+app/src/test/java/com/yuezhou/reader/web/WebPageStateMachineTest.kt
+  h_7f20b2a03eb3b6 1-96
+app/src/ttsTestDebug/java/com/yuezhou/reader/tts/ReaderTtsApplication.kt
+  h_7f20b2a03eb3b6 6
+docs/04-在线书库统一化/Z-Library混合架构阶段C实施报告.md
+  h_7f20b2a03eb3b6 1-250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b7d420784cd8257be0e0a3fcd9103f103ab935fe",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
