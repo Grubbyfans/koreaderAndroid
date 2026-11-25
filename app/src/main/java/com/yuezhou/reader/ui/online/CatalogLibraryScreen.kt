@@ -109,6 +109,7 @@ private val LANGUAGE_OPTIONS = listOf(
 fun CatalogLibraryScreen(
     vm: OnlineLibraryViewModel,
     state: ProviderUiState,
+    providerId: String,
     onOpenSettings: () -> Unit,
 ) {
     val downloadedIds by vm.downloadManager.activeRemoteIds.collectAsStateWithLifecycle(initialValue = emptySet())
@@ -116,7 +117,7 @@ fun CatalogLibraryScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val prefs = remember(context) { LibraryUiPrefs(context) }
-    val gridState = rememberRestoredGridState("catalog.${vm.selectedProviderId}", prefs)
+    val gridState = rememberRestoredGridState("catalog.$providerId", prefs)
     // 仅当「已提交关键词」真正变化时回到顶部；从其他页签返回或打开详情再回来不重置位置。
     var lastSubmitted by remember { mutableStateOf(state.submittedKeyword) }
     LaunchedEffect(state.submittedKeyword) {
@@ -134,7 +135,7 @@ fun CatalogLibraryScreen(
     ) {
         keyboardController?.hide()
         focusManager.clearFocus()
-        vm.clearSearch()
+        vm.clearSearch(providerId)
     }
 
     fun openWebSearch() {
@@ -152,12 +153,12 @@ fun CatalogLibraryScreen(
         ) {
             CompactSearchField(
                 value = state.keyword,
-                onValueChange = vm::setKeyword,
+                onValueChange = { vm.setKeyword(it, providerId) },
                 enabled = !state.loading,
                 onSearch = {
                     keyboardController?.hide()
                     focusManager.clearFocus()
-                    vm.search()
+                    vm.search(providerId)
                 },
                 modifier = Modifier.weight(1f),
             )
@@ -188,7 +189,7 @@ fun CatalogLibraryScreen(
                     .padding(vertical = 8.dp),
             )
             TextButton(
-                onClick = { vm.setGridMode(!state.gridMode) },
+                onClick = { vm.setGridMode(!state.gridMode, providerId) },
                 contentPadding = PaddingValues(horizontal = 8.dp),
             ) { Text(if (state.gridMode) "列表" else "网格") }
         }
@@ -252,7 +253,7 @@ fun CatalogLibraryScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     if (state.submittedKeyword.isNotBlank()) {
-                        OutlinedButton(onClick = { vm.retrySubmittedSearch() }) { Text("重新搜索") }
+                        OutlinedButton(onClick = { vm.retrySubmittedSearch(providerId) }) { Text("重新搜索") }
                         Spacer(Modifier.height(4.dp))
                     }
                     OutlinedButton(onClick = ::openWebSearch) { Text("网页搜索") }
@@ -260,15 +261,16 @@ fun CatalogLibraryScreen(
             }
             else -> PullToRefreshBox(
                 isRefreshing = state.refreshing,
-                onRefresh = { vm.refreshCurrent() },
+                onRefresh = { vm.refreshCurrent(providerId) },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 CatalogResults(
                     vm = vm,
                     state = state,
+                    providerId = providerId,
                     gridState = gridState,
                     downloadedIds = downloadedIds,
-                    onRetry = { vm.retrySubmittedSearch() },
+                    onRetry = { vm.retrySubmittedSearch(providerId) },
                     onWebSearch = ::openWebSearch,
                 )
             }
@@ -282,7 +284,7 @@ fun CatalogLibraryScreen(
             onDismiss = { filterSheetOpen = false },
             onApply = { language, label, sort ->
                 filterSheetOpen = false
-                vm.applyFilters(language, label, sort)
+                vm.applyFilters(language, label, sort, providerId)
             },
         )
     }
@@ -454,6 +456,7 @@ private fun sortLabel(value: String): String =
 private fun CatalogResults(
     vm: OnlineLibraryViewModel,
     state: ProviderUiState,
+    providerId: String,
     gridState: LazyGridState,
     downloadedIds: Set<String>,
     onRetry: () -> Unit,
@@ -480,8 +483,8 @@ private fun CatalogResults(
             }
         }
         items(state.items, key = { it.remoteId }) { book ->
-            if (state.gridMode) GridBookCard(book, vm, book.remoteId in downloadedIds)
-            else ListBookCard(book, vm, book.remoteId in downloadedIds)
+            if (state.gridMode) GridBookCard(book, vm, providerId, book.remoteId in downloadedIds)
+            else ListBookCard(book, vm, providerId, book.remoteId in downloadedIds)
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
             when {
@@ -502,12 +505,12 @@ private fun CatalogResults(
                         textAlign = TextAlign.Center,
                     )
                     OutlinedButton(
-                        onClick = { vm.loadMore() },
+                        onClick = { vm.loadMore(providerId) },
                         modifier = Modifier.padding(top = 6.dp),
                     ) { Text("重试") }
                 }
                 state.hasMore -> OutlinedButton(
-                    onClick = { vm.loadMore() },
+                    onClick = { vm.loadMore(providerId) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("加载更多") }
                 else -> Text(
@@ -573,13 +576,18 @@ private fun SearchNoticeBar(
 }
 
 @Composable
-private fun GridBookCard(book: OnlineBook, vm: OnlineLibraryViewModel, downloaded: Boolean) {
+private fun GridBookCard(
+    book: OnlineBook,
+    vm: OnlineLibraryViewModel,
+    providerId: String,
+    downloaded: Boolean,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { vm.openDetail(book) },
+            .clickable { vm.openDetail(book, providerId) },
     ) {
-        RemoteCover(book.coverUrl, book.title, vm, Modifier.fillMaxWidth().aspectRatio(0.75f))
+        RemoteCover(book.coverUrl, book.title, vm, providerId, Modifier.fillMaxWidth().aspectRatio(0.75f))
         Spacer(Modifier.height(6.dp))
         Text(
             book.title,
@@ -616,14 +624,19 @@ private fun GridBookCard(book: OnlineBook, vm: OnlineLibraryViewModel, downloade
 }
 
 @Composable
-private fun ListBookCard(book: OnlineBook, vm: OnlineLibraryViewModel, downloaded: Boolean) {
+private fun ListBookCard(
+    book: OnlineBook,
+    vm: OnlineLibraryViewModel,
+    providerId: String,
+    downloaded: Boolean,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { vm.openDetail(book) }
+            .clickable { vm.openDetail(book, providerId) }
             .padding(vertical = 4.dp),
     ) {
-        RemoteCover(book.coverUrl, book.title, vm, Modifier.width(72.dp).height(102.dp))
+        RemoteCover(book.coverUrl, book.title, vm, providerId, Modifier.width(72.dp).height(102.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -659,9 +672,10 @@ private fun RemoteCover(
     url: String?,
     title: String,
     vm: OnlineLibraryViewModel,
+    providerId: String,
     modifier: Modifier,
 ) {
-    LaunchedEffect(url) { vm.loadCover(url) }
+    LaunchedEffect(url, providerId) { vm.loadCover(url, providerId) }
     val bytes = vm.coverOf(url)
     val bitmap by produceState<ImageBitmap?>(initialValue = null, bytes) {
         value = if (bytes == null) null else withContext(Dispatchers.Default) {

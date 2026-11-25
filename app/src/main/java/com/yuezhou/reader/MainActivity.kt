@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import com.yuezhou.reader.reader.db.SyncLogEntity
 import com.yuezhou.reader.reader.online.mapping.OnlineBookMappingStore
@@ -103,7 +102,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -128,6 +126,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.ui.LibraryUiPrefs
+import com.yuezhou.reader.ui.navigation.ShelfNavigator
+import com.yuezhou.reader.ui.navigation.ShelfPage
+import com.yuezhou.reader.ui.navigation.Tab
 import com.yuezhou.reader.ui.rememberRestoredGridState
 import com.yuezhou.reader.ui.rememberRestoredListState
 import com.yuezhou.reader.ui.online.DownloadManagerScreen
@@ -196,8 +197,8 @@ private fun BookshelfScreen() {
     var status by remember { mutableStateOf<String?>(null) }
     // 刷新触发计数：+1 触发重新加载书库
     var refreshKey by remember { mutableStateOf(0) }
-    // 主导航状态须跨 Activity 重建/从桌面返回保留，否则会掉回默认的「书库」。
-    var currentTab by rememberSaveable(stateSaver = TabSaver) { mutableStateOf(Tab.书架) }
+    // 仅用于进程重建恢复；运行期间的导航真源是 ShelfNavigator.committedKey。
+    var restoredTab by rememberSaveable(stateSaver = TabSaver) { mutableStateOf(Tab.书架) }
     // 管理态（多选删除）：非空表示进入管理态，集合为已勾选的 bookId
     var selecting by remember { mutableStateOf<Set<String>?>(null) }
     // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
@@ -222,6 +223,21 @@ private fun BookshelfScreen() {
     val cloudSync = remember { CloudSync(context) }
     // 在线书库统一入口：书源状态由 ViewModel 独立持有，Activity 只保留详情/下载等既有状态。
     val onlineVm: OnlineLibraryViewModel = viewModel()
+
+    // 唯一的已提交导航状态：currentTab / 当前书源均由页面 key 派生。
+    val navigator = remember {
+        ShelfNavigator(
+            initialKey = when (restoredTab) {
+                Tab.书架 -> ShelfPage.LocalShelf.key
+                Tab.云端 -> "cloud.${onlineVm.selectedProviderId}"
+                Tab.设置 -> ShelfPage.Settings.key
+            },
+            providerIds = onlineVm.registry.enabled().map { it.id },
+        )
+    }
+    val currentTab = navigator.tab
+    val providerIds = onlineVm.registry.enabled().map { it.id }
+    LaunchedEffect(providerIds) { navigator.syncPages(providerIds) }
 
     // —— 云端书库状态（由 onlineVm 的当前书源状态同步，供既有详情/下载弹窗复用）——
     var remoteBooks by remember { mutableStateOf<List<CloudSync.RemoteBook>>(emptyList()) }
@@ -359,15 +375,15 @@ private fun BookshelfScreen() {
     }
 
     // 主动更新书库：登记外部书籍 + 强制刷新当前书源
-    fun refreshRemoteLibrary() {
-        if (onlineVm.isCatalogSelected) {
+    fun refreshRemoteLibrary(providerId: String = onlineVm.selectedProviderId) {
+        if (onlineVm.isCatalog(providerId)) {
             // 检索型书源无云端索引可同步，刷新即按当前条件重新搜索。
-            scope.launch { onlineVm.refreshSelected() }
+            scope.launch { onlineVm.refreshSelected(providerId) }
             return
         }
         if (uploadQueue.busy || remoteLoading) return
         scope.launch {
-            val (_, message) = onlineVm.refreshSelected()
+            val (_, message) = onlineVm.refreshSelected(providerId)
             if (!message.isNullOrBlank()) {
                 status = message
                 snackbarHostState.showSnackbar(message)
@@ -376,17 +392,20 @@ private fun BookshelfScreen() {
     }
 
     // 网页搜索：只传已配置服务器与当前输入关键词，登录沿用 WebView 自身会话。
-    fun openZLibraryWeb() {
-        val keyword = onlineVm.selectedState.keyword
+    fun openZLibraryWeb(providerId: String = onlineVm.selectedProviderId) {
+        val keyword = onlineVm.stateOf(providerId).keyword
         if (!ZLibraryWebEntry.launch(context, onlineVm.webBaseUrl(), keyword)) {
             scope.launch { snackbarHostState.showSnackbar("请先配置可用的 Z-Library 服务器") }
         }
     }
 
     // 切换到云端一级页时加载一次（命中缓存时不重复请求网络）
-    LaunchedEffect(currentTab) {
-        if (currentTab == Tab.云端) {
-            loadRemote()
+    LaunchedEffect(navigator.committedKey) {
+        // 进程重建时把当前页写回保存状态，保证下次恢复仍停在原位置。
+        restoredTab = navigator.tab
+        val active = navigator.providerId
+        if (navigator.tab == Tab.云端 && active != null) {
+            if (active == onlineVm.selectedProviderId) loadRemote() else onlineVm.selectProvider(active)
         }
     }
 
@@ -410,7 +429,7 @@ private fun BookshelfScreen() {
     BackHandler(enabled = showOnlineDownloads) { showOnlineDownloads = false }
     // 云端是一级页：无浮层时返回键先回到「书库」，不直接退出应用。
     BackHandler(enabled = currentTab == Tab.云端 && !fullscreenSubPage && !showOnlineDownloads) {
-        currentTab = Tab.书架
+        navigator.navigateTo(ShelfPage.LocalShelf.key)
     }
     // 云端一级页右上角「更多」：刷新与网页搜索；额度/账户在后续阶段迁入。
     var cloudMenuOpen by remember { mutableStateOf(false) }
@@ -519,12 +538,13 @@ private fun BookshelfScreen() {
                                 )
                             }
                         }
-                        if (currentTab == Tab.云端) {
+                        val cloudProviderId = navigator.providerId
+                        if (currentTab == Tab.云端 && cloudProviderId != null) {
                             Box {
                                 IconButton(
                                     onClick = {
                                         cloudMenuOpen = true
-                                        if (onlineVm.isCatalogSelected) onlineVm.loadQuota()
+                                        if (onlineVm.isCatalog(cloudProviderId)) onlineVm.loadQuota(cloudProviderId)
                                     },
                                 ) {
                                     Icon(Icons.Filled.MoreVert, contentDescription = "更多")
@@ -533,15 +553,16 @@ private fun BookshelfScreen() {
                                     expanded = cloudMenuOpen,
                                     onDismissRequest = { cloudMenuOpen = false },
                                 ) {
-                                    val catalog = onlineVm.isCatalogSelected
-                                    val submitted = onlineVm.selectedState.submittedKeyword
+                                    val catalog = onlineVm.isCatalog(cloudProviderId)
+                                    val cloudState = onlineVm.stateOf(cloudProviderId)
+                                    val submitted = cloudState.submittedKeyword
                                     if (catalog) {
                                         DropdownMenuItem(
                                             text = {
                                                 Column {
                                                     Text("Z-Library 账户")
                                                     Text(
-                                                        onlineVm.selectedState.quotaText ?: "正在读取登录状态…",
+                                                        cloudState.quotaText ?: "正在读取登录状态…",
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = YuezhouColors.TextSecondary,
                                                     )
@@ -552,13 +573,13 @@ private fun BookshelfScreen() {
                                                     )
                                                 }
                                             },
-                                            onClick = { onlineVm.loadQuota() },
+                                            onClick = { onlineVm.loadQuota(cloudProviderId) },
                                         )
                                         DropdownMenuItem(
                                             text = { Text("账户管理") },
                                             onClick = {
                                                 cloudMenuOpen = false
-                                                currentTab = Tab.设置
+                                                navigator.navigateTo(ShelfPage.Settings.key)
                                                 showZLibrarySettings = true
                                             },
                                         )
@@ -566,18 +587,18 @@ private fun BookshelfScreen() {
                                             text = { Text("浏览官方热门") },
                                             onClick = {
                                                 cloudMenuOpen = false
-                                                onlineVm.openPopular()
+                                                onlineVm.openPopular(cloudProviderId)
                                             },
                                         )
                                     }
                                     DropdownMenuItem(
                                         text = { Text("刷新云端书库") },
                                         // 检索书源必须已有提交词才可刷新，避免用输入框草稿触发请求。
-                                        enabled = !onlineVm.selectedState.refreshing &&
+                                        enabled = !cloudState.refreshing &&
                                             (!catalog || submitted.isNotBlank()),
                                         onClick = {
                                             cloudMenuOpen = false
-                                            refreshRemoteLibrary()
+                                            refreshRemoteLibrary(cloudProviderId)
                                         },
                                     )
                                     if (catalog) {
@@ -585,7 +606,7 @@ private fun BookshelfScreen() {
                                             text = { Text("网页搜索") },
                                             onClick = {
                                                 cloudMenuOpen = false
-                                                openZLibraryWeb()
+                                                openZLibraryWeb(cloudProviderId)
                                             },
                                         )
                                     }
@@ -616,7 +637,18 @@ private fun BookshelfScreen() {
         },
         bottomBar = {
             if (!fullscreenSubPage) {
-                BottomNavBar(current = currentTab, onSelect = { currentTab = it })
+                BottomNavBar(
+                    current = currentTab,
+                    onSelect = { tab ->
+                        navigator.navigateTo(
+                            when (tab) {
+                                Tab.书架 -> ShelfPage.LocalShelf.key
+                                Tab.云端 -> navigator.cloudKey(onlineVm.selectedProviderId)
+                                Tab.设置 -> ShelfPage.Settings.key
+                            },
+                        )
+                    },
+                )
             }
         },
     ) { padding ->
@@ -673,10 +705,12 @@ private fun BookshelfScreen() {
                 }
                 Tab.云端 -> OnlineLibraryScreen(
                     vm = onlineVm,
-                    onRefresh = { refreshRemoteLibrary() },
+                    providerId = navigator.providerId,
+                    onSelectProvider = { navigator.navigateTo("cloud.$it") },
+                    onRefresh = { navigator.providerId?.let { refreshRemoteLibrary(it) } },
                     onOpenDetail = { detailBook = it },
                     onOpenSettings = {
-                        currentTab = Tab.设置
+                        navigator.navigateTo(ShelfPage.Settings.key)
                         showZLibrarySettings = true
                     },
                 )
@@ -1148,34 +1182,6 @@ private fun ScanResultDialog(
         },
     )
 }
-
-/** 底部导航的三个 tab。 */
-private enum class Tab(val label: String, val icon: ImageVector) {
-    书架("书库", Icons.Filled.List),
-    云端("云端", cloudTabIcon()),
-    设置("设置", Icons.Filled.Settings),
-}
-
-/** icons-core 不包含 Cloud，使用标准 Material Cloud 24dp 路径，避免新增图标依赖。 */
-private fun cloudTabIcon(): ImageVector = ImageVector.Builder(
-    name = "CloudTab",
-    defaultWidth = 24.dp,
-    defaultHeight = 24.dp,
-    viewportWidth = 24f,
-    viewportHeight = 24f,
-).apply {
-    path(fill = SolidColor(Color.Black)) {
-        moveTo(19.35f, 10.04f)
-        curveTo(18.67f, 6.59f, 15.64f, 4f, 12f, 4f)
-        curveTo(9.11f, 4f, 6.6f, 5.64f, 5.35f, 8.04f)
-        curveTo(2.34f, 8.36f, 0f, 10.91f, 0f, 14f)
-        curveTo(0f, 17.31f, 2.69f, 20f, 6f, 20f)
-        horizontalLineTo(19f)
-        curveTo(21.76f, 20f, 24f, 17.76f, 24f, 15f)
-        curveTo(24f, 12.37f, 21.95f, 10.22f, 19.35f, 10.04f)
-        close()
-    }
-}.build()
 
 /** 单一下载任务状态（同一时间最多一个任务）。 */
 private data class DownloadTask(

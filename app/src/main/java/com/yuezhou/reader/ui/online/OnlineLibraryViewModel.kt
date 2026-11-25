@@ -126,6 +126,9 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     val isCatalogSelected: Boolean
         get() = registry.get(selectedProviderId) is CatalogBookProvider
 
+    /** 指定书源是否为检索型；顶栏与页面都按明确 id 判断，不依赖全局选中。 */
+    fun isCatalog(providerId: String): Boolean = registry.get(providerId) is CatalogBookProvider
+
     init {
         // 没有任何书源记录时，沿用用户已有的同步后端选择，避免切换入口后目标云端发生变化。
         viewModelScope.launch {
@@ -138,26 +141,34 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun selectedBackendKind(): BackendKind? = when (selectedProviderId) {
-        "baidu" -> BackendKind.Baidu
-        "webdav" -> BackendKind.WebDav
-        else -> null
-    }
-
     fun selectProvider(providerId: String) {
         if (providerId == selectedProviderId || registry.get(providerId) == null) return
         selectedProviderId = providerId
         prefs.lastCloudProvider = providerId
         if (registry.get(providerId) is CatalogBookProvider) {
-            loadQuota()
+            // 登录状态是页面常驻信息：仅首次进入时预热一次，已查询过则不重复请求；
+            // 打开「更多」菜单时仍会主动刷新额度。
+            if (stateOf(providerId).quotaText == null) loadQuota(providerId)
         } else {
-            viewModelScope.launch { loadSelected() }
+            viewModelScope.launch { loadSelected(providerId = providerId) }
         }
     }
 
-    /** 加载当前书源列表；已加载且非强制刷新时直接复用，避免切换书源重复请求。 */
-    suspend fun loadSelected(force: Boolean = false): ProviderUiState {
-        val id = selectedProviderId
+    /** 书源与云同步后端的映射；不依赖“当前选中”状态，便于页面按 providerId 调用。 */
+    fun backendKindOf(providerId: String): BackendKind? = when (providerId) {
+        "baidu" -> BackendKind.Baidu
+        "webdav" -> BackendKind.WebDav
+        else -> null
+    }
+
+    fun selectedBackendKind(): BackendKind? = backendKindOf(selectedProviderId)
+
+    /** 加载指定书源列表；已加载且非强制刷新时直接复用，避免切换书源重复请求。 */
+    suspend fun loadSelected(
+        force: Boolean = false,
+        providerId: String = selectedProviderId,
+    ): ProviderUiState {
+        val id = providerId
         val current = stateOf(id)
         if (current.loaded && !force && !current.loading) return current
 
@@ -182,9 +193,9 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             states[id] = next
             if (page.fromCache) {
                 viewModelScope.launch {
-                    val changed = runCatching { cloudSync.discoverExternalBooks(forced = selectedBackendKind()) }
+                    val changed = runCatching { cloudSync.discoverExternalBooks(forced = backendKindOf(id)) }
                         .getOrDefault(0)
-                    if (changed > 0) loadSelected(force = true)
+                    if (changed > 0) loadSelected(force = true, providerId = id)
                 }
             }
             next
@@ -197,42 +208,43 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     }
 
     /** 主动更新：云书源登记外部书籍后强制重拉；检索书源按当前数据源刷新。 */
-    suspend fun refreshSelected(): Pair<ProviderUiState, String?> {
-        if (registry.get(selectedProviderId) is CatalogBookProvider) {
-            val current = stateOf(selectedProviderId)
+    suspend fun refreshSelected(providerId: String = selectedProviderId): Pair<ProviderUiState, String?> {
+        val id = providerId
+        if (registry.get(id) is CatalogBookProvider) {
+            val current = stateOf(id)
             if (current.resultSource == CatalogSource.POPULAR) {
-                refreshPopular(selectedProviderId)
-                return stateOf(selectedProviderId) to null
+                refreshPopular(id)
+                return stateOf(id) to null
             }
             if (current.submittedKeyword.isBlank()) {
                 return current to "请先输入关键词搜索"
             }
-            jobs[selectedProviderId]?.cancel()
-            val seq = nextRequestSeq(selectedProviderId)
-            states[selectedProviderId] = current.copy(refreshing = true, searchError = null)
-            doSearch(selectedProviderId, current.submittedKeyword, append = false, seq = seq)
-            loadQuota()
-            return stateOf(selectedProviderId) to null
+            jobs[id]?.cancel()
+            val seq = nextRequestSeq(id)
+            states[id] = current.copy(refreshing = true, searchError = null)
+            doSearch(id, current.submittedKeyword, append = false, seq = seq)
+            loadQuota(id)
+            return stateOf(id) to null
         }
-        val kind = selectedBackendKind() ?: return selectedState to "请先配置云同步后端"
+        val kind = backendKindOf(id) ?: return stateOf(id) to "请先配置云同步后端"
         val message = try {
             cloudSync.refreshLibrary(forced = kind)
         } catch (e: Exception) {
-            val failed = selectedState.copy(refreshing = false, error = e.message ?: "更新书库失败")
-            states[selectedProviderId] = failed
+            val failed = stateOf(id).copy(refreshing = false, error = e.message ?: "更新书库失败")
+            states[id] = failed
             return failed to "更新书库失败：${e.message ?: "未知错误"}"
         }
-        return loadSelected(force = true) to message
+        return loadSelected(force = true, providerId = id) to message
     }
 
     /** 下拉刷新/菜单刷新的非挂起入口。 */
-    fun refreshCurrent() {
-        viewModelScope.launch { refreshSelected() }
+    fun refreshCurrent(providerId: String = selectedProviderId) {
+        viewModelScope.launch { refreshSelected(providerId) }
     }
 
     /** 常驻入口：无需先触发一次被拒搜索，直接浏览官方「最热门」单页。 */
-    fun openPopular() {
-        val id = selectedProviderId
+    fun openPopular(providerId: String = selectedProviderId) {
+        val id = providerId
         val provider = registry.get(id) as? ZLibraryBookProvider ?: return
         jobs[id]?.cancel()
         val seq = nextRequestSeq(id)
@@ -322,13 +334,18 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
 
     // —— 检索型书源：输入状态 ——
 
-    fun setKeyword(value: String) {
-        val id = selectedProviderId
+    fun setKeyword(value: String, providerId: String = selectedProviderId) {
+        val id = providerId
         states[id] = stateOf(id).copy(keyword = value)
     }
 
-    fun applyFilters(language: String?, languageLabel: String, sort: String) {
-        val id = selectedProviderId
+    fun applyFilters(
+        language: String?,
+        languageLabel: String,
+        sort: String,
+        providerId: String = selectedProviderId,
+    ) {
+        val id = providerId
         val current = stateOf(id)
         states[id] = current.copy(language = language, languageLabel = languageLabel, sort = sort)
         // 已提交过关键词时，筛选变更统一触发一次新搜索；否则只更新条件，不发请求。
@@ -337,20 +354,20 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun setGridMode(value: Boolean) {
-        val id = selectedProviderId
+    fun setGridMode(value: Boolean, providerId: String = selectedProviderId) {
+        val id = providerId
         states[id] = stateOf(id).copy(gridMode = value)
         prefs.catalogGridMode = value
     }
 
-    fun clearSearch() {
-        val id = selectedProviderId
+    fun clearSearch(providerId: String = selectedProviderId) {
+        val id = providerId
         jobs[id]?.cancel()
         states[id] = ProviderUiState(language = stateOf(id).language, languageLabel = stateOf(id).languageLabel)
     }
 
-    fun search() {
-        val id = selectedProviderId
+    fun search(providerId: String = selectedProviderId) {
+        val id = providerId
         val keyword = stateOf(id).keyword.trim()
         if (keyword.isEmpty()) {
             states[id] = stateOf(id).copy(searchError = "请输入书名、作者或 ISBN")
@@ -360,8 +377,8 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     }
 
     /** 提示条里的「重新搜索」只重试已提交关键词，不读取输入框中尚未提交的内容。 */
-    fun retrySubmittedSearch() {
-        val id = selectedProviderId
+    fun retrySubmittedSearch(providerId: String = selectedProviderId) {
+        val id = providerId
         val keyword = stateOf(id).submittedKeyword.trim()
         if (keyword.isEmpty()) return
         startSearch(id, keyword)
@@ -389,8 +406,8 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         jobs[id] = viewModelScope.launch { doSearch(id, keyword, append = false, seq = seq) }
     }
 
-    fun loadMore() {
-        val id = selectedProviderId
+    fun loadMore(providerId: String = selectedProviderId) {
+        val id = providerId
         val current = stateOf(id)
         if (current.loading || current.loadingMore || !current.hasMore || current.nextCursor == null) return
         val seq = nextRequestSeq(id)
@@ -452,8 +469,8 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
 
     // —— 详情 ——
 
-    fun openDetail(book: OnlineBook) {
-        val id = selectedProviderId
+    fun openDetail(book: OnlineBook, providerId: String = selectedProviderId) {
+        val id = providerId
         val seq = (detailSeq[id] ?: 0) + 1
         detailSeq[id] = seq
         states[id] = stateOf(id).copy(detail = book, detailLoading = true, detailMessage = null)
@@ -483,15 +500,15 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun closeDetail() {
-        val id = selectedProviderId
+    fun closeDetail(providerId: String = selectedProviderId) {
+        val id = providerId
         detailSeq[id] = (detailSeq[id] ?: 0) + 1
         states[id] = stateOf(id).copy(detail = null, detailLoading = false, detailMessage = null)
     }
 
     /** 从详情页发起下载：文件名唯一性检查与覆盖确认在管理器/导入协调器中完成。 */
-    fun enqueueDownload(book: OnlineBook) {
-        val id = selectedProviderId
+    fun enqueueDownload(book: OnlineBook, providerId: String = selectedProviderId) {
+        val id = providerId
         // 详情页已按格式/标识状态禁用按钮，这里再兜底一次，避免任何调用路径误入下载。
         if (book.formatState != BookFormatState.CONFIRMED) return
         if (book.remoteId.split(":", limit = 2).let { it.size != 2 || it.any(String::isBlank) }) return
@@ -514,14 +531,14 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun setAutoImport(value: Boolean) {
-        val id = selectedProviderId
+    fun setAutoImport(value: Boolean, providerId: String = selectedProviderId) {
+        val id = providerId
         states[id] = stateOf(id).copy(autoImport = value)
     }
 
     /** 登录状态与额度只用于展示；凭证查询在 reader 层加密存储中进行。 */
-    fun loadQuota() {
-        val id = selectedProviderId
+    fun loadQuota(providerId: String = selectedProviderId) {
+        val id = providerId
         val provider = registry.get(id) as? ZLibraryBookProvider ?: return
         viewModelScope.launch {
             val account = provider.currentAccount()
@@ -548,9 +565,9 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
 
     fun isCoverLoading(url: String?): Boolean = url != null && url in coverLoading
 
-    fun loadCover(url: String?) {
+    fun loadCover(url: String?, providerId: String = selectedProviderId) {
         if (url == null || url in coverLoading || url in coverFailed || url in coverBytes) return
-        val provider = registry.get(selectedProviderId) as? CatalogBookProvider ?: return
+        val provider = registry.get(providerId) as? CatalogBookProvider ?: return
         coverLoading.add(url)
         viewModelScope.launch {
             provider.fetchCover(url).fold(

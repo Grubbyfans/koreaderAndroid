@@ -59,6 +59,7 @@ fun BookDetailScreen(
     book: OnlineBook,
     state: ProviderUiState,
     vm: OnlineLibraryViewModel,
+    providerId: String,
     onBack: () -> Unit,
 ) {
     var descriptionExpanded by remember(book.remoteId) { mutableStateOf(false) }
@@ -205,7 +206,10 @@ fun BookDetailScreen(
                         color = YuezhouColors.TextSecondary,
                     )
                 }
-                Switch(checked = state.autoImport, onCheckedChange = vm::setAutoImport)
+                Switch(
+                    checked = state.autoImport,
+                    onCheckedChange = { vm.setAutoImport(it, providerId) },
+                )
             }
 
             state.detailMessage?.let { message ->
@@ -235,8 +239,8 @@ fun BookDetailScreen(
                     ) {
                         requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
-                    vm.enqueueDownload(book)
-                    vm.closeDetail()
+                    vm.enqueueDownload(book, providerId)
+                    vm.closeDetail(providerId)
                 },
                 enabled = downloadBlockedReason == null,
                 modifier = Modifier.fillMaxWidth(),

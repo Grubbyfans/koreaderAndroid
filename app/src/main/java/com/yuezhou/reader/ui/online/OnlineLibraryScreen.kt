@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -23,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.CloudBookshelfContent
@@ -40,22 +42,35 @@ import com.yuezhou.reader.reader.CloudSync
 @Composable
 fun OnlineLibraryScreen(
     vm: OnlineLibraryViewModel,
+    providerId: String?,
+    onSelectProvider: (String) -> Unit,
     onRefresh: () -> Unit,
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val state = vm.selectedState
+    val providers = vm.registry.enabled()
+    val state = providerId?.let { vm.stateOf(it) }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            CloudSourceTabs(
-                providers = vm.registry.enabled(),
-                selectedId = vm.selectedProviderId,
-                onSelect = vm::selectProvider,
-            )
+            if (providers.isNotEmpty()) {
+                CloudSourceTabs(
+                    providers = providers,
+                    selectedId = providerId.orEmpty(),
+                    onSelect = onSelectProvider,
+                )
+            }
 
-            if (vm.registry.get(vm.selectedProviderId) is CatalogBookProvider) {
-                CatalogLibraryScreen(vm = vm, state = state, onOpenSettings = onOpenSettings)
+            if (providerId == null || state == null) {
+                // 全部书源被禁用：仍保留「云端」一级入口，给出明确的恢复路径。
+                CloudEmptyState(onOpenSettings)
+            } else if (vm.registry.get(providerId) is CatalogBookProvider) {
+                CatalogLibraryScreen(
+                    vm = vm,
+                    state = state,
+                    providerId = providerId,
+                    onOpenSettings = onOpenSettings,
+                )
             } else {
                 PullToRefreshBox(
                     isRefreshing = state.refreshing,
@@ -70,7 +85,7 @@ fun OnlineLibraryScreen(
                         backendLabel = state.backendLabel.ifBlank { null },
                         fetchedAt = state.fetchedAt,
                         fromCache = state.fromCache,
-                        scrollKey = "cloud.${vm.selectedProviderId}",
+                        scrollKey = "cloud.$providerId",
                         onRefresh = onRefresh,
                         onOpenDetail = onOpenDetail,
                     )
@@ -78,15 +93,44 @@ fun OnlineLibraryScreen(
             }
         }
 
-        state.detail?.let { detail ->
-            BackHandler(enabled = true) { vm.closeDetail() }
-            BookDetailScreen(
-                book = detail,
-                state = state,
-                vm = vm,
-                onBack = { vm.closeDetail() },
-            )
+        // 详情页覆盖在整页之上，而不是追加在内容列之后（否则会被 fillMaxSize 内容挤出可视区）。
+        if (providerId != null && state != null) {
+            state.detail?.let { detail ->
+                BackHandler(enabled = true) { vm.closeDetail(providerId) }
+                BookDetailScreen(
+                    book = detail,
+                    state = state,
+                    vm = vm,
+                    providerId = providerId,
+                    onBack = { vm.closeDetail(providerId) },
+                )
+            }
         }
+    }
+}
+
+/** 全部书源禁用时的云端空态。 */
+@Composable
+private fun CloudEmptyState(onOpenSettings: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("暂无启用的书源", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "在设置中启用百度网盘、WebDAV 或 Z-Library 后即可使用云端书库",
+            style = MaterialTheme.typography.bodySmall,
+            color = YuezhouColors.TextSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        Button(
+            onClick = onOpenSettings,
+            modifier = Modifier.padding(top = 12.dp),
+        ) { Text("去设置") }
     }
 }
 
