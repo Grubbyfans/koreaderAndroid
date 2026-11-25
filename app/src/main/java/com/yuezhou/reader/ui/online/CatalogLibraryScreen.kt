@@ -2,6 +2,7 @@ package com.yuezhou.reader.ui.online
 
 import android.graphics.BitmapFactory
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -125,6 +126,16 @@ fun CatalogLibraryScreen(
         }
     }
     var filterSheetOpen by remember { mutableStateOf(false) }
+
+    // 返回层级：详情 > 筛选弹窗 > 清空当前检索 > 回到「书库」页（由外层处理）。
+    BackHandler(
+        enabled = !filterSheetOpen && state.detail == null &&
+            (state.searched || state.keyword.isNotBlank() || state.searchError != null),
+    ) {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        vm.clearSearch()
+    }
 
     fun openWebSearch() {
         if (!ZLibraryWebEntry.launch(context, vm.webBaseUrl(), state.keyword)) {

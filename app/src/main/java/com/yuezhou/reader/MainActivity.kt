@@ -408,6 +408,10 @@ private fun BookshelfScreen() {
     // 统一下载管理页：覆盖在主界面之上，返回键逐层退出。
     var showOnlineDownloads by rememberSaveable { mutableStateOf(false) }
     BackHandler(enabled = showOnlineDownloads) { showOnlineDownloads = false }
+    // 云端是一级页：无浮层时返回键先回到「书库」，不直接退出应用。
+    BackHandler(enabled = currentTab == Tab.云端 && !fullscreenSubPage && !showOnlineDownloads) {
+        currentTab = Tab.书架
+    }
     // 云端一级页右上角「更多」：刷新与网页搜索；额度/账户在后续阶段迁入。
     var cloudMenuOpen by remember { mutableStateOf(false) }
 
