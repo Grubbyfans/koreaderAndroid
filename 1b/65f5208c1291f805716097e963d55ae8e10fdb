@@ -1,0 +1,52 @@
+app/src/main/AndroidManifest.xml
+  h_7f20b2a03eb3b6 84-93
+app/src/main/java/com/yuezhou/reader/ui/online/CatalogLibraryScreen.kt
+  h_7f20b2a03eb3b6 4,47,54,91,115-122
+app/src/main/java/com/yuezhou/reader/ui/online/DownloadManagerHolder.kt
+  h_7f20b2a03eb3b6 9,11,13,33,47-48,72-84
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryViewModel.kt
+  h_7f20b2a03eb3b6 27-29,303-305,307-309,316,445-447,460
+app/src/main/java/com/yuezhou/reader/web/WebNavigationPolicy.kt
+  h_7f20b2a03eb3b6 6,8-9,14-17,30-39
+app/src/main/java/com/yuezhou/reader/web/ZLibraryDownloadHandoffProvider.kt
+  h_7f20b2a03eb3b6 1-64
+app/src/main/java/com/yuezhou/reader/web/ZLibraryWebActivity.kt
+  h_7f20b2a03eb3b6 13,33-35,37-39,51-52,71-74,86,158-160,167,169,173-227,229-233,276,278-283,299-300,324-384,495,500-504,506-507,521-522
+app/src/main/java/com/yuezhou/reader/web/ZLibraryWebDownloadWatcher.kt
+  h_7f20b2a03eb3b6 1-152
+app/src/main/java/com/yuezhou/reader/web/ZLibraryWebDownloads.kt
+  h_7f20b2a03eb3b6 1-159
+app/src/main/java/com/yuezhou/reader/web/ZLibraryWebEntry.kt
+  h_7f20b2a03eb3b6 1-36
+app/src/test/java/com/yuezhou/reader/web/DownloadRequestPolicyTest.kt
+  h_7f20b2a03eb3b6 1-59
+app/src/test/java/com/yuezhou/reader/web/WebNavigationPolicyTest.kt
+  h_7f20b2a03eb3b6 42-62
+app/src/test/java/com/yuezhou/reader/web/ZLibraryWebEntryTest.kt
+  h_7f20b2a03eb3b6 1-29
+docs/04-在线书库统一化/Z-Library混合架构阶段D实施报告.md
+  h_7f20b2a03eb3b6 1-151
+reader/src/main/java/com/yuezhou/reader/reader/online/download/BookDownloadManager.kt
+  h_7f20b2a03eb3b6 339-377
+reader/src/main/java/com/yuezhou/reader/reader/online/download/DownloadManagerGateway.kt
+  h_7f20b2a03eb3b6 1-109
+reader/src/main/java/com/yuezhou/reader/reader/online/download/DownloadNamePolicy.kt
+  h_7f20b2a03eb3b6 12
+reader/src/main/java/com/yuezhou/reader/reader/online/download/WebDownloadRegistry.kt
+  h_7f20b2a03eb3b6 1-138
+reader/src/test/java/com/yuezhou/reader/reader/online/download/BookDownloadManagerTest.kt
+  h_7f20b2a03eb3b6 452-490
+reader/src/test/java/com/yuezhou/reader/reader/online/download/WebDownloadRegistryTest.kt
+  h_7f20b2a03eb3b6 1-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1b65f5208c1291f805716097e963d55ae8e10fdb",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
