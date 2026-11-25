@@ -212,7 +212,11 @@ fun CatalogLibraryScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        if (state.searchError != null) "搜索失败" else "没有找到相关书籍",
+                        when {
+                            state.searchError == null -> "没有找到相关书籍"
+                            state.submittedKeyword.isBlank() -> "加载失败"
+                            else -> "搜索失败"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                     )
                     state.searchError?.let { message ->

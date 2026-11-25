@@ -230,6 +230,52 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch { refreshSelected() }
     }
 
+    /** 常驻入口：无需先触发一次被拒搜索，直接浏览官方「最热门」单页。 */
+    fun openPopular() {
+        val id = selectedProviderId
+        val provider = registry.get(id) as? ZLibraryBookProvider ?: return
+        jobs[id]?.cancel()
+        val seq = nextRequestSeq(id)
+        states[id] = stateOf(id).copy(
+            loading = true,
+            loadingMore = false,
+            loadMoreError = null,
+            searchError = null,
+            notice = null,
+            refreshing = false,
+        )
+        jobs[id] = viewModelScope.launch {
+            try {
+                val page = provider.mostPopular(30)
+                if (requestSeq[id] != seq) return@launch
+                states[id] = stateOf(id).copy(
+                    items = page.items,
+                    nextCursor = null,
+                    hasMore = false,
+                    loading = false,
+                    loadingMore = false,
+                    loadMoreError = null,
+                    refreshing = false,
+                    fetchedAt = page.fetchedAt,
+                    searchError = null,
+                    notice = page.notice,
+                    searched = true,
+                    resultSource = CatalogSource.POPULAR,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (requestSeq[id] != seq) return@launch
+                states[id] = stateOf(id).copy(
+                    loading = false,
+                    loadingMore = false,
+                    searched = true,
+                    searchError = readableError(e),
+                )
+            }
+        }
+    }
+
     /** 热门书单没有分页，刷新只重拉固定一页，不触碰关键词搜索条件。 */
     private suspend fun refreshPopular(id: String) {
         val provider = registry.get(id) as? ZLibraryBookProvider ?: return

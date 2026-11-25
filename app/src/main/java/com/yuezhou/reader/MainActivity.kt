@@ -554,6 +554,13 @@ private fun BookshelfScreen() {
                                                 showZLibrarySettings = true
                                             },
                                         )
+                                        DropdownMenuItem(
+                                            text = { Text("浏览官方热门") },
+                                            onClick = {
+                                                cloudMenuOpen = false
+                                                onlineVm.openPopular()
+                                            },
+                                        )
                                     }
                                     DropdownMenuItem(
                                         text = { Text("刷新云端书库") },
