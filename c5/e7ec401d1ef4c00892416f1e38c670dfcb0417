@@ -1,0 +1,16 @@
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  h_7f20b2a03eb3b6 132,210-213,502-509,649,1448,1455,1457-1469,1479-1496,1511,2187-2299
+app/src/main/java/com/yuezhou/reader/ui/LibraryUiPrefs.kt
+  h_7f20b2a03eb3b6 4,7,53-58,84-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c5e7ec401d1ef4c00892416f1e38c670dfcb0417",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
