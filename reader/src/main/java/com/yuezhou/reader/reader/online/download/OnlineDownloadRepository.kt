@@ -9,25 +9,36 @@ import com.yuezhou.reader.reader.db.OnlineDownloadTaskEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
+/** 下载任务持久化端口；Room 实现用于生产，内存实现用于单元测试。 */
+interface DownloadTaskStore {
+    fun observeAll(): Flow<List<OnlineDownloadTask>>
+    fun observeActiveRemoteIds(): Flow<Set<String>>
+    suspend fun find(taskId: String): OnlineDownloadTask?
+    suspend fun unfinished(): List<OnlineDownloadTask>
+    suspend fun save(task: OnlineDownloadTask)
+    suspend fun delete(taskId: String)
+    suspend fun clearFinished()
+}
+
 /** Room 与 UI 状态模型之间的映射；状态/错误码以枚举名持久化。 */
-class OnlineDownloadRepository(database: AppDatabase) {
+class OnlineDownloadRepository(database: AppDatabase) : DownloadTaskStore {
     private val dao: OnlineDownloadTaskDao = database.onlineDownloadTaskDao()
     private val mappingDao = database.onlineBookMappingDao()
 
     /** 映射表仅用于展示已下载状态，不参与任何判重逻辑。 */
-    fun observeActiveRemoteIds(): Flow<Set<String>> = mappingDao.observeActiveRemoteIds().map { it.toSet() }
+    override fun observeActiveRemoteIds(): Flow<Set<String>> = mappingDao.observeActiveRemoteIds().map { it.toSet() }
 
-    fun observeAll(): Flow<List<OnlineDownloadTask>> = dao.observeAll().map { rows -> rows.map(::toModel) }
+    override fun observeAll(): Flow<List<OnlineDownloadTask>> = dao.observeAll().map { rows -> rows.map(::toModel) }
 
-    suspend fun find(taskId: String): OnlineDownloadTask? = dao.find(taskId)?.let(::toModel)
+    override suspend fun find(taskId: String): OnlineDownloadTask? = dao.find(taskId)?.let(::toModel)
 
-    suspend fun unfinished(): List<OnlineDownloadTask> = dao.unfinished().map(::toModel)
+    override suspend fun unfinished(): List<OnlineDownloadTask> = dao.unfinished().map(::toModel)
 
-    suspend fun save(task: OnlineDownloadTask) = dao.upsert(toEntity(task))
+    override suspend fun save(task: OnlineDownloadTask) = dao.upsert(toEntity(task))
 
-    suspend fun delete(taskId: String) = dao.delete(taskId)
+    override suspend fun delete(taskId: String) = dao.delete(taskId)
 
-    suspend fun clearFinished() = dao.clearFinished()
+    override suspend fun clearFinished() = dao.clearFinished()
 
     private fun toEntity(task: OnlineDownloadTask) = OnlineDownloadTaskEntity(
         taskId = task.taskId,

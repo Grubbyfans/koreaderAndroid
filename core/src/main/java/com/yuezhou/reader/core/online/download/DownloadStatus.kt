@@ -8,6 +8,8 @@ enum class DownloadStatus {
     VERIFYING,
     IMPORTING,
     COMPLETED,
+    /** 外部下载已落盘，但文件名缺失/无意义，等待用户确认。 */
+    AWAITING_NAME,
     IMPORT_FAILED,
     FAILED,
     CANCELLED;
@@ -19,11 +21,13 @@ enum class DownloadStatus {
     companion object {
         private val allowed: Map<DownloadStatus, Set<DownloadStatus>> = mapOf(
             QUEUED to setOf(PREPARING, FAILED, CANCELLED),
-            PREPARING to setOf(DOWNLOADING, FAILED, CANCELLED),
+            // 外部交接在 PREPARING 阶段完成落盘/校验后，可能回到队列、待命名或直接进入同名确认。
+            PREPARING to setOf(DOWNLOADING, VERIFYING, QUEUED, AWAITING_NAME, IMPORT_FAILED, FAILED, CANCELLED),
             DOWNLOADING to setOf(VERIFYING, FAILED, CANCELLED),
-            VERIFYING to setOf(IMPORTING, IMPORT_FAILED, FAILED, CANCELLED),
+            VERIFYING to setOf(IMPORTING, QUEUED, AWAITING_NAME, IMPORT_FAILED, FAILED, CANCELLED),
             IMPORTING to setOf(COMPLETED, IMPORT_FAILED, FAILED, CANCELLED),
-            IMPORT_FAILED to setOf(QUEUED, FAILED, CANCELLED),
+            AWAITING_NAME to setOf(QUEUED, IMPORTING, IMPORT_FAILED, FAILED, CANCELLED),
+            IMPORT_FAILED to setOf(QUEUED, AWAITING_NAME, FAILED, CANCELLED),
             FAILED to setOf(QUEUED, CANCELLED),
             COMPLETED to emptySet(),
             CANCELLED to emptySet(),

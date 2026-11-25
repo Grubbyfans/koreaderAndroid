@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -66,6 +67,9 @@ fun DownloadManagerScreen(
     val tasks by vm.downloadManager.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
     var filter by remember { mutableStateOf(DownloadFilter.ALL) }
     var confirmTask by remember { mutableStateOf<OnlineDownloadTask?>(null) }
+    // 阶段 B：外部下载无法从文件确定书名时，由用户确认/修改文件名后再导入。
+    var nameTask by remember { mutableStateOf<OnlineDownloadTask?>(null) }
+    var nameInput by remember { mutableStateOf("") }
 
     // 阶段 F：手动上传只允许从已完成任务发起；两个云端分别选择、分别记结果。
     val context = LocalContext.current
@@ -124,6 +128,7 @@ fun DownloadManagerScreen(
                     DownloadFilter.DONE -> task.status == DownloadStatus.COMPLETED
                     DownloadFilter.FAILED -> task.status == DownloadStatus.FAILED ||
                         task.status == DownloadStatus.IMPORT_FAILED ||
+                        task.status == DownloadStatus.AWAITING_NAME ||
                         task.status == DownloadStatus.CANCELLED
                 }
             }
@@ -159,6 +164,14 @@ fun DownloadManagerScreen(
                                 }
                             },
                             onRead = task.localBookId?.let { id -> { onOpenBook(id) } },
+                            onName = if (task.status == DownloadStatus.AWAITING_NAME) {
+                                {
+                                    nameInput = ""
+                                    nameTask = task
+                                }
+                            } else {
+                                null
+                            },
                             onUpload = task.localBookId?.let {
                                 {
                                     uploadError = null
@@ -194,7 +207,52 @@ fun DownloadManagerScreen(
                 }) { Text("确认覆盖") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmTask = null }) { Text("取消") }
+                TextButton(onClick = {
+                    // 同名冲突只提供覆盖与取消：取消时清理暂存文件与交接回执，不自动改名或保留两份。
+                    vm.downloadManager.cancel(task.taskId)
+                    confirmTask = null
+                }) { Text("取消并清理") }
+            },
+        )
+    }
+
+    val pendingName = nameTask
+    if (pendingName != null) {
+        AlertDialog(
+            onDismissRequest = { nameTask = null },
+            title = { Text("确认文件名") },
+            text = {
+                Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    Text("无法从下载文件确定有效书名，请输入完整文件名（.epub 可省略）。")
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        singleLine = true,
+                        label = { Text("文件名") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "不会自动追加序号，也不会保留两份；若同名，导入前会再次要求确认覆盖。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = nameInput.isNotBlank(),
+                    onClick = {
+                        val target = pendingName
+                        val name = nameInput
+                        nameTask = null
+                        scope.launch { vm.downloadManager.confirmName(target.taskId, name) }
+                    },
+                ) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vm.downloadManager.cancel(pendingName.taskId)
+                    nameTask = null
+                }) { Text("取消并清理") }
             },
         )
     }
@@ -305,6 +363,7 @@ private fun DownloadTaskRow(
     onRetry: () -> Unit,
     onRead: (() -> Unit)?,
     onUpload: (() -> Unit)?,
+    onName: (() -> Unit)?,
 ) {
     Column(
         modifier = Modifier
@@ -337,8 +396,11 @@ private fun DownloadTaskRow(
             Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (task.status.active) {
+            if (task.status.active || task.status == DownloadStatus.AWAITING_NAME) {
                 TextButton(onClick = onCancel) { Text("取消") }
+            }
+            onName?.let {
+                Button(onClick = it) { Text("命名") }
             }
             if (task.status == DownloadStatus.FAILED || task.status == DownloadStatus.IMPORT_FAILED) {
                 Button(onClick = onRetry) { Text(if (task.status == DownloadStatus.IMPORT_FAILED) "重试导入" else "重试") }
@@ -362,6 +424,7 @@ private fun statusLabel(status: DownloadStatus): String = when (status) {
     DownloadStatus.VERIFYING -> "校验中"
     DownloadStatus.IMPORTING -> "导入中"
     DownloadStatus.COMPLETED -> "已导入"
+    DownloadStatus.AWAITING_NAME -> "待命名"
     DownloadStatus.IMPORT_FAILED -> "导入失败"
     DownloadStatus.FAILED -> "失败"
     DownloadStatus.CANCELLED -> "已取消"

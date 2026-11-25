@@ -38,7 +38,7 @@ interface OnlineDownloadTaskDao {
     @Query("SELECT * FROM online_download_task WHERE taskId = :taskId")
     suspend fun find(taskId: String): OnlineDownloadTaskEntity?
 
-    @Query("SELECT * FROM online_download_task WHERE status IN ('QUEUED','PREPARING','DOWNLOADING','VERIFYING','IMPORTING')")
+    @Query("SELECT * FROM online_download_task WHERE status IN ('QUEUED','PREPARING','DOWNLOADING','VERIFYING','IMPORTING','AWAITING_NAME','IMPORT_FAILED')")
     suspend fun unfinished(): List<OnlineDownloadTaskEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -47,6 +47,6 @@ interface OnlineDownloadTaskDao {
     @Query("DELETE FROM online_download_task WHERE taskId = :taskId")
     suspend fun delete(taskId: String)
 
-    @Query("DELETE FROM online_download_task WHERE status NOT IN ('QUEUED','PREPARING','DOWNLOADING','VERIFYING','IMPORTING')")
+    @Query("DELETE FROM online_download_task WHERE status NOT IN ('QUEUED','PREPARING','DOWNLOADING','VERIFYING','IMPORTING','AWAITING_NAME')")
     suspend fun clearFinished()
 }
