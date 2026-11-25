@@ -211,7 +211,10 @@ fun CatalogLibraryScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Text("没有找到相关书籍", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (state.searchError != null) "搜索失败" else "没有找到相关书籍",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
                     state.searchError?.let { message ->
                         Text(
                             message,
@@ -220,11 +223,13 @@ fun CatalogLibraryScreen(
                             textAlign = TextAlign.Center,
                         )
                     }
-                    Text(
-                        "试试更换关键词、语言或排序条件",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YuezhouColors.TextSecondary,
-                    )
+                    if (state.searchError == null) {
+                        Text(
+                            "试试更换关键词、语言或排序条件",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YuezhouColors.TextSecondary,
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                     if (state.submittedKeyword.isNotBlank()) {
                         OutlinedButton(onClick = { vm.retrySubmittedSearch() }) { Text("重新搜索") }

@@ -536,8 +536,14 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             ProviderErrorCode.QUOTA -> "下载额度已用尽"
             ProviderErrorCode.RATE_LIMITED -> "请求过于频繁，请稍后再试"
             ProviderErrorCode.SERVER_REJECTED -> NATIVE_SEARCH_UNAVAILABLE
-            else -> e.message ?: "请求失败"
+            else -> e.message ?: "请求失败，请稍后重试"
         }
-        else -> e.message ?: "网络请求失败"
+        // 网络异常不把底层英文堆栈直接抛给用户，按可操作方向给出一句提示。
+        is java.net.UnknownHostException -> "无法解析服务器地址，请检查网络或代理设置"
+        is java.net.SocketTimeoutException -> "请求超时，请检查网络后重试"
+        is javax.net.ssl.SSLException -> "安全连接失败，请检查网络或代理设置"
+        is java.net.ConnectException -> "网络不可达，请检查网络或代理设置"
+        is java.io.IOException -> "网络连接中断，请检查网络后重试"
+        else -> e.message ?: "操作失败，请稍后重试"
     }
 }
