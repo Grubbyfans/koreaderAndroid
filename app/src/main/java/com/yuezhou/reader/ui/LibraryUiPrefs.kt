@@ -1,8 +1,10 @@
 package com.yuezhou.reader.ui
 
 import android.content.Context
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -48,6 +50,12 @@ class LibraryUiPrefs(context: Context) {
         set(value) {
             prefs.edit { putBoolean("catalog_grid_mode", value) }
         }
+
+    var localGridMode: Boolean
+        get() = prefs.getBoolean("local_grid_mode", true)
+        set(value) {
+            prefs.edit { putBoolean("local_grid_mode", value) }
+        }
 }
 
 /**
@@ -60,6 +68,25 @@ class LibraryUiPrefs(context: Context) {
 fun rememberRestoredGridState(key: String, prefs: LibraryUiPrefs): LazyGridState {
     val saved = remember(key) { prefs.scroll(key) }
     val state = rememberLazyGridState(
+        initialFirstVisibleItemIndex = saved.index,
+        initialFirstVisibleItemScrollOffset = saved.offset,
+    )
+    LaunchedEffect(key, state) {
+        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+            .distinctUntilChanged()
+            .collectLatest { (index, offset) ->
+                delay(150)
+                prefs.saveScroll(key, index, offset)
+            }
+    }
+    return state
+}
+
+/** 与 [rememberRestoredGridState] 相同，用于单列列表模式。 */
+@Composable
+fun rememberRestoredListState(key: String, prefs: LibraryUiPrefs): LazyListState {
+    val saved = remember(key) { prefs.scroll(key) }
+    val state = rememberLazyListState(
         initialFirstVisibleItemIndex = saved.index,
         initialFirstVisibleItemScrollOffset = saved.offset,
     )

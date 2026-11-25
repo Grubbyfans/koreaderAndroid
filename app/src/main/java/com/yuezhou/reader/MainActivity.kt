@@ -129,6 +129,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.ui.LibraryUiPrefs
 import com.yuezhou.reader.ui.rememberRestoredGridState
+import com.yuezhou.reader.ui.rememberRestoredListState
 import com.yuezhou.reader.ui.online.DownloadManagerScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryScreen
 import com.yuezhou.reader.ui.online.OnlineLibraryViewModel
@@ -205,6 +206,10 @@ private fun BookshelfScreen() {
     var showHiddenBooks by remember { mutableStateOf(false) }
     var deletingLocalBooks by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    val uiPrefs = remember(context) { LibraryUiPrefs(context) }
+    // 本地书库展示模式：网格/列表，切换后立即持久化。
+    var localGridMode by remember { mutableStateOf(uiPrefs.localGridMode) }
 
     val store = remember { LibraryStore(context) }
     var hiddenBooks by remember { mutableStateOf(store.hiddenBookIds()) }
@@ -494,6 +499,14 @@ private fun BookshelfScreen() {
                         if (currentTab == Tab.书架 && removedBooks.isNotEmpty()) {
                             TextButton(onClick = { showHiddenBooks = true }) { Text("已移除") }
                         }
+                        if (currentTab == Tab.书架 && selecting == null) {
+                            TextButton(
+                                onClick = {
+                                    localGridMode = !localGridMode
+                                    uiPrefs.localGridMode = localGridMode
+                                },
+                            ) { Text(if (localGridMode) "列表" else "网格") }
+                        }
                         // 下载任务入口：书库与云端都保留；设置页不显示。
                         if (currentTab == Tab.书架 || currentTab == Tab.云端) {
                             IconButton(onClick = { showOnlineDownloads = true }) {
@@ -633,6 +646,7 @@ private fun BookshelfScreen() {
                     BookshelfContent(
                         books = visibleBooks,
                         loading = loading,
+                        gridMode = localGridMode,
                         selecting = selecting,
                         onImport = { if (!scanning && !importing) importOptionsOpen = true },
                         onEnterSelect = { selecting = setOf(it) },
@@ -1431,14 +1445,28 @@ private fun formatSize(bytes: Long): String {
 private fun BookshelfContent(
     books: List<LibraryStore.Entry>,
     loading: Boolean,
+    gridMode: Boolean,
     selecting: Set<String>?,
     onImport: () -> Unit,
     onEnterSelect: (String) -> Unit,
     onToggleSelect: (String) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val localPrefs = remember { LibraryUiPrefs(context) }
+    val localPrefs = remember(context) { LibraryUiPrefs(context) }
     val gridState = rememberRestoredGridState("local", localPrefs)
+    val listState = rememberRestoredListState("local.list", localPrefs)
+
+    fun openBook(book: LibraryStore.Entry) {
+        if (selecting != null) {
+            onToggleSelect(book.bookId)
+        } else {
+            val intent = Intent(context, ReaderActivity::class.java).apply {
+                putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId)
+            }
+            context.startActivity(intent)
+        }
+    }
+
     when {
         loading -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1447,6 +1475,24 @@ private fun BookshelfContent(
         }
         books.isEmpty() -> {
             EmptyLibrary(onImport = onImport)
+        }
+        !gridMode -> {
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                lazyItems(books, key = { it.bookId }) { book ->
+                    BookListRow(
+                        book = book,
+                        selecting = selecting != null,
+                        checked = selecting?.contains(book.bookId) == true,
+                        onClick = { openBook(book) },
+                        onLongClick = { onEnterSelect(book.bookId) },
+                    )
+                }
+            }
         }
         else -> {
             LazyVerticalGrid(
@@ -1462,15 +1508,7 @@ private fun BookshelfContent(
                         book = book,
                         selecting = selecting != null,
                         checked = selecting?.contains(book.bookId) == true,
-                        onClick = {
-                            if (selecting != null) onToggleSelect(book.bookId)
-                            else {
-                                val intent = Intent(context, ReaderActivity::class.java).apply {
-                                    putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId)
-                                }
-                                context.startActivity(intent)
-                            }
-                        },
+                        onClick = { openBook(book) },
                         onLongClick = { onEnterSelect(book.bookId) },
                     )
                 }
@@ -2141,6 +2179,119 @@ private fun BookCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = YuezhouColors.TextSecondary,
                 )
+            }
+        }
+    }
+}
+
+/** 本地书库列表模式：封面缩略 + 书名 + 大小/进度，与网格模式共用点击与多选行为。 */
+@Composable
+private fun BookListRow(
+    book: LibraryStore.Entry,
+    selecting: Boolean,
+    checked: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 52.dp, height = 70.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(CoverPlaceholder.color(book.bookId))
+                .then(
+                    if (selecting && checked) {
+                        Modifier.border(2.dp, YuezhouColors.Brand, RoundedCornerShape(6.dp))
+                    } else {
+                        Modifier
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            val cover = book.coverPng
+            if (cover != null) {
+                CoverImage(
+                    bytes = cover,
+                    contentDescription = book.title,
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Text(
+                    text = book.title.take(1),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                )
+            }
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = book.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = YuezhouColors.TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+            val percent = book.percent?.coerceIn(0.0, 1.0)
+            Text(
+                text = buildString {
+                    append(formatSize(book.size))
+                    if (percent != null) append(" · 已读 ${(percent * 100).toInt()}%")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = YuezhouColors.TextSecondary,
+            )
+            if (percent != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(1.5.dp))
+                        .background(YuezhouColors.Divider),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(percent.coerceAtLeast(0.01).toFloat())
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(1.5.dp))
+                            .background(YuezhouColors.Brand),
+                    )
+                }
+            }
+        }
+
+        if (selecting) {
+            Spacer(Modifier.width(12.dp))
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(if (checked) YuezhouColors.Brand else Color.White)
+                    .border(
+                        1.dp,
+                        if (checked) Color.Transparent else YuezhouColors.Divider,
+                        androidx.compose.foundation.shape.CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (checked) {
+                    Text(
+                        "✓",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
     }
