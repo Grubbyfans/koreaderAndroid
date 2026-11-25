@@ -1,0 +1,28 @@
+app/build.gradle.kts
+  h_7f20b2a03eb3b6 71
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  h_7f20b2a03eb3b6 43-44,96,145,148,247-292,402-404,453,459-464,578,580,584,593,603,740-761,763-775,777-798,801-812,930,1557,1570
+app/src/main/java/com/yuezhou/reader/ui/navigation/ShelfNavigator.kt
+  h_7f20b2a03eb3b6 8,10-12,23,27-30,33,36-39,56-58,60,63,68,72,74-75,78-81,83-94
+app/src/main/java/com/yuezhou/reader/ui/online/BookDetailScreen.kt
+  h_7f20b2a03eb3b6 64,212,247
+app/src/main/java/com/yuezhou/reader/ui/online/CatalogLibraryScreen.kt
+  h_7f20b2a03eb3b6 114,133,135,275,465,490-494,591,596,640,645
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryScreen.kt
+  h_7f20b2a03eb3b6 50,74,101-102,108
+app/src/test/java/com/yuezhou/reader/ui/navigation/ShelfNavigatorTest.kt
+  h_7f20b2a03eb3b6 4,6,58,106-107,111,114-121,123-128,130-133,137-186
+gradle/libs.versions.toml
+  h_7f20b2a03eb3b6 34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d2320be9a31fd651d4fb85492fd11c761975da6e",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
