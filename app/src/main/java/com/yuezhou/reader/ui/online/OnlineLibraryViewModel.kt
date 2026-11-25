@@ -28,6 +28,9 @@ import kotlinx.coroutines.launch
 /** 原生搜索被服务端拒绝时的统一提示；保留网页入口，不展示降级书单冒充结果。 */
 private const val NATIVE_SEARCH_UNAVAILABLE = "原生搜索暂不可用，可使用网页搜索"
 
+/** 检索结果来源：关键词搜索或服务端拒绝后的官方热门书单。 */
+enum class CatalogSource { NONE, KEYWORD, POPULAR }
+
 /** 单个书源的页面状态：云书源保存列表，检索书源另存搜索词、筛选、分页、滚动与详情。 */
 data class ProviderUiState(
     val items: List<OnlineBook> = emptyList(),
@@ -38,7 +41,7 @@ data class ProviderUiState(
     val fetchedAt: Long = 0L,
     val fromCache: Boolean = false,
     val loaded: Boolean = false,
-    // —— 检索型书源（阶段 D）——
+    // —— 检索型书源 ——
     val keyword: String = "",
     val submittedKeyword: String = "",
     val language: String? = null,
@@ -49,6 +52,8 @@ data class ProviderUiState(
     val hasMore: Boolean = false,
     val loadingMore: Boolean = false,
     val searchError: String? = null,
+    /** 当前列表的来源；热门书单无分页，刷新时按来源选择接口。 */
+    val resultSource: CatalogSource = CatalogSource.NONE,
     /** 降级等非错误提示（如服务端拒绝搜索后展示热门书单）。 */
     val notice: String? = null,
     val gridMode: Boolean = true,
@@ -179,15 +184,20 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    /** 主动更新：云书源登记外部书籍后强制重拉；检索书源按当前条件重新搜索。 */
+    /** 主动更新：云书源登记外部书籍后强制重拉；检索书源按当前数据源刷新。 */
     suspend fun refreshSelected(): Pair<ProviderUiState, String?> {
         if (registry.get(selectedProviderId) is CatalogBookProvider) {
             val current = stateOf(selectedProviderId)
+            if (current.resultSource == CatalogSource.POPULAR) {
+                refreshPopular(selectedProviderId)
+                return stateOf(selectedProviderId) to null
+            }
             if (current.submittedKeyword.isBlank()) {
                 return current to "请先输入关键词搜索"
             }
             jobs[selectedProviderId]?.cancel()
             val seq = nextRequestSeq(selectedProviderId)
+            states[selectedProviderId] = current.copy(refreshing = true, searchError = null)
             doSearch(selectedProviderId, current.submittedKeyword, append = false, seq = seq)
             loadQuota()
             return stateOf(selectedProviderId) to null
@@ -201,6 +211,41 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             return failed to "更新书库失败：${e.message ?: "未知错误"}"
         }
         return loadSelected(force = true) to message
+    }
+
+    /** 下拉刷新/菜单刷新的非挂起入口。 */
+    fun refreshCurrent() {
+        viewModelScope.launch { refreshSelected() }
+    }
+
+    /** 热门书单没有分页，刷新只重拉固定一页，不触碰关键词搜索条件。 */
+    private suspend fun refreshPopular(id: String) {
+        val provider = registry.get(id) as? ZLibraryBookProvider ?: return
+        val seq = nextRequestSeq(id)
+        states[id] = stateOf(id).copy(refreshing = true, searchError = null)
+        try {
+            val page = provider.mostPopular(30)
+            if (requestSeq[id] != seq) return
+            states[id] = stateOf(id).copy(
+                items = page.items,
+                nextCursor = null,
+                hasMore = false,
+                loading = false,
+                loadingMore = false,
+                refreshing = false,
+                fetchedAt = page.fetchedAt,
+                searchError = null,
+                notice = page.notice,
+                searched = true,
+                resultSource = CatalogSource.POPULAR,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (requestSeq[id] != seq) return
+            // 刷新失败保留旧热门列表，只提示错误。
+            states[id] = stateOf(id).copy(refreshing = false, searchError = readableError(e))
+        }
     }
 
     /** 转换为现有云端详情/下载弹窗所需的模型；原 CloudSync.RemoteBook 不改动。 */
@@ -282,6 +327,8 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             notice = null,
             loading = true,
             loadingMore = false,
+            refreshing = false,
+            resultSource = CatalogSource.NONE,
             scrollIndex = 0,
             detail = null,
         )
@@ -328,6 +375,7 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
                 searchError = null,
                 notice = page.notice,
                 searched = true,
+                resultSource = if (fallback) CatalogSource.POPULAR else CatalogSource.KEYWORD,
             )
         } catch (e: CancellationException) {
             throw e

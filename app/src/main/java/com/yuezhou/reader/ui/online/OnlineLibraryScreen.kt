@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,17 +54,23 @@ fun OnlineLibraryScreen(
             if (vm.registry.get(vm.selectedProviderId) is CatalogBookProvider) {
                 CatalogLibraryScreen(vm = vm, state = state, onOpenSettings = onOpenSettings)
             } else {
-                CloudBookshelfContent(
-                    books = vm.legacyBooks(state.items),
-                    loading = state.loading,
-                    showRefreshBar = state.refreshing,
-                    error = state.error,
-                    backendLabel = state.backendLabel.ifBlank { null },
-                    fetchedAt = state.fetchedAt,
-                    fromCache = state.fromCache,
+                PullToRefreshBox(
+                    isRefreshing = state.refreshing,
                     onRefresh = onRefresh,
-                    onOpenDetail = onOpenDetail,
-                )
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    CloudBookshelfContent(
+                        books = vm.legacyBooks(state.items),
+                        loading = state.loading,
+                        showRefreshBar = state.refreshing,
+                        error = state.error,
+                        backendLabel = state.backendLabel.ifBlank { null },
+                        fetchedAt = state.fetchedAt,
+                        fromCache = state.fromCache,
+                        onRefresh = onRefresh,
+                        onOpenDetail = onOpenDetail,
+                    )
+                }
             }
         }
 

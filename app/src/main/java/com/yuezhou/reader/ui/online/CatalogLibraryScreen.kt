@@ -46,6 +46,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -170,24 +171,6 @@ fun CatalogLibraryScreen(
             ) { Text(if (state.gridMode) "列表" else "网格") }
         }
 
-        state.searchError?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFC0392B),
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
-
-        state.notice?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = YuezhouColors.Brand,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
-
         when {
             state.loading && state.items.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -223,16 +206,41 @@ fun CatalogLibraryScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text("没有找到相关书籍", style = MaterialTheme.typography.titleMedium)
+                    state.searchError?.let { message ->
+                        Text(
+                            message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFC0392B),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                     Text(
                         "试试更换关键词、语言或排序条件",
                         style = MaterialTheme.typography.bodySmall,
                         color = YuezhouColors.TextSecondary,
                     )
                     Spacer(Modifier.height(8.dp))
+                    if (state.submittedKeyword.isNotBlank()) {
+                        OutlinedButton(onClick = { vm.retrySubmittedSearch() }) { Text("重新搜索") }
+                        Spacer(Modifier.height(4.dp))
+                    }
                     OutlinedButton(onClick = ::openWebSearch) { Text("网页搜索") }
                 }
             }
-            else -> CatalogResults(vm, state, gridState, downloadedIds)
+            else -> PullToRefreshBox(
+                isRefreshing = state.refreshing,
+                onRefresh = { vm.refreshCurrent() },
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                CatalogResults(
+                    vm = vm,
+                    state = state,
+                    gridState = gridState,
+                    downloadedIds = downloadedIds,
+                    onRetry = { vm.retrySubmittedSearch() },
+                    onWebSearch = ::openWebSearch,
+                )
+            }
         }
     }
 
@@ -417,6 +425,8 @@ private fun CatalogResults(
     state: ProviderUiState,
     gridState: LazyGridState,
     downloadedIds: Set<String>,
+    onRetry: () -> Unit,
+    onWebSearch: () -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(if (state.gridMode) 3 else 1),
@@ -426,6 +436,18 @@ private fun CatalogResults(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        if (state.notice != null || state.searchError != null) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                SearchNoticeBar(
+                    notice = state.notice,
+                    error = state.searchError,
+                    isPopular = state.resultSource == CatalogSource.POPULAR,
+                    canRetry = state.submittedKeyword.isNotBlank(),
+                    onRetry = onRetry,
+                    onWebSearch = onWebSearch,
+                )
+            }
+        }
         items(state.items, key = { it.remoteId }) { book ->
             if (state.gridMode) GridBookCard(book, vm, book.remoteId in downloadedIds)
             else ListBookCard(book, vm, book.remoteId in downloadedIds)
@@ -451,6 +473,54 @@ private fun CatalogResults(
                         .padding(vertical = 12.dp),
                     textAlign = TextAlign.Center,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchNoticeBar(
+    notice: String?,
+    error: String?,
+    isPopular: Boolean,
+    canRetry: Boolean,
+    onRetry: () -> Unit,
+    onWebSearch: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = if (error != null) Color(0xFFFDECEA) else YuezhouColors.BrandContainer,
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(
+                text = notice ?: error.orEmpty(),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (error != null) Color(0xFFC0392B) else YuezhouColors.BrandDark,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isPopular) {
+                    Text(
+                        "官方热门书单 · 非关键词结果",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = YuezhouColors.TextSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
+                if (canRetry) {
+                    TextButton(
+                        onClick = onRetry,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("重新搜索") }
+                }
+                TextButton(
+                    onClick = onWebSearch,
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                ) { Text("网页搜索") }
             }
         }
     }

@@ -126,6 +126,17 @@ class ZLibraryBookProvider(context: Context) : CatalogBookProvider {
 
     override suspend fun fetchCover(url: String): Result<ByteArray> = api().fetchCover(url)
 
+    /**
+     * 重新拉取官方「最热门」单页书单。
+     *
+     * 仅用于当前列表已降级为热门时的刷新；普通搜索仍走 [search]，拒绝判定规则不变。
+     */
+    suspend fun mostPopular(limit: Int = config.preferences.pageSize): BookPage {
+        val session = currentSession()
+        return api().getMostPopular(limit.coerceIn(1, 30), session)
+            .getOrElse { throw asProviderException(it) }
+    }
+
     override suspend fun getBookDetail(remoteId: String): OnlineBook {
         val parts = remoteId.split(":", limit = 2)
         if (parts.size != 2 || parts.any { it.isBlank() }) {
