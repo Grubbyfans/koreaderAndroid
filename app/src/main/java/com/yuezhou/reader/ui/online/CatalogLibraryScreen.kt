@@ -314,8 +314,8 @@ private fun CompactSearchField(
     onValueChange: (String) -> Unit,
     enabled: Boolean,
     onSearch: () -> Unit,
-    onFocusChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
+    onFocusChange: (Boolean) -> Unit = {},
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -611,7 +611,7 @@ private fun GridBookCard(
             .fillMaxWidth()
             .clickable(enabled = interactionsEnabled) { vm.openDetail(book, providerId) },
     ) {
-        RemoteCover(book.coverUrl, book.title, vm, providerId, Modifier.fillMaxWidth().aspectRatio(0.75f))
+        RemoteCover(book.coverUrl, book.title, vm, providerId, Modifier.fillMaxWidth().aspectRatio(0.75f), enabled = interactionsEnabled)
         Spacer(Modifier.height(6.dp))
         Text(
             book.title,
@@ -661,7 +661,7 @@ private fun ListBookCard(
             .clickable(enabled = interactionsEnabled) { vm.openDetail(book, providerId) }
             .padding(vertical = 4.dp),
     ) {
-        RemoteCover(book.coverUrl, book.title, vm, providerId, Modifier.width(72.dp).height(102.dp))
+        RemoteCover(book.coverUrl, book.title, vm, providerId, Modifier.width(72.dp).height(102.dp), enabled = interactionsEnabled)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -699,8 +699,10 @@ private fun RemoteCover(
     vm: OnlineLibraryViewModel,
     providerId: String,
     modifier: Modifier,
+    enabled: Boolean = true,
 ) {
-    LaunchedEffect(url, providerId) { vm.loadCover(url, providerId) }
+    // 只在页面落页后加载封面，避免 Pager 切换动画期间的相邻页预组合触发额外网络请求。
+    LaunchedEffect(url, providerId, enabled) { if (enabled) vm.loadCover(url, providerId) }
     val bytes = vm.coverOf(url)
     val bitmap by produceState<ImageBitmap?>(initialValue = null, bytes) {
         value = if (bytes == null) null else withContext(Dispatchers.Default) {
