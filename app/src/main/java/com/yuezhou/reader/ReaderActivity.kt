@@ -902,7 +902,7 @@ private fun ReaderScreen(
                             p.kokoroSpeaker != readerPrefs.kokoroSpeaker
                         val rateChanged = p.speechRate != readerPrefs.speechRate
                         scope.launch {
-                            ReaderSettings.save(context, p)
+                            ReaderSettings.save(context, readerPrefs, p)
                             // 语速实时生效（Kokoro 重合成当前句，系统 TTS 应用到后续句），不打断队列。
                             if (rateChanged && speaking) {
                                 SpeechPlanStore.setRate(context, p.speechRate)

@@ -1,6 +1,8 @@
 package com.yuezhou.reader
 
 import android.content.Context
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -99,24 +101,30 @@ object ReaderSettings {
         context.readerDataStore.edit { it[KEY_BRIGHTNESS] = brightness }
     }
 
-    /** 保存整份设置。 */
-    suspend fun save(context: Context, prefs: ReaderPreferences) {
-        context.readerDataStore.edit { it ->
-            it[KEY_FONT_SIZE] = prefs.fontSize
-            it[KEY_FONT_ID] = prefs.fontId
-            it[KEY_FONT_WEIGHT] = prefs.fontWeight
-            it[KEY_LINE_HEIGHT] = prefs.lineHeight
-            it[KEY_PAGE_MARGIN] = prefs.pageMargin
-            it[KEY_THEME] = prefs.theme
-            it[KEY_VERTICAL] = prefs.vertical
-            it[KEY_PAGE_ANIMATION] = prefs.pageAnimation
-            it[KEY_SPEECH_RATE] = prefs.speechRate
-            it[KEY_SPEECH_VOICE] = prefs.speechVoice
-            it[KEY_SPEECH_ENGINE] = prefs.speechEngine
-            it[KEY_KOKORO_MODEL] = prefs.kokoroModel
-            it[KEY_KOKORO_SPEAKER] = prefs.kokoroSpeaker
-            it[KEY_AUTO_SYNC] = prefs.autoSync
-            it[KEY_BRIGHTNESS] = prefs.brightness
+    /** 保存本次交互修改的设置。 */
+    suspend fun save(context: Context, before: ReaderPreferences, prefs: ReaderPreferences) {
+        context.readerDataStore.edit { applyDelta(it, before, prefs) }
+    }
+
+    internal fun applyDelta(target: MutablePreferences, before: ReaderPreferences, prefs: ReaderPreferences) {
+        fun <T> changed(key: Preferences.Key<T>, original: T, edited: T) {
+            if (original != edited) target[key] = edited
         }
+
+        changed(KEY_FONT_SIZE, before.fontSize, prefs.fontSize)
+        changed(KEY_FONT_ID, before.fontId, prefs.fontId)
+        changed(KEY_FONT_WEIGHT, before.fontWeight, prefs.fontWeight)
+        changed(KEY_LINE_HEIGHT, before.lineHeight, prefs.lineHeight)
+        changed(KEY_PAGE_MARGIN, before.pageMargin, prefs.pageMargin)
+        changed(KEY_THEME, before.theme, prefs.theme)
+        changed(KEY_VERTICAL, before.vertical, prefs.vertical)
+        changed(KEY_PAGE_ANIMATION, before.pageAnimation, prefs.pageAnimation)
+        changed(KEY_SPEECH_RATE, before.speechRate, prefs.speechRate)
+        changed(KEY_SPEECH_VOICE, before.speechVoice, prefs.speechVoice)
+        changed(KEY_SPEECH_ENGINE, before.speechEngine, prefs.speechEngine)
+        changed(KEY_KOKORO_MODEL, before.kokoroModel, prefs.kokoroModel)
+        changed(KEY_KOKORO_SPEAKER, before.kokoroSpeaker, prefs.kokoroSpeaker)
+        changed(KEY_AUTO_SYNC, before.autoSync, prefs.autoSync)
+        changed(KEY_BRIGHTNESS, before.brightness, prefs.brightness)
     }
 }

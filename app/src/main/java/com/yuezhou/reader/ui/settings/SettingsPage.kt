@@ -211,7 +211,7 @@ internal fun SettingsPage(
                 Switch(
                     checked = prefs.autoSync,
                     onCheckedChange = { enabled ->
-                        scope.launch { ReaderSettings.save(context, prefs.copy(autoSync = enabled)) }
+                        scope.launch { ReaderSettings.save(context, prefs, prefs.copy(autoSync = enabled)) }
                     },
                 )
             }
@@ -340,7 +340,7 @@ internal fun SettingsPage(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                            .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(theme = value)) } }
+                            .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(theme = value)) } }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 }
@@ -360,7 +360,7 @@ internal fun SettingsPage(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                            .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(vertical = value)) } }
+                            .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(vertical = value)) } }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 }
@@ -383,7 +383,7 @@ internal fun SettingsPage(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                            .clickable { scope.launch { ReaderSettings.save(context, prefs.copy(pageAnimation = value)) } }
+                            .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(pageAnimation = value)) } }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 }
@@ -391,7 +391,7 @@ internal fun SettingsPage(
             Spacer(Modifier.height(4.dp))
 
             ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
-                scope.launch { ReaderSettings.save(context, prefs.copy(fontWeight = w)) }
+                scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontWeight = w)) }
             })
 
             // 字号
@@ -402,7 +402,7 @@ internal fun SettingsPage(
                 onValueChangeFinished = {
                     val v = fontSizePreview
                     if (v != null) {
-                        scope.launch { ReaderSettings.save(context, prefs.copy(fontSize = v)) }
+                        scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontSize = v)) }
                         fontSizePreview = null
                     }
                 },
@@ -417,7 +417,7 @@ internal fun SettingsPage(
                 onValueChangeFinished = {
                     val v = lineHeightPreview
                     if (v != null) {
-                        scope.launch { ReaderSettings.save(context, prefs.copy(lineHeight = v)) }
+                        scope.launch { ReaderSettings.save(context, prefs, prefs.copy(lineHeight = v)) }
                         lineHeightPreview = null
                     }
                 },
@@ -432,7 +432,7 @@ internal fun SettingsPage(
                 onValueChangeFinished = {
                     val v = marginPreview
                     if (v != null) {
-                        scope.launch { ReaderSettings.save(context, prefs.copy(pageMargin = v)) }
+                        scope.launch { ReaderSettings.save(context, prefs, prefs.copy(pageMargin = v)) }
                         marginPreview = null
                     }
                 },
@@ -472,7 +472,7 @@ internal fun SettingsPage(
                         modelBusy = false
                         modelMessage = if (deleted) "已删除 ${info.id}" else "删除失败：模型可能正在使用"
                         if (deleted && prefs.kokoroModel == info.id) {
-                            ReaderSettings.save(context, prefs.copy(kokoroModel = ""))
+                            ReaderSettings.save(context, prefs, prefs.copy(kokoroModel = ""))
                         }
                     }
                 },
