@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -172,7 +171,8 @@ fun CloudSourceTabs(
     ) {
         providers.forEach { provider ->
             val progress = (selectedProgress[provider.id] ?: 0f).coerceIn(0f, 1f)
-            val backgroundColor = lerp(Color.Transparent, YuezhouColors.BrandContainer, progress)
+            // 只改变透明度，避免透明黑参与颜色插值导致滑动中途变灰。
+            val backgroundColor = YuezhouColors.BrandContainer.copy(alpha = progress)
             val textColor = lerp(YuezhouColors.TextSecondary, YuezhouColors.BrandDark, progress)
             val weight = (400 + (600 - 400) * progress).toInt().coerceIn(400, 600)
             Box(
