@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yuezhou.reader.core.cloud.BackendKind
 import com.yuezhou.reader.core.online.model.BookDownloadRequest
+import com.yuezhou.reader.core.online.model.BookFormatState
 import com.yuezhou.reader.core.online.model.OnlineBook
 import com.yuezhou.reader.core.online.model.OnlinePageMerger
 import com.yuezhou.reader.core.online.model.ProviderErrorCode
@@ -371,6 +372,9 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
     /** 从详情页发起下载：文件名唯一性检查与覆盖确认在管理器/导入协调器中完成。 */
     fun enqueueDownload(book: OnlineBook) {
         val id = selectedProviderId
+        // 详情页已按格式/标识状态禁用按钮，这里再兜底一次，避免任何调用路径误入下载。
+        if (book.formatState != BookFormatState.CONFIRMED) return
+        if (book.remoteId.split(":", limit = 2).let { it.size != 2 || it.any(String::isBlank) }) return
         val provider = registry.get(id)
         if (provider !is CatalogBookProvider || !provider.capabilities.contains(
                 com.yuezhou.reader.core.online.provider.ProviderCapability.DOWNLOAD,

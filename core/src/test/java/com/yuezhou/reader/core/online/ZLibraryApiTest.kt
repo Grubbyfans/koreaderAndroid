@@ -2,6 +2,7 @@ package com.yuezhou.reader.core.online
 
 import com.yuezhou.reader.core.online.api.ZLibraryApi
 import com.yuezhou.reader.core.online.config.ZLibraryConfig
+import com.yuezhou.reader.core.online.model.BookFormatState
 import com.yuezhou.reader.core.online.model.ProviderErrorCode
 import com.yuezhou.reader.core.online.model.ProviderException
 import com.yuezhou.reader.core.online.model.SearchQuery
@@ -179,5 +180,61 @@ class ZLibraryApiTest {
         val quota = api(body = body).getQuota(ZLibraryApi.AuthSession("remix_userid=1")).getOrThrow()
         assertEquals(3, quota.downloadsToday)
         assertEquals(10, quota.downloadsLimit)
+    }
+
+    @Test
+    fun `详情优先读取 extension 字段`() = runBlocking {
+        val body = """{"success":1,"book":{"id":"1","hash":"h","title":"书","extension":".EPUB"}}"""
+        val book = api(body = body).getBookDetail("1", "h").getOrThrow()
+        assertEquals("epub", book.format)
+        assertEquals(BookFormatState.CONFIRMED, book.formatState)
+        assertEquals("书.epub", book.fileName)
+        assertEquals("EPUB", book.formatLabel)
+    }
+
+    @Test
+    fun `format 与 extension 缺失时不伪造 EPUB`() = runBlocking {
+        val body = """{"success":1,"book":{"id":"1","hash":"h","title":"书"}}"""
+        val book = api(body = body).getBookDetail("1", "h").getOrThrow()
+        assertEquals("", book.format)
+        assertEquals(BookFormatState.MISSING, book.formatState)
+        assertEquals("书", book.fileName)
+        assertEquals("格式未知", book.formatLabel)
+    }
+
+    @Test
+    fun `format 与 extension 冲突时标记冲突`() = runBlocking {
+        val body = """{"success":1,"book":{"id":"1","hash":"h","title":"书","format":"epub","extension":"pdf"}}"""
+        val book = api(body = body).getBookDetail("1", "h").getOrThrow()
+        assertEquals("", book.format)
+        assertEquals(BookFormatState.CONFLICT, book.formatState)
+        assertEquals("格式冲突", book.formatLabel)
+    }
+
+    @Test
+    fun `非 EPUB 格式标记为暂不支持`() = runBlocking {
+        val body = """{"success":1,"book":{"id":"1","hash":"h","title":"书","format":"PDF"}}"""
+        val book = api(body = body).getBookDetail("1", "h").getOrThrow()
+        assertEquals("pdf", book.format)
+        assertEquals(BookFormatState.UNSUPPORTED, book.formatState)
+        assertEquals("书.pdf", book.fileName)
+        assertEquals("PDF · 暂不支持", book.formatLabel)
+    }
+
+    @Test
+    fun `HTTP 200 的业务失败仍按错误分类`() = runBlocking {
+        val searchError = api(body = """{"success":0,"error":"Access denied"}""")
+            .search(SearchQuery(keyword = "kotlin")).exceptionOrNull()
+        assertTrue(searchError is ProviderException)
+        assertEquals(ProviderErrorCode.SERVER_REJECTED, (searchError as ProviderException).code)
+
+        val quotaError = api(body = """{"success":0,"error":"daily download quota reached"}""")
+            .getQuota(ZLibraryApi.AuthSession("remix_userid=1")).exceptionOrNull()
+        assertTrue(quotaError is ProviderException)
+        assertEquals(ProviderErrorCode.QUOTA, (quotaError as ProviderException).code)
+
+        val detailError = api(body = """{"success":0,"message":"book not found"}""")
+            .getBookDetail("1", "h").exceptionOrNull()
+        assertTrue(detailError is ProviderException)
     }
 }

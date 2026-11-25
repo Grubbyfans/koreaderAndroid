@@ -111,22 +111,18 @@ class ZLibraryBookProvider(context: Context) : CatalogBookProvider {
             sort = order,
             pageSize = config.preferences.pageSize.coerceIn(1, 30),
         )
-        val result = api().search(effective, session)
-        result.getOrNull()?.let { return it }
-        val error = result.exceptionOrNull() ?: ProviderException(ProviderErrorCode.NETWORK, "搜索失败")
-        // 服务端拒绝搜索时（2026-11-23 起 Z-Library 的 400 Access denied），
-        // 按参考实现降级到仍可用的官方「最热门」列表，并在结果中提示。
-        if ((error as? ProviderException)?.code == ProviderErrorCode.SERVER_REJECTED) {
-            api().getMostPopular(effective.pageSize, session).getOrNull()?.let { return it }
-        }
-        throw asProviderException(error)
+        // 服务端拒绝搜索（如 400 Access denied）时按拒绝状态上抛，由界面提示改用网页搜索；
+        // 不再自动请求「最热门」列表充当搜索结果，也不自动切换服务器。
+        return api().search(effective, session).getOrElse { throw asProviderException(it) }
     }
 
     override suspend fun fetchCover(url: String): Result<ByteArray> = api().fetchCover(url)
 
     override suspend fun getBookDetail(remoteId: String): OnlineBook {
         val parts = remoteId.split(":", limit = 2)
-        if (parts.size != 2) throw ProviderException(ProviderErrorCode.INVALID_CONFIG, "远程标识格式无效")
+        if (parts.size != 2 || parts.any { it.isBlank() }) {
+            throw ProviderException(ProviderErrorCode.INVALID_CONFIG, "远程标识缺少 id:hash，暂不支持原生详情")
+        }
         val session = currentSession()
             ?: throw ProviderException(ProviderErrorCode.AUTH, "请先登录 Z-Library")
         return api().getBookDetail(parts[0], parts[1], session).getOrElse { throw asProviderException(it) }

@@ -1,6 +1,7 @@
 package com.yuezhou.reader.core.online.api
 
 import com.yuezhou.reader.core.online.config.ZLibraryConfig
+import com.yuezhou.reader.core.online.model.BookFormatState
 import com.yuezhou.reader.core.online.model.BookPage
 import com.yuezhou.reader.core.online.model.OnlineBook
 import com.yuezhou.reader.core.online.model.ProviderErrorCode
@@ -87,6 +88,7 @@ class ZLibraryApi(
             val page = query.cursor?.toIntOrNull() ?: 1
             val response = execute(buildSearchRequest(query, page), session)
             val element = parseJson(response)
+            requireBusinessSuccess(response, element)
             val books = findBooks(element)
             BookPage(
                 items = books.map { it.toOnlineBook() },
@@ -111,6 +113,7 @@ class ZLibraryApi(
             val url = baseUrl + config.endpoints.mostPopular.path + "?page=1&limit=$limit"
             val response = execute(Request.Builder().url(url).get().build(), session)
             val element = parseJson(response)
+            requireBusinessSuccess(response, element)
             val books = findBooks(element)
             BookPage(
                 items = books.map { it.toOnlineBook() },
@@ -130,6 +133,7 @@ class ZLibraryApi(
                     .replace("{id}", id).replace("{hash}", hash)
                 val response = execute(buildGetRequest(path), session)
                 val element = parseJson(response)
+                requireBusinessSuccess(response, element)
                 findBookObject(element)?.toOnlineBook()
                     ?: throw ProviderException(ProviderErrorCode.NOT_FOUND, "未找到书籍详情")
             }
@@ -142,6 +146,7 @@ class ZLibraryApi(
                     .replace("{id}", id).replace("{hash}", hash)
                 val response = execute(buildGetRequest(path), session)
                 val element = parseJson(response)
+                requireBusinessSuccess(response, element)
                 val link = findString(element, "downloadLink")
                     ?: throw ProviderException(ProviderErrorCode.NOT_FOUND, "服务端未返回下载链接")
                 val url = runCatching { URL(link) }.getOrNull()
@@ -271,6 +276,8 @@ class ZLibraryApi(
         runCatching {
             val response = execute(buildGetRequest(config.endpoints.profile.path), session)
             val element = parseJson(response)
+            // 额度查询失败时保留 null，由界面显示“未知”，不以其它数字兜底。
+            requireBusinessSuccess(response, element)
             Quota(
                 downloadsToday = findInt(element, "downloads_today"),
                 downloadsLimit = findInt(element, "downloads_limit"),
@@ -392,6 +399,32 @@ class ZLibraryApi(
         else -> null
     }
 
+    /**
+     * HTTP 200 不代表业务成功：服务端会用 `{"success":0,"error":"..."}` 表达拒绝/额度等问题。
+     * 仅在服务端显式给出失败标记时抛错，缺省 success 字段的端点保持原行为。
+     */
+    private fun requireBusinessSuccess(response: Response, element: JsonObject) {
+        if (successFlag(element) != false) return
+        val message = textField(element, "message") ?: textField(element, "error") ?: "服务端未返回成功状态"
+        throw classify(response.code, message)
+    }
+
+    /** 当前阅读器只入库 EPUB；其余格式只展示，不进入原生下载。 */
+    private fun resolveFormat(element: JsonObject): Pair<String, BookFormatState> {
+        // 第三阶段实测：详情字段为 extension，部分端点为 format；两者都取并规范化。
+        val candidates = listOf("extension", "format")
+            .mapNotNull { textField(element, it) }
+            .map { it.trim().lowercase().removePrefix(".").substringBefore('?').substringBefore('/') }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        return when {
+            candidates.isEmpty() -> "" to BookFormatState.MISSING
+            candidates.size > 1 -> "" to BookFormatState.CONFLICT
+            candidates.first() == "epub" -> candidates.first() to BookFormatState.CONFIRMED
+            else -> candidates.first() to BookFormatState.UNSUPPORTED
+        }
+    }
+
     private fun isRateLimited(message: String): Boolean =
         message.contains("rate", true) || message.contains("频繁", true) || message.contains("too many", true)
 
@@ -419,7 +452,7 @@ class ZLibraryApi(
         val id = textField(this, "id").orEmpty()
         val hash = textField(this, "hash").orEmpty()
         val title = textField(this, "title").orElse("未命名书籍")
-        val format = (textField(this, "format") ?: "epub").lowercase()
+        val (format, formatState) = resolveFormat(this)
         val authorText = textField(this, "author").orEmpty()
         val authors = (this["author"] as? JsonArray)
             ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
@@ -434,8 +467,9 @@ class ZLibraryApi(
             providerId = ZLibraryConfig.PROVIDER_ID,
             remoteId = listOf(id, hash).filter { it.isNotEmpty() }.joinToString(":"),
             title = title,
-            fileName = sanitizeFileName(title) + "." + format,
+            fileName = if (format.isEmpty()) sanitizeFileName(title) else sanitizeFileName(title) + "." + format,
             format = format,
+            formatState = formatState,
             authors = authors,
             coverUrl = cover,
             description = textField(this, "description"),

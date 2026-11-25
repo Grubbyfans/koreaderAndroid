@@ -46,11 +46,12 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.YuezhouColors
+import com.yuezhou.reader.core.online.model.BookFormatState
 import com.yuezhou.reader.core.online.model.OnlineBook
 
 /**
- * 检索型书源详情（阶段 D）：展示搜索结果已有字段，并异步补全服务端详情。
- * 下载按钮在阶段 E 接入下载管理器前保持禁用，避免产生无法落盘或消耗的额度操作。
+ * 检索型书源详情：展示搜索结果已有字段，并异步补全服务端详情。
+ * 只有格式确认且具备 id:hash 的书籍才允许原生下载，其余状态明确提示并禁用按钮。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +62,13 @@ fun BookDetailScreen(
     onBack: () -> Unit,
 ) {
     var descriptionExpanded by remember(book.remoteId) { mutableStateOf(false) }
+    val downloadBlockedReason = when {
+        book.formatState != BookFormatState.CONFIRMED ->
+            "格式未确认（${book.formatLabel}），暂不支持原生下载"
+        book.remoteId.split(":", limit = 2).let { it.size != 2 || it.any(String::isBlank) } ->
+            "缺少服务端 id:hash 标识，暂不支持原生下载，可使用网页搜索"
+        else -> null
+    }
     val context = LocalContext.current
     val requestNotificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -141,7 +149,7 @@ fun BookDetailScreen(
                     Spacer(Modifier.height(6.dp))
                     Text(
                         buildString {
-                            append(book.format.uppercase())
+                            append(book.formatLabel)
                             book.fileSize?.let { append(" · ${formatDetailSize(it)}") }
                             book.language?.let { append(" · $it") }
                         },
@@ -209,6 +217,15 @@ fun BookDetailScreen(
                 )
             }
 
+            downloadBlockedReason?.let { reason ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFC0392B),
+                )
+            }
+
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = {
@@ -221,6 +238,7 @@ fun BookDetailScreen(
                     vm.enqueueDownload(book)
                     vm.closeDetail()
                 },
+                enabled = downloadBlockedReason == null,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("下载书籍")

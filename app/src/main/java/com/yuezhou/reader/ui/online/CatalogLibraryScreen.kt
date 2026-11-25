@@ -304,7 +304,7 @@ private fun GridBookCard(book: OnlineBook, vm: OnlineLibraryViewModel, downloade
         )
         Text(
             buildString {
-                append(book.format.uppercase())
+                append(book.formatLabel)
                 book.fileSize?.let { append(" · ${formatSize(it)}") }
                 book.language?.let { append(" · $it") }
             },
@@ -347,7 +347,7 @@ private fun ListBookCard(book: OnlineBook, vm: OnlineLibraryViewModel, downloade
             )
             Text(
                 buildString {
-                    append(book.format.uppercase())
+                    append(book.formatLabel)
                     book.publishYear?.let { append(" · $it") }
                     book.fileSize?.let { append(" · ${formatSize(it)}") }
                 },
