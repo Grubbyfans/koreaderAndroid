@@ -1,0 +1,14 @@
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryViewModel.kt
+  h_7f20b2a03eb3b6 594-595,598-602,606,608
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2731117e2369c7dc92e4d722a573251f21b69d4e",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
