@@ -47,6 +47,7 @@ fun OnlineLibraryScreen(
     onRefresh: () -> Unit,
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
     onOpenSettings: () -> Unit,
+    interactionsEnabled: Boolean = true,
 ) {
     val providers = vm.registry.enabled()
     val state = providerId?.let { vm.stateOf(it) }
@@ -70,6 +71,7 @@ fun OnlineLibraryScreen(
                     state = state,
                     providerId = providerId,
                     onOpenSettings = onOpenSettings,
+                    interactionsEnabled = interactionsEnabled,
                 )
             } else {
                 PullToRefreshBox(
@@ -96,12 +98,14 @@ fun OnlineLibraryScreen(
         // 详情页覆盖在整页之上，而不是追加在内容列之后（否则会被 fillMaxSize 内容挤出可视区）。
         if (providerId != null && state != null) {
             state.detail?.let { detail ->
-                BackHandler(enabled = true) { vm.closeDetail(providerId) }
+                // 页面切换期间不接管返回键，避免滑出中的页面拦截手势返回。
+                BackHandler(enabled = interactionsEnabled) { vm.closeDetail(providerId) }
                 BookDetailScreen(
                     book = detail,
                     state = state,
                     vm = vm,
                     providerId = providerId,
+                    interactionsEnabled = interactionsEnabled,
                     onBack = { vm.closeDetail(providerId) },
                 )
             }

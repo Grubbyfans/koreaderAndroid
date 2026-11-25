@@ -61,6 +61,7 @@ fun BookDetailScreen(
     vm: OnlineLibraryViewModel,
     providerId: String,
     onBack: () -> Unit,
+    interactionsEnabled: Boolean = true,
 ) {
     var descriptionExpanded by remember(book.remoteId) { mutableStateOf(false) }
     val downloadBlockedReason = when {
@@ -208,6 +209,7 @@ fun BookDetailScreen(
                 }
                 Switch(
                     checked = state.autoImport,
+                    enabled = interactionsEnabled,
                     onCheckedChange = { vm.setAutoImport(it, providerId) },
                 )
             }
@@ -242,7 +244,7 @@ fun BookDetailScreen(
                     vm.enqueueDownload(book, providerId)
                     vm.closeDetail(providerId)
                 },
-                enabled = downloadBlockedReason == null,
+                enabled = downloadBlockedReason == null && interactionsEnabled,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("下载书籍")

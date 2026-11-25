@@ -111,6 +111,7 @@ fun CatalogLibraryScreen(
     state: ProviderUiState,
     providerId: String,
     onOpenSettings: () -> Unit,
+    interactionsEnabled: Boolean = true,
 ) {
     val downloadedIds by vm.downloadManager.activeRemoteIds.collectAsStateWithLifecycle(initialValue = emptySet())
     val context = LocalContext.current
@@ -129,8 +130,9 @@ fun CatalogLibraryScreen(
     var filterSheetOpen by remember { mutableStateOf(false) }
 
     // 返回层级：详情 > 筛选弹窗 > 清空当前检索 > 回到「书库」页（由外层处理）。
+    // 页面切换期间不接管返回键，避免滑出中的页面误清检索或拦截返回。
     BackHandler(
-        enabled = !filterSheetOpen && state.detail == null &&
+        enabled = interactionsEnabled && !filterSheetOpen && state.detail == null &&
             (state.searched || state.keyword.isNotBlank() || state.searchError != null),
     ) {
         keyboardController?.hide()
@@ -270,6 +272,7 @@ fun CatalogLibraryScreen(
                     providerId = providerId,
                     gridState = gridState,
                     downloadedIds = downloadedIds,
+                    interactionsEnabled = interactionsEnabled,
                     onRetry = { vm.retrySubmittedSearch(providerId) },
                     onWebSearch = ::openWebSearch,
                 )
@@ -459,6 +462,7 @@ private fun CatalogResults(
     providerId: String,
     gridState: LazyGridState,
     downloadedIds: Set<String>,
+    interactionsEnabled: Boolean,
     onRetry: () -> Unit,
     onWebSearch: () -> Unit,
 ) {
@@ -483,8 +487,11 @@ private fun CatalogResults(
             }
         }
         items(state.items, key = { it.remoteId }) { book ->
-            if (state.gridMode) GridBookCard(book, vm, providerId, book.remoteId in downloadedIds)
-            else ListBookCard(book, vm, providerId, book.remoteId in downloadedIds)
+            if (state.gridMode) {
+                GridBookCard(book, vm, providerId, book.remoteId in downloadedIds, interactionsEnabled)
+            } else {
+                ListBookCard(book, vm, providerId, book.remoteId in downloadedIds, interactionsEnabled)
+            }
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
             when {
@@ -581,11 +588,12 @@ private fun GridBookCard(
     vm: OnlineLibraryViewModel,
     providerId: String,
     downloaded: Boolean,
+    interactionsEnabled: Boolean,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { vm.openDetail(book, providerId) },
+            .clickable(enabled = interactionsEnabled) { vm.openDetail(book, providerId) },
     ) {
         RemoteCover(book.coverUrl, book.title, vm, providerId, Modifier.fillMaxWidth().aspectRatio(0.75f))
         Spacer(Modifier.height(6.dp))
@@ -629,11 +637,12 @@ private fun ListBookCard(
     vm: OnlineLibraryViewModel,
     providerId: String,
     downloaded: Boolean,
+    interactionsEnabled: Boolean,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { vm.openDetail(book, providerId) }
+            .clickable(enabled = interactionsEnabled) { vm.openDetail(book, providerId) }
             .padding(vertical = 4.dp),
     ) {
         RemoteCover(book.coverUrl, book.title, vm, providerId, Modifier.width(72.dp).height(102.dp))

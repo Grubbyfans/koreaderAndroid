@@ -5,10 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * 唯一的已提交导航状态（阶段 A 不接入 Pager）。
+ * 导航状态：区分「导航请求」与「已提交页面」。
  *
- * - `committedKey` 只允许通过 [navigateTo] / [syncPages] 修改，所有导航入口统一走这里。
- * - 页面内容与业务请求以 committed 书源为准，避免点击瞬间就切换业务数据源。
+ * - [requestedKey] 只表示用户意图（点击一级/二级导航、返回键），由 Pager 去执行滚动。
+ * - [committedKey] 只有在 Pager 真正落页后才写入，业务加载与顶栏/底栏都只认它。
+ * - 页面内容以各自页面的 providerId 为准，动画期间相邻页可安全同时组合。
  * - 页面列表动态变化时按稳定 key 重定位；无效 key 有明确回退链。
  */
 class ShelfNavigator(
@@ -19,13 +20,22 @@ class ShelfNavigator(
     var pages: List<ShelfPage> by mutableStateOf(ShelfPage.build(providerIds))
         private set
 
-    /** 唯一已提交的页面 key。 */
+    /** 唯一已提交的页面 key（落页后写入）。 */
     var committedKey: String by mutableStateOf(initialKey)
+        private set
+
+    /** 当前导航请求 key；与 committedKey 不同表示 Pager 正在或即将滚动。 */
+    var requestedKey: String by mutableStateOf(initialKey)
         private set
 
     init {
         committedKey = resolve(pages, initialKey)
+        requestedKey = committedKey
     }
+
+    /** 程序化导航是否尚未落页。手势拖动请配合 PagerState.isScrollInProgress 判断。 */
+    val isNavigating: Boolean
+        get() = requestedKey != committedKey
 
     /** 一级栏目由 committed key 派生，不再单独维护 currentTab。 */
     val tab: Tab
@@ -43,26 +53,45 @@ class ShelfNavigator(
             else -> null
         }
 
+    /** 稳定 key 在扁平页面列表中的下标；不存在返回 -1。 */
+    fun indexOf(key: String): Int = pages.indexOfFirst { it.key == key }
+
     /**
-     * 书源增删/排序后同步页面列表，并按稳定 key 重定位当前页。
+     * 书源增删/排序后同步页面列表，并按稳定 key 重定位。
      *
      * 回退链：保留原 key → 首个可用书源 → 云端空态 → 首个页面。
+     * 若待执行的目标页在本次变化中失效，则取消该次导航（请求退回已提交页）。
      */
     fun syncPages(providerIds: List<String>) {
         pages = ShelfPage.build(providerIds)
         committedKey = resolve(pages, committedKey)
+        requestedKey = if (pages.any { it.key == requestedKey }) requestedKey else committedKey
     }
 
     /**
-     * 统一导航入口：合法 key 直接提交；未知的云端 key 按回退链落到可用书源。
+     * 导航请求入口：只记录目标，不切换业务页。
      *
-     * 其它无法识别的 key 保持当前页，避免一次错误跳转把用户带回书库。
+     * 合法的 key 直接作为目标；未知的云端 key 按回退链落到可用书源；
+     * 其它无法识别的 key 保持当前导航，避免一次错误跳转把用户带回书库。
      */
     fun navigateTo(key: String) {
-        when {
-            pages.any { it.key == key } -> committedKey = key
-            key.startsWith(CLOUD_PREFIX) -> committedKey = resolve(pages, key)
+        val target = when {
+            pages.any { it.key == key } -> key
+            key.startsWith(CLOUD_PREFIX) -> resolve(pages, key)
+            else -> return
         }
+        requestedKey = target
+    }
+
+    /** Pager 落页后提交业务页面；无效 key 忽略，避免页面列表变化瞬间写坏状态。 */
+    fun commit(key: String) {
+        if (pages.none { it.key == key }) return
+        committedKey = key
+    }
+
+    /** 程序化滚动结束（含被手势取消）后清理该次请求，避免 isNavigating 残留。 */
+    fun clearRequest(key: String) {
+        if (requestedKey == key && committedKey != key) requestedKey = committedKey
     }
 
     /** 点击「云端」时恢复上次访问的有效书源；不存在则回退首个可用书源/空态。 */
