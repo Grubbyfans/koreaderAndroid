@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -24,27 +26,44 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -81,6 +100,7 @@ private val LANGUAGE_OPTIONS = listOf(
  * Z-Library 检索页（阶段 D）：搜索、语言/格式/排序、分页、列表/网格、详情入口与封面。
  * 状态全部由 ViewModel 按书源保存，切 Tab 或进入详情再返回时恢复输入、筛选与滚动位置。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogLibraryScreen(
     vm: OnlineLibraryViewModel,
@@ -89,88 +109,66 @@ fun CatalogLibraryScreen(
 ) {
     val downloadedIds by vm.downloadManager.activeRemoteIds.collectAsStateWithLifecycle(initialValue = emptySet())
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = state.scrollIndex)
     LaunchedEffect(gridState.firstVisibleItemIndex) { vm.saveScroll(gridState.firstVisibleItemIndex) }
     LaunchedEffect(state.submittedKeyword) {
         if (state.submittedKeyword.isNotEmpty()) gridState.scrollToItem(0)
     }
-    LaunchedEffect(Unit) { vm.loadQuota() }
+    var filterSheetOpen by remember { mutableStateOf(false) }
+
+    fun openWebSearch() {
+        if (!ZLibraryWebEntry.launch(context, vm.webBaseUrl(), state.keyword)) {
+            Toast.makeText(context, "请先配置可用的 Z-Library 服务器", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
+            CompactSearchField(
                 value = state.keyword,
                 onValueChange = vm::setKeyword,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                label = { Text("书名 / 作者 / ISBN") },
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = { vm.search() }, enabled = !state.loading) { Text("搜索") }
-            // 原生搜索被拒绝时仍可完整使用网页搜索；网页、筛选、分页与登录都由站点自身完成。
-            TextButton(
-                onClick = {
-                    if (!ZLibraryWebEntry.launch(context, vm.webBaseUrl(), state.keyword)) {
-                        Toast.makeText(context, "请先配置可用的 Z-Library 服务器", Toast.LENGTH_SHORT).show()
-                    }
+                enabled = !state.loading,
+                onSearch = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    vm.search()
                 },
-            ) { Text("网页搜索") }
+                modifier = Modifier.weight(1f),
+            )
+            // 原生搜索不可用时，网页搜索仍完整可用；登录与筛选由站点自身负责。
+            TextButton(
+                onClick = ::openWebSearch,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) { Text("网页") }
         }
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            LANGUAGE_OPTIONS.forEach { option ->
-                FilterChip(
-                    selected = state.language == option.value,
-                    onClick = { vm.setLanguage(option.value, option.label) },
-                    label = { Text(option.label) },
-                    modifier = Modifier.padding(end = 6.dp),
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SORT_OPTIONS.forEach { option ->
-                FilterChip(
-                    selected = state.sort == option.value,
-                    onClick = { vm.setSort(option.value) },
-                    label = { Text(option.label) },
-                    modifier = Modifier.padding(end = 6.dp),
-                )
-            }
             Text(
-                "格式：EPUB",
+                text = "${state.languageLabel} · ${sortLabel(state.sort)} · EPUB",
                 style = MaterialTheme.typography.bodySmall,
                 color = YuezhouColors.TextSecondary,
-                modifier = Modifier.padding(end = 8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { filterSheetOpen = true }
+                    .padding(vertical = 8.dp),
             )
-            TextButton(onClick = { vm.setGridMode(!state.gridMode) }) {
-                Text(if (state.gridMode) "列表" else "网格")
-            }
+            TextButton(
+                onClick = { vm.setGridMode(!state.gridMode) },
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) { Text(if (state.gridMode) "列表" else "网格") }
         }
-
-        Text(
-            text = state.quotaText ?: "正在读取登录状态…",
-            style = MaterialTheme.typography.bodySmall,
-            color = YuezhouColors.TextSecondary,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-        )
 
         state.searchError?.let { message ->
             Text(
@@ -212,7 +210,9 @@ fun CatalogLibraryScreen(
                         color = YuezhouColors.TextSecondary,
                         textAlign = TextAlign.Center,
                     )
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(onClick = ::openWebSearch) { Text("网页搜索") }
+                    Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = onOpenSettings) { Text("配置 Z-Library 服务器") }
                 }
             }
@@ -228,12 +228,188 @@ fun CatalogLibraryScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = YuezhouColors.TextSecondary,
                     )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = ::openWebSearch) { Text("网页搜索") }
                 }
             }
             else -> CatalogResults(vm, state, gridState, downloadedIds)
         }
     }
+
+    if (filterSheetOpen) {
+        ZLibraryFilterSheet(
+            language = state.language,
+            sort = state.sort,
+            onDismiss = { filterSheetOpen = false },
+            onApply = { language, label, sort ->
+                filterSheetOpen = false
+                vm.applyFilters(language, label, sort)
+            },
+        )
+    }
 }
+
+/** 紧凑搜索框：40dp 高，支持键盘搜索键，避免常规 TextField 的 56dp 最小高度。 */
+@Composable
+private fun CompactSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    enabled: Boolean,
+    onSearch: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    Surface(
+        modifier = modifier.height(40.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = YuezhouColors.Surface,
+        border = BorderStroke(1.dp, YuezhouColors.Divider),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 4.dp),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = YuezhouColors.TextPrimary),
+                    cursorBrush = SolidColor(YuezhouColors.Brand),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                            onSearch()
+                        },
+                    ),
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (value.isEmpty()) {
+                                Text(
+                                    "书名 / 作者 / ISBN",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = YuezhouColors.TextSecondary,
+                                    maxLines = 1,
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+            }
+            if (value.isNotEmpty()) {
+                IconButton(
+                    onClick = { onValueChange("") },
+                    modifier = Modifier.size(32.dp),
+                ) { Icon(Icons.Filled.Close, contentDescription = "清空", modifier = Modifier.size(16.dp)) }
+            }
+            IconButton(
+                onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    onSearch()
+                },
+                enabled = enabled,
+                modifier = Modifier.size(40.dp),
+            ) { Icon(Icons.Filled.Search, contentDescription = "搜索", modifier = Modifier.size(20.dp)) }
+        }
+    }
+}
+
+/** 语言、排序统一在弹窗内编辑，点「应用」后只提交一次。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ZLibraryFilterSheet(
+    language: String?,
+    sort: String,
+    onDismiss: () -> Unit,
+    onApply: (String?, String, String) -> Unit,
+) {
+    var draftLanguage by remember(language) { mutableStateOf(language) }
+    var draftSort by remember(sort) { mutableStateOf(sort) }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+        ) {
+            Text("筛选条件", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(16.dp))
+            Text("语言", style = MaterialTheme.typography.labelMedium, color = YuezhouColors.TextSecondary)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(vertical = 6.dp),
+            ) {
+                LANGUAGE_OPTIONS.forEach { option ->
+                    FilterChip(
+                        selected = draftLanguage == option.value,
+                        onClick = { draftLanguage = option.value },
+                        label = { Text(option.label) },
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                }
+            }
+            Text(
+                "排序",
+                style = MaterialTheme.typography.labelMedium,
+                color = YuezhouColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(vertical = 6.dp),
+            ) {
+                SORT_OPTIONS.forEach { option ->
+                    FilterChip(
+                        selected = draftSort == option.value,
+                        onClick = { draftSort = option.value },
+                        label = { Text(option.label) },
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                }
+            }
+            Text(
+                "格式：EPUB（固定）",
+                style = MaterialTheme.typography.bodySmall,
+                color = YuezhouColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Spacer(Modifier.height(20.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = {
+                        draftLanguage = null
+                        draftSort = "bestmatch"
+                    },
+                ) { Text("重置") }
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = {
+                        onApply(
+                            draftLanguage,
+                            LANGUAGE_OPTIONS.firstOrNull { it.value == draftLanguage }?.label ?: "全部语言",
+                            draftSort,
+                        )
+                    },
+                ) { Text("应用") }
+            }
+        }
+    }
+}
+
+private fun sortLabel(value: String): String =
+    SORT_OPTIONS.firstOrNull { it.value == value }?.label ?: SORT_OPTIONS.first().label
 
 @Composable
 private fun CatalogResults(

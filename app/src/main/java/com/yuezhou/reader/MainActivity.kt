@@ -502,7 +502,12 @@ private fun BookshelfScreen() {
                         }
                         if (currentTab == Tab.云端) {
                             Box {
-                                IconButton(onClick = { cloudMenuOpen = true }) {
+                                IconButton(
+                                    onClick = {
+                                        cloudMenuOpen = true
+                                        if (onlineVm.isCatalogSelected) onlineVm.loadQuota()
+                                    },
+                                ) {
                                     Icon(Icons.Filled.MoreVert, contentDescription = "更多")
                                 }
                                 DropdownMenu(
@@ -511,6 +516,30 @@ private fun BookshelfScreen() {
                                 ) {
                                     val catalog = onlineVm.isCatalogSelected
                                     val submitted = onlineVm.selectedState.submittedKeyword
+                                    if (catalog) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text("Z-Library 账户")
+                                                    Text(
+                                                        onlineVm.selectedState.quotaText ?: "正在读取登录状态…",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = YuezhouColors.TextSecondary,
+                                                    )
+                                                }
+                                            },
+                                            enabled = false,
+                                            onClick = {},
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("账户管理") },
+                                            onClick = {
+                                                cloudMenuOpen = false
+                                                currentTab = Tab.设置
+                                                showZLibrarySettings = true
+                                            },
+                                        )
+                                    }
                                     DropdownMenuItem(
                                         text = { Text("刷新云端书库") },
                                         // 检索书源必须已有提交词才可刷新，避免用输入框草稿触发请求。

@@ -223,14 +223,14 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         states[id] = stateOf(id).copy(keyword = value)
     }
 
-    fun setLanguage(value: String?, label: String) {
+    fun applyFilters(language: String?, languageLabel: String, sort: String) {
         val id = selectedProviderId
-        states[id] = stateOf(id).copy(language = value, languageLabel = label)
-    }
-
-    fun setSort(value: String) {
-        val id = selectedProviderId
-        states[id] = stateOf(id).copy(sort = value)
+        val current = stateOf(id)
+        states[id] = current.copy(language = language, languageLabel = languageLabel, sort = sort)
+        // 已提交过关键词时，筛选变更统一触发一次新搜索；否则只更新条件，不发请求。
+        if (current.searched && current.submittedKeyword.isNotBlank()) {
+            startSearch(id, current.submittedKeyword)
+        }
     }
 
     fun setGridMode(value: Boolean) {
@@ -257,6 +257,18 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             states[id] = stateOf(id).copy(searchError = "请输入书名、作者或 ISBN")
             return
         }
+        startSearch(id, keyword)
+    }
+
+    /** 提示条里的「重新搜索」只重试已提交关键词，不读取输入框中尚未提交的内容。 */
+    fun retrySubmittedSearch() {
+        val id = selectedProviderId
+        val keyword = stateOf(id).submittedKeyword.trim()
+        if (keyword.isEmpty()) return
+        startSearch(id, keyword)
+    }
+
+    private fun startSearch(id: String, keyword: String) {
         jobs[id]?.cancel()
         val seq = nextRequestSeq(id)
         states[id] = stateOf(id).copy(
