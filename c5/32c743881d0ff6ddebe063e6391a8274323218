@@ -1,0 +1,19 @@
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  s_a8d6daa44fef52::t_9b837f5683ce02 195-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c532c743881d0ff6ddebe063e6391a8274323218",
+  "prompts": {},
+  "sessions": {
+    "s_a8d6daa44fef52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2170a-287d-7020-a964-0f0b80293428",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
