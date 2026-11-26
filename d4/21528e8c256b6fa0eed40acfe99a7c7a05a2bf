@@ -1,0 +1,27 @@
+reader/src/main/java/com/yuezhou/reader/reader/animation/PageTurnVisual.kt
+  s_a8d6daa44fef52::t_f8f5bc1fa7cb93 7,10,12,17-29
+  s_a8d6daa44fef52::t_118a28bc7caa76 14,30
+app/src/main/java/com/yuezhou/reader/animation/ReaderAnimationController.kt
+  s_a8d6daa44fef52::t_8e90dfd3d2b0c0 158-167,169-172
+  s_a8d6daa44fef52::t_f8f5bc1fa7cb93 49-50,111-113,146,178,310-314
+  s_a8d6daa44fef52::t_b8bca08f084ec7 8,10-12,150-157
+reader/src/test/java/com/yuezhou/reader/reader/animation/PageTurnVisualTest.kt
+  s_a8d6daa44fef52::t_7cb69f82867200 55
+  s_a8d6daa44fef52::t_24f5c6beb5650a 15-24,28,36,46-49,59,61-62,66,71,81-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d421528e8c256b6fa0eed40acfe99a7c7a05a2bf",
+  "prompts": {},
+  "sessions": {
+    "s_a8d6daa44fef52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2170a-287d-7020-a964-0f0b80293428",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
