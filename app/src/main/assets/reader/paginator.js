@@ -881,6 +881,8 @@ export class Paginator extends HTMLElement {
     #onTouchMove(e) {
         const state = this.#touchState
         if (!state || state.pinched) return
+        // Native animation owns paginated drags, including preview warm-up and busy frames.
+        if (!this.scrolled && this.hasAttribute('native-page-turn')) return
         state.pinched = globalThis.visualViewport.scale > 1 || e.touches.length > 1
         if (state.pinched) {
             if (this.#touchScrolled) e.preventDefault()

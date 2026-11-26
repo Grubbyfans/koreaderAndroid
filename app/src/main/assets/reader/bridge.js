@@ -317,13 +317,15 @@ function setFlow(vertical) {
 }
 
 // 根据翻页动画设置开启/关闭动画：给 foliate-paginator 加 animated 属性。
-// none=瞬时翻页；slide=平滑滑动。
+// 只有 slide 使用底层滑动；fade/ios_curl 的触摸与动画由 Android 接管。
 function applyPageAnimation() {
     const renderer = view.renderer
     if (!renderer) return
     const mode = currentSettings.pageAnimation || 'slide'
-    if (mode === 'none') renderer.removeAttribute('animated')
-    else renderer.setAttribute('animated', 'slide')
+    if (mode === 'slide') renderer.setAttribute('animated', 'slide')
+    else renderer.removeAttribute('animated')
+    if (mode === 'fade' || mode === 'ios_curl') renderer.setAttribute('native-page-turn', '')
+    else renderer.removeAttribute('native-page-turn')
 }
 
 async function applyFlow(vertical) {

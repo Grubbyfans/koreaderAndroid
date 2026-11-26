@@ -18,6 +18,7 @@ class PreviewPageProvider(
     private val scope: CoroutineScope,
     private val configure: (ReaderWebView) -> Unit,
     private val onFailure: (Throwable) -> Unit,
+    private val onPrepared: () -> Unit = {},
 ) : AutoCloseable {
     data class Pair(val origin: PageSnapshotKey, val target: PageSnapshotKey)
     private val pool = PageSnapshotPool()
@@ -30,6 +31,8 @@ class PreviewPageProvider(
     private var opened: CompletableDeferred<Unit>? = null
     private var current: PageSnapshotKey? = null
     private val adjacent = mutableMapOf<Int, PageSnapshotKey>()
+    var isPreparing = false
+        private set
 
     fun open(fileName: String, uri: Uri?) {
         close()
@@ -54,6 +57,7 @@ class PreviewPageProvider(
     /** Cancels queued preparation before discarding snapshots borrowed by an idle animation layer. */
     fun invalidateLayout() {
         generation++
+        isPreparing = false
         preparation?.cancel(); preparation = null
         revision++
         current = null; adjacent.clear(); pool.close()
@@ -66,6 +70,7 @@ class PreviewPageProvider(
         val stamp = ++generation
         preparation?.cancel()
         current = null; adjacent.clear()
+        isPreparing = true
         preparation = scope.launch {
             try {
                 withTimeout(10000) {
@@ -106,6 +111,11 @@ class PreviewPageProvider(
                 if (stamp == generation) { current = null; adjacent.clear(); pool.close(); onFailure(error) }
             } catch (error: Exception) {
                 if (stamp == generation) onFailure(error)
+            } finally {
+                if (stamp == generation) {
+                    isPreparing = false
+                    onPrepared()
+                }
             }
         }
     }
@@ -123,6 +133,7 @@ class PreviewPageProvider(
 
     override fun close() {
         generation++
+        isPreparing = false
         preparation?.cancel(); preparation = null
         opened?.cancel(); opened = null
         inspector?.close(); inspector = null

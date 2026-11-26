@@ -26,7 +26,7 @@ internal class ReaderAnimationController(
     private val reportError: (Throwable) -> Unit,
 ) : AutoCloseable {
     private val overlay = PageTurnOverlay(parent.context)
-    private val pages = PreviewPageProvider(parent, primary, scope, configurePreview, reportError)
+    private val pages = PreviewPageProvider(parent, primary, scope, configurePreview, reportError, ::drainPendingTurn)
     private val transaction = PageTurnTransaction()
     private val curl = IosCurlTurn()
     private var bookSource: Pair<String, android.net.Uri?>? = null
@@ -44,6 +44,9 @@ internal class ReaderAnimationController(
     private var downX = 0f
     private var downY = 0f
     private var skipGesture = false
+    private var swallowGesture = false
+    private var deferredDragDirection: Int? = null
+    private var pendingTurn: Int? = null
     private var location: String? = null
     var mode: String = "slide"
         private set
@@ -83,23 +86,39 @@ internal class ReaderAnimationController(
         location = cfi
         // A committing turn holds its final frame until the primary WebView is visually ready.
         if (transaction.phase != PageTurnTransaction.Phase.COMMITTING) {
-            cancel()
+            cancel(clearPending = false)
             pages.prepare(cfi)
         }
     }
 
-    /** Returns false immediately when the caller should use ordinary reader navigation. */
+    /** Native modes own navigation even while snapshots are still being prepared. */
     fun tap(direction: Int): Boolean {
-        if (!renderAvailable || (mode != "fade" && mode != "ios_curl")) return false
-        if (transaction.phase != PageTurnTransaction.Phase.IDLE) return true
-        val cfi = location ?: return false
-        val pair = pages.ready(cfi, direction) ?: return false
-        val first = pages.bitmap(pair.origin) ?: return false
-        val second = pages.bitmap(pair.target) ?: return false
-        val token = transaction.begin(pair.origin, pair.target, direction) ?: return false
+        if (mode != "fade" && mode != "ios_curl") return false
+        if (!renderAvailable) {
+            // The bridge disables slide for native modes, so a renderer failure falls back instantly.
+            return false
+        }
+        pendingTurn = direction // Coalesce rapid input into at most one additional turn.
+        drainPendingTurn()
+        return true
+    }
+
+    private fun drainPendingTurn() {
+        if (transaction.phase != PageTurnTransaction.Phase.IDLE) return
+        val direction = pendingTurn ?: return
+        val cfi = location ?: return
+        val pair = pages.ready(cfi, direction)
+        if (pair == null) {
+            // A completed preparation with no neighbor is a book boundary or preparation failure.
+            if (!pages.isPreparing) pendingTurn = null
+            return
+        }
+        val first = pages.bitmap(pair.origin) ?: return
+        val second = pages.bitmap(pair.target) ?: return
+        val token = transaction.begin(pair.origin, pair.target, direction) ?: return
+        pendingTurn = null
         overlay.prepare(first, second, background)
         animate(token, cfi, direction, commit = true, manual = false)
-        return true
     }
 
     private fun animate(token: PageTurnTransaction.Token, cfi: String, direction: Int, commit: Boolean,
@@ -127,6 +146,7 @@ internal class ReaderAnimationController(
                 }
                 if (!commit) {
                     transaction.finish(token); overlay.clear(); curl.reset()
+                    drainPendingTurn()
                     return@launch
                 }
                 if (!transaction.commit(token)) return@launch
@@ -142,6 +162,7 @@ internal class ReaderAnimationController(
                 if (transaction.finish(token)) {
                     overlay.clear(); curl.reset()
                     primary.finishAnimatedCommit()
+                    drainPendingTurn()
                 }
             } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
                 // An internal deadline must release the final frame and the navigation gate.
@@ -156,25 +177,45 @@ internal class ReaderAnimationController(
 
     fun touch(event: android.view.MotionEvent): Boolean {
         if (!renderAvailable || (mode != "fade" && mode != "ios_curl")) return false
+        // Once a DOWN is consumed, keep the rest of that sequence out of the WebView,
+        // even if the animation finishes or preview preparation restarts in between.
+        if (event.actionMasked != android.view.MotionEvent.ACTION_DOWN && swallowGesture) {
+            if (event.actionMasked == android.view.MotionEvent.ACTION_UP ||
+                event.actionMasked == android.view.MotionEvent.ACTION_CANCEL) swallowGesture = false
+            return true
+        }
         val cfi = location ?: return false
         val slop = android.view.ViewConfiguration.get(parent.context).scaledTouchSlop.toFloat()
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
                 downX = event.x; downY = event.y; skipGesture = false
-                if (transaction.phase != PageTurnTransaction.Phase.IDLE) return true
+                deferredDragDirection = null
+                swallowGesture = transaction.phase != PageTurnTransaction.Phase.IDLE
+                if (swallowGesture) return true
                 curl.down(primary.width, primary.height, parent.resources.displayMetrics.density,
                     event.x, event.y, event.eventTime, pages.ready(cfi, -1) != null, pages.ready(cfi, 1) != null, slop)
                 return false
             }
             android.view.MotionEvent.ACTION_MOVE -> {
+                if (event.pointerCount > 1) {
+                    val owned = dragToken != null || deferredDragDirection != null
+                    cancel(); skipGesture = true
+                    return owned
+                }
+                if (deferredDragDirection != null) return true
                 if (skipGesture) return false
-                if (event.pointerCount > 1) { val owned = dragToken != null; cancel(); skipGesture = true; return owned }
                 val dx = event.x - downX; val dy = event.y - downY
                 if (dragToken == null) {
                     if (kotlin.math.abs(dx) < slop && kotlin.math.abs(dy) < slop) return false
                     if (kotlin.math.abs(dy) >= kotlin.math.abs(dx)) { skipGesture = true; return false }
                     val direction = if (dx < 0) 1 else -1
-                    val pair = pages.ready(cfi, direction) ?: run { skipGesture = true; return false }
+                    val pair = pages.ready(cfi, direction) ?: run {
+                        deferredDragDirection = direction
+                        val cancelEvent = android.view.MotionEvent.obtain(event)
+                        cancelEvent.action = android.view.MotionEvent.ACTION_CANCEL
+                        primary.onTouchEvent(cancelEvent); cancelEvent.recycle()
+                        return true
+                    }
                     val first = pages.bitmap(pair.origin) ?: return false
                     val second = pages.bitmap(pair.target) ?: return false
                     val token = transaction.begin(pair.origin, pair.target, direction) ?: return true
@@ -203,6 +244,11 @@ internal class ReaderAnimationController(
                 return true
             }
             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                deferredDragDirection?.let { direction ->
+                    deferredDragDirection = null
+                    if (event.actionMasked == android.view.MotionEvent.ACTION_UP) tap(direction)
+                    return true
+                }
                 val token = dragToken ?: return transaction.phase != PageTurnTransaction.Phase.IDLE
                 dragToken = null
                 val cancelled = event.actionMasked == android.view.MotionEvent.ACTION_CANCEL
@@ -217,7 +263,10 @@ internal class ReaderAnimationController(
         return dragToken != null
     }
 
-    fun cancel() {
+    fun cancel(clearPending: Boolean = true) {
+        if (clearPending) pendingTurn = null
+        if (dragToken != null || deferredDragDirection != null) swallowGesture = true
+        deferredDragDirection = null
         pendingFallbackDirection = null
         dragToken = null
         motion?.cancel(); motion = null

@@ -84,7 +84,7 @@ test('changing only page animation does not touch layout or navigate', async () 
     view.renderer.setAttribute = (name, value) => mutations.push([name, value])
     view.renderer.removeAttribute = name => mutations.push([name, null])
     assert.equal(await reader.applySettings({ pageAnimation: 'fade' }), true)
-    assert.deepEqual(mutations, [['animated', 'slide']])
+    assert.deepEqual(mutations, [['animated', null], ['native-page-turn', '']])
     assert.deepEqual(visited, [])
 })
 
@@ -99,3 +99,35 @@ test('external navigation waits for an already committed page turn', async () =>
     assert.equal(await navigation, true)
     assert.deepEqual(visited, ['target-after-turn'])
 })
+
+for (const mode of ['fade', 'ios_curl', 'none', 'slide']) {
+    test(`switching to ${mode} sets only its own navigation policy`, async () => {
+        const { reader, view } = makeReader(0.315)
+        const attributes = new Map([['animated', 'slide'], ['native-page-turn', '']])
+        view.renderer.setAttribute = (name, value) => attributes.set(name, value)
+        view.renderer.removeAttribute = name => attributes.delete(name)
+        assert.equal(await reader.applySettings({ pageAnimation: mode }), true)
+        assert.equal(attributes.has('animated'), mode === 'slide')
+        assert.equal(attributes.has('native-page-turn'), mode === 'fade' || mode === 'ios_curl')
+    })
+}
+
+for (const mode of ['fade', 'ios_curl']) {
+    test(`${mode} commits exactly once without enabling slide afterwards`, async () => {
+        const { reader, view } = makeReader(0.315)
+        const attributes = new Map()
+        let turns = 0
+        view.renderer.setAttribute = (name, value) => attributes.set(name, value)
+        view.renderer.removeAttribute = name => attributes.delete(name)
+        view.renderer.getAttribute = name => attributes.get(name) ?? null
+        view.next = async () => {
+            assert.equal(attributes.has('animated'), false)
+            turns++
+        }
+        await reader.applySettings({ pageAnimation: mode })
+        await reader.commitPageTurn(1)
+        assert.equal(turns, 1)
+        assert.equal(attributes.has('animated'), false)
+        assert.equal(attributes.has('native-page-turn'), true)
+    })
+}
