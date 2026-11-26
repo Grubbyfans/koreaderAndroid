@@ -1,0 +1,19 @@
+app/src/main/res/mipmap-anydpi-v33/ic_launcher.xml
+  s_bf480910ff8615::t_07951882fdc57e 2-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f4ad92f3cc52d8a6feb2b97e0a6d6dc2e5217e8f",
+  "prompts": {},
+  "sessions": {
+    "s_bf480910ff8615": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a215a3-07d9-7983-84c5-33388ab28d4a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
