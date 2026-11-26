@@ -1,0 +1,19 @@
+reader/src/main/java/com/yuezhou/reader/reader/online/import/OnlineImportCoordinator.kt
+  s_01cbf74bbc9328::t_ba17c07fda4bb5 6,50-54,76-82,84-87,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ef3706ef01b46c0b3e910617dc931be2ed78b506",
+  "prompts": {},
+  "sessions": {
+    "s_01cbf74bbc9328": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21577-9ec1-7d33-bf63-5b0276d51c91",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
