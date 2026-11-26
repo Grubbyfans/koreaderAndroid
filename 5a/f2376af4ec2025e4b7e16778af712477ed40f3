@@ -1,0 +1,19 @@
+app/build.gradle.kts
+  s_01cbf74bbc9328::t_f69b1f77b5cd73 14-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5af2376af4ec2025e4b7e16778af712477ed40f3",
+  "prompts": {},
+  "sessions": {
+    "s_01cbf74bbc9328": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21577-9ec1-7d33-bf63-5b0276d51c91",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
