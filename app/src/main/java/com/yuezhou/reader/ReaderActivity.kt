@@ -193,6 +193,7 @@ private fun ReaderScreen(
     // Activity 级作用域：切后台/退出时 rememberCoroutineScope 会被取消，上传/记录须用它
     val appScope = LocalLifecycleOwner.current.lifecycleScope
     var webView by remember { mutableStateOf<ReaderWebView?>(null) }
+    var animationController by remember { mutableStateOf<com.yuezhou.reader.animation.ReaderAnimationController?>(null) }
     var title by remember { mutableStateOf(bookId ?: "阅读") }
     var loading by remember { mutableStateOf(true) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -632,6 +633,8 @@ private fun ReaderScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) animationController?.suspendPreview()
+            if (event == Lifecycle.Event.ON_START) animationController?.resumePreview()
             if (event == Lifecycle.Event.ON_PAUSE && !leaving) {
                 appScope.launch {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
@@ -666,6 +669,7 @@ private fun ReaderScreen(
                 pendingJump?.takeIf { it.first == event.requestId }?.second?.complete(event)
             }
             is ReaderEvent.Relocated -> {
+                event.cfi?.let { animationController?.relocated(it) }
                 currentCfi = event.cfi
                 currentFraction = event.fraction
                 currentIndex = event.index
@@ -783,6 +787,22 @@ private fun ReaderScreen(
         }
     }
 
+    LaunchedEffect(animationController, openedSource, readerPrefs.pageAnimation, readerPrefs.vertical,
+        readerPrefs.fontSize, readerPrefs.fontId, readerPrefs.fontWeight, readerPrefs.lineHeight,
+        readerPrefs.pageMargin, readerPrefs.theme) {
+        val controller = animationController ?: return@LaunchedEffect
+        val source = openedSource ?: return@LaunchedEffect
+        if (!readerPrefs.vertical && readerPrefs.pageAnimation in setOf("fade", "ios_curl")) {
+            controller.settings(readerPrefs.pageAnimation, layoutChanged = true)
+            controller.background = themeBackground(readerPrefs.theme).let { color ->
+                android.graphics.Color.argb((color.alpha * 255).toInt(), (color.red * 255).toInt(),
+                    (color.green * 255).toInt(), (color.blue * 255).toInt())
+            }
+            controller.open(source.first, source.second)
+            currentCfi?.let(controller::relocated)
+        } else controller.disable()
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open,
@@ -826,24 +846,37 @@ private fun ReaderScreen(
             // 正文 WebView（铺满，单击呼出面板）
             AndroidView(
                 factory = { ctx ->
+                    val host = android.widget.FrameLayout(ctx)
                     ReaderWebView(ctx).also { wv ->
                         wv.eventListener = eventListener
                         wv.onTap = {
                             readerOverlay = if (readerOverlay == ReaderOverlay.Hidden) ReaderOverlay.Toolbar else ReaderOverlay.Hidden
                         }
                         wv.onPageTap = { dir ->
-                            if (dir > 0) wv.nextPage() else wv.prevPage()
+                            if (animationController?.tap(dir) != true) {
+                                if (dir > 0) wv.nextPage() else wv.prevPage()
+                            }
                         }
                         wv.onBrightnessScroll = { delta ->
                             adjustBrightness(ctx, delta)
                         }
                         wv.verticalMode = readerPrefs.vertical
+                        host.addView(wv, android.widget.FrameLayout.LayoutParams(-1, -1))
+                        animationController = com.yuezhou.reader.animation.ReaderAnimationController(host, wv, scope,
+                            configurePreview = { preview ->
+                                val p = latestPrefs
+                                preview.applySettings(p.fontSize, p.lineHeight, p.pageMargin, p.theme, false,
+                                    p.fontId, p.fontWeight, "none")
+                            }, reportError = { android.util.Log.w("ReaderAnimation", "Animation unavailable", it) })
+                        wv.onExternalNavigation = { animationController?.cancel() }
+                        wv.onAnimationTouch = { animationController?.touch(it) == true }
                         webView = wv
                     }
+                    host
                 },
-                onRelease = { releasedView ->
-                    if (webView === releasedView) webView = null
-                    releasedView.release()
+                onRelease = {
+                    animationController?.close(); animationController = null
+                    webView?.release(); webView = null
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -1422,12 +1455,14 @@ private fun SettingsControls(
                 }
             }
             // 翻页动画方式
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 Text("动画", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.width(12.dp))
                 listOf(
                     "none" to "无",
                     "slide" to "滑动",
+                    "fade" to "渐变",
+                    "ios_curl" to "iOS 仿真",
                 ).forEach { (value, label) ->
                     TextButton(onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) }) {
                         Text(

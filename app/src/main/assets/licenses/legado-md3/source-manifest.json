@@ -1,0 +1,195 @@
+{
+  "repository": "https://github.com/HapeLee/legado-with-MD3",
+  "archiveSha256": "d172d62d4af7d29bb3012be8f37506176e85f751adc4195f09aec3875aa7e849",
+  "files": [
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/CurlMesh.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/CurlMesh.kt",
+      "sourceSha256": "9381130eed1f4c0be2b0346f05e501db8d93c4c4baf61c002c20c1df9bc4cb47",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/layout/CurlLayout.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/layout/CurlLayout.kt",
+      "sourceSha256": "befc12d02cbf79bca2a1143f889d8ce3816da5c0e4dc12a548efd27dc047103a",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/math/BinaryMath.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/math/BinaryMath.kt",
+      "sourceSha256": "22be2a68aa6474909173feae9f37fc0f033fac92dc5e020cfa733441b9f4137f",
+      "modified": true,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/gesture/CurlNavigation.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/gesture/CurlNavigation.kt",
+      "sourceSha256": "8d6fea995bd4e626753db898460f453e9625da33aaf26549dfdfa08ed7110772",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/gesture/CurlPan.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/gesture/CurlPan.kt",
+      "sourceSha256": "05a05e30a9cf5e0f7f3296b0024a3d91ca0d58122d08de63c26ba43543b749ce",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/model/CurlModel.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/model/CurlModel.kt",
+      "sourceSha256": "e0079276abe6d75e715cfb0e6d10c33e82297803bc4c9015e1198c77e1e8828e",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/control/CurlTiming.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/control/CurlTiming.kt",
+      "sourceSha256": "bbec3e1d6b60b803291e992353d29411c1a60c4c9aa92cf5670b0607031af9f1",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/control/CurlControl.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/control/CurlControl.kt",
+      "sourceSha256": "fdeece57b7e148af119645125c2c644f760c9e1363e96a18bb265660fd524ca9",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurveSampling.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurveSampling.kt",
+      "sourceSha256": "4e5c46b518e12373262d6bb70091e7dfade42d56dd9d1b22d49248e422b54bb6",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurlCurve.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurlCurve.kt",
+      "sourceSha256": "f10ecf8ea0878fa58865dcb8638b975dc091dc9179e1b1cfce0b893600d030fa",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshConstants.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshConstants.kt",
+      "sourceSha256": "1f6e8a574e754a2cc7ea0a1dbab52663aef2c999a6adf9599951b63be4244f87",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PageSurfaceBuilder.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PageSurfaceBuilder.kt",
+      "sourceSha256": "a89c617b887e2493f95b24d5cf7fe57ad25b4b7b807019367b56d7fcfb1211d5",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PackedHalfColor.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PackedHalfColor.kt",
+      "sourceSha256": "1d157b90ba028820dda749cc347d48433ca214c8d9e903380e36d7cdccbf93a6",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/ShadowBuilder.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/ShadowBuilder.kt",
+      "sourceSha256": "632244f0c1f7249936e52b30d5e21c12ce0c2a2ca493962fdb8417c5c96ac84b",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PenumbraBuilder.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PenumbraBuilder.kt",
+      "sourceSha256": "18aeef09c61d0b7e32a8abf4d2856423cd9cc2950a609db0da1f5d714f4798bf",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshGenerator.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshGenerator.kt",
+      "sourceSha256": "5b5cd545df71d88431eb2c829ee69ceab816aec65cf1d6c15c6fc42e54e1675e",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshBuildContext.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshBuildContext.kt",
+      "sourceSha256": "9e517e1af3381203bf7713c4ab75cf3a91199c5be9869eed6444b8c1fbca4111",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/LinearTransform.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/LinearTransform.kt",
+      "sourceSha256": "78f528feec3fce79b37de56ed497a5b730187f0d196b84a354b3a1d986978f5d",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurlProjectionBuilder.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurlProjectionBuilder.kt",
+      "sourceSha256": "af248a5ec5398d65a25c18ee5e2055b1897376f9a0cf023333032eb290c904a4",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/VertexBuffer.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/VertexBuffer.kt",
+      "sourceSha256": "4d5af73eb20b47a667b1c87e750c856ebafa4dbc654e7d87e14b73b29f932fa9",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/DrawBatchAssembler.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/DrawBatchAssembler.kt",
+      "sourceSha256": "d8832bb1bd193bc02c3104ede4f738e5078256f30f694ff687d78465566aaceb",
+      "modified": false,
+      "license": "MIT"
+    },
+    {
+      "destination": "app/src/main/java/io/legado/app/feature/reader/components/ioscurl/IosCurlTurn.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/components/ioscurl/IosCurlTurn.kt",
+      "sourceSha256": "e002767912ee5acff724ff8c0285afea837995a57888a8463c916f084a3468be",
+      "modified": false,
+      "license": "GPL-3.0"
+    },
+    {
+      "destination": "app/src/main/java/io/legado/app/feature/reader/platform/ioscurl/IosCurlCanvasRenderer.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/platform/ioscurl/IosCurlCanvasRenderer.kt",
+      "sourceSha256": "e26388a6ea910f7903facb84010e61d822a68c2ab8812e17193e1f6b6c5569c6",
+      "modified": false,
+      "license": "GPL-3.0"
+    },
+    {
+      "destination": "app/src/main/java/io/legado/app/feature/reader/platform/ioscurl/IosCurlRenderer.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/platform/ioscurl/IosCurlRenderer.kt",
+      "sourceSha256": "2f121769a5747ca112f48b85f2a3043d6d3356c510878f0b05a1f66e1deaef3b",
+      "modified": false,
+      "license": "GPL-3.0"
+    },
+    {
+      "destination": "app/src/main/java/io/legado/app/feature/reader/core/transition/ReaderPageTurnSpeed.kt",
+      "source": "app/src/main/java/io/legado/app/feature/reader/core/transition/ReaderPageTurnSpeed.kt",
+      "sourceSha256": "7dd7e274ea93089e24fea36bdfac9d68c4059de00f926b08abcecedab1914b3e",
+      "modified": false,
+      "license": "GPL-3.0"
+    },
+    {
+      "destination": "reader/src/test/java/io/legado/app/feature/reader/core/transition/ioscurl/ShadowProfileTest.kt",
+      "source": "app/src/test/java/io/legado/app/feature/reader/core/transition/ioscurl/ShadowProfileTest.kt",
+      "sourceSha256": "3f17728a797ca512f810ec85249ed0920d2f43024207ff34ec3e971185eeadf2",
+      "modified": true,
+      "license": "GPL-3.0"
+    },
+    {
+      "destination": "reader/src/test/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/CurlMeshCompatibilityTest.kt",
+      "source": "app/src/test/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/CurlMeshCompatibilityTest.kt",
+      "sourceSha256": "2cf02ff07a07c1f489c8e38b0ecc94abb7257589d9639521275e835cb03dbeb0",
+      "modified": true,
+      "license": "GPL-3.0"
+    }
+  ]
+}

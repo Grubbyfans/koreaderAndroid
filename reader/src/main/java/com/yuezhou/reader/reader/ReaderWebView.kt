@@ -33,6 +33,9 @@ import java.util.UUID
  */
 class ReaderWebView(context: Context) : WebView(context) {
 
+    private var animationCommitGeneration = 0L
+    private var animationCommitPending = false
+    private var animationRelocation: ReaderEvent.Relocated? = null
     @Volatile private var externalSource: Uri? = null
     @Volatile private var released = false
     private val callbacks = Handler(Looper.getMainLooper())
@@ -82,6 +85,10 @@ class ReaderWebView(context: Context) : WebView(context) {
     var onTap: (() -> Unit)? = null
 
     /** 翻页点击回调（左右 1/3 区域单击时触发，参数为翻页方向）。 */
+    var onExternalNavigation: (() -> Unit)? = null
+
+    var onAnimationTouch: ((MotionEvent) -> Boolean)? = null
+
     var onPageTap: ((Int) -> Unit)? = null // +1 下一页 / -1 上一页
 
     /** 左侧边缘滑动回调（参数为本次垂直位移增量 px，正=下滑/增亮，负=上滑/减暗）。 */
@@ -187,6 +194,12 @@ class ReaderWebView(context: Context) : WebView(context) {
             }
         })
         setOnTouchListener { _, event ->
+            if (onAnimationTouch?.invoke(event) == true) {
+                val cancel = MotionEvent.obtain(event)
+                cancel.action = MotionEvent.ACTION_CANCEL
+                taps.onTouchEvent(cancel); cancel.recycle()
+                return@setOnTouchListener true
+            }
             // 手势结束时清空方向锁定与亮度激活状态，避免状态残留到下一次手势
             when (event.actionMasked) {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -265,8 +278,12 @@ class ReaderWebView(context: Context) : WebView(context) {
     fun release() {
         if (released) return
         released = true
+        animationCommitPending = false
+        animationRelocation = null
         eventListener = null
         onTap = null
+        onExternalNavigation = null
+        onAnimationTouch = null
         onPageTap = null
         onBrightnessScroll = null
         externalSource = null
@@ -311,6 +328,7 @@ class ReaderWebView(context: Context) : WebView(context) {
 
     /** 跳转到指定 CFI。 */
     fun goToCfi(cfi: String) {
+        onExternalNavigation?.invoke()
         whenReaderReady {
             evaluateJavascript(
                 "window.__reader.goToCfi(${jsonQuote(cfi)}).then(r => {});",
@@ -320,14 +338,34 @@ class ReaderWebView(context: Context) : WebView(context) {
     }
 
     fun verifyJump(requestId: String, cfi: String, restoreCfi: String, expectedCfi: String? = null) = whenReaderReady {
+        onExternalNavigation?.invoke()
         evaluateJavascript(
             "window.__reader.verifyJump(${jsonQuote(requestId)}, ${jsonQuote(cfi)}, ${jsonQuote(restoreCfi)}, ${expectedCfi?.let(::jsonQuote) ?: "null"})",
             null,
         )
     }
 
-    fun nextPage() = whenReaderReady { evaluateJavascript("window.__reader.next();", null) }
-    fun prevPage() = whenReaderReady { evaluateJavascript("window.__reader.prev();", null) }
+    fun finishAnimatedCommit() {
+        animationCommitGeneration++
+        animationCommitPending = false
+        val relocation = animationRelocation
+        animationRelocation = null
+        if (!released && relocation != null) eventListener?.invoke(relocation)
+    }
+
+    fun commitAnimatedTurn(direction: Int) {
+        val ticket = ++animationCommitGeneration
+        whenReaderReady {
+        if (ticket != animationCommitGeneration) return@whenReaderReady
+        animationCommitPending = true
+        animationRelocation = null
+        evaluateJavascript("window.__readerTurnCommit=window.__reader.commitPageTurn($direction);void 0", null)
+    }
+
+    }
+
+    fun nextPage() = whenReaderReady { onExternalNavigation?.invoke(); evaluateJavascript("window.__reader.next();", null) }
+    fun prevPage() = whenReaderReady { onExternalNavigation?.invoke(); evaluateJavascript("window.__reader.prev();", null) }
 
     /** 请求目录树（结果通过 TocLoaded 事件回传）。 */
     fun requestToc() = whenReaderReady {
@@ -357,6 +395,7 @@ class ReaderWebView(context: Context) : WebView(context) {
 
     /** 跳转到目录项（href 指向章节）。 */
     fun goToToc(href: String) = whenReaderReady {
+        onExternalNavigation?.invoke()
         evaluateJavascript("window.__reader.goToToc(${jsonQuote(href)}).then(r => {});", null)
     }
 
@@ -391,6 +430,7 @@ class ReaderWebView(context: Context) : WebView(context) {
 
     /** 跳到全书百分比进度（0..1）。 */
     fun goToFraction(frac: Float) = whenReaderReady {
+        onExternalNavigation?.invoke()
         evaluateJavascript("window.__reader.goToFraction($frac).then(r => {});", null)
     }
 
@@ -459,6 +499,7 @@ class ReaderWebView(context: Context) : WebView(context) {
     }
 
     private fun dispatchEvent(type: String, data: String) {
+        if (type == "navigation") { onExternalNavigation?.invoke(); return }
         if (type == "positionConverted") {
             val obj = parseJson(data)
             val requestId = obj["requestId"] as? String ?: return
@@ -510,7 +551,8 @@ class ReaderWebView(context: Context) : WebView(context) {
             }
             else -> ReaderEvent.Error("未知事件: $type")
         }
-        eventListener?.invoke(event)
+        if (animationCommitPending && event is ReaderEvent.Relocated) animationRelocation = event
+        else eventListener?.invoke(event)
     }
 
     private fun parseJson(data: String): Map<String, Any?> {

@@ -22,7 +22,7 @@ function makeReader(fraction, pointVisible = true) {
         window, document: { getElementById: () => view }, Overlayer: {}, SpeechHighlight: class {},
         Range: { START_TO_START: 0 },
     })
-    return { reader: window.__reader, messages, visited, view }
+    return { reader: window.__reader, messages, visited, view, window }
 }
 
 test('verified jump reports the fraction at the actual landing position', async () => {
@@ -76,4 +76,26 @@ test('compares spine order and DOM positions without reading displayed percentag
         ['positionConverted', 'same', '0'],
         ['positionConverted', 'invalid-anchor', null],
     ])
+})
+
+test('changing only page animation does not touch layout or navigate', async () => {
+    const { reader, view, visited } = makeReader(0.315)
+    const mutations = []
+    view.renderer.setAttribute = (name, value) => mutations.push([name, value])
+    view.renderer.removeAttribute = name => mutations.push([name, null])
+    assert.equal(await reader.applySettings({ pageAnimation: 'fade' }), true)
+    assert.deepEqual(mutations, [['animated', 'slide']])
+    assert.deepEqual(visited, [])
+})
+
+test('external navigation waits for an already committed page turn', async () => {
+    const { reader, visited, window } = makeReader(0.315)
+    let complete
+    window.__readerTurnCommit = new Promise(resolve => { complete = resolve })
+    const navigation = reader.goToCfi('target-after-turn')
+    await Promise.resolve()
+    assert.deepEqual(visited, [])
+    complete()
+    assert.equal(await navigation, true)
+    assert.deepEqual(visited, ['target-after-turn'])
 })

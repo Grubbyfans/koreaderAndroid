@@ -6,9 +6,10 @@ import './view.js'
 import { Overlayer } from './overlayer.js'
 import { SpeechHighlight } from './speech-highlight.js'
 import * as XPointer from './xpointer.js'
+import { pageSnapshotState } from './page-snapshot.js'
 
 const view = document.getElementById('view')
-const speechHighlight = new SpeechHighlight(view, Overlayer.highlight)
+const speechHighlight = new SpeechHighlight(view, Overlayer.highlight, () => { post('navigation', {}); return window.__readerTurnCommit })
 function redrawSpeechHighlight() {
     requestAnimationFrame(() => {
         try { speechHighlight.render(false) } catch (_) { /* Range unavailable while chapter loads. */ }
@@ -32,6 +33,15 @@ let currentSettings = {
 
 // 供 Kotlin 调用的全局接口
 window.__reader = {
+    async commitPageTurn(direction) {
+        const renderer = view.renderer
+        const animated = renderer.getAttribute('animated')
+        renderer.removeAttribute('animated')
+        try { if (direction > 0) await view.next(); else await view.prev() }
+        finally { if (animated !== null) renderer.setAttribute('animated', animated) }
+    },
+    // Read-only inspection shared by primary and isolated preview instances.
+    snapshotState() { return pageSnapshotState(view) },
     // 打开 EPUB：epubUrl 为 Android 侧提供的可访问 URL；restoreCfi 为可选的恢复位置
     async openBook(epubUrl, restoreCfi, settings) {
         try {
@@ -57,6 +67,7 @@ window.__reader = {
 
     // 跳转到指定 CFI（foliate-js 的 view 已实现 resolveCFI + goTo）
     async goToCfi(cfi) {
+        await window.__readerTurnCommit
         try {
             await view.goTo(cfi)
             return true
@@ -67,6 +78,7 @@ window.__reader = {
     },
 
     async verifyJump(requestId, cfi, restoreCfi, expectedCfi) {
+        await window.__readerTurnCommit
         if (expectedCfi && view.lastLocation?.cfi !== expectedCfi) {
             post('jumpVerified', { requestId, verified: false, fraction: null, stale: true })
             return
@@ -92,8 +104,8 @@ window.__reader = {
     },
 
     // 下一页 / 上一页
-    async next() { await view.next(); return true },
-    async prev() { await view.prev(); return true },
+    async next() { await window.__readerTurnCommit; await view.next(); return true },
+    async prev() { await window.__readerTurnCommit; await view.prev(); return true },
 
     // 获取目录树：返回 { label, href, subitems } 嵌套结构
     getTableOfContents() {
@@ -110,6 +122,7 @@ window.__reader = {
 
     // 跳转到目录项（href 指向章节）
     async goToToc(href) {
+        await window.__readerTurnCommit
         try {
             await view.goTo(href)
             return true
@@ -121,6 +134,7 @@ window.__reader = {
 
     // 跳到全书百分比进度（0..1）
     async goToFraction(frac) {
+        await window.__readerTurnCommit
         try {
             await view.goToFraction(frac)
             return true
@@ -270,9 +284,13 @@ window.__reader = {
     async applySettings(settings) {
         try {
             const prevVertical = currentSettings.vertical
-            Object.assign(currentSettings, settings || {})
-            applyTheme()
-            applyTextStyle()
+            const supplied = settings || {}
+            const themeChanged = Object.hasOwn(supplied, 'theme') && supplied.theme !== currentSettings.theme
+            const layoutChanged = ['fontId', 'fontWeight', 'fontSize', 'lineHeight', 'pageMargin', 'theme']
+                .some(key => Object.hasOwn(supplied, key) && supplied[key] !== currentSettings[key])
+            Object.assign(currentSettings, supplied)
+            if (themeChanged) applyTheme()
+            if (layoutChanged) applyTextStyle()
             applyPageAnimation()
             // 翻页模式切换：设置 foliate-paginator 的 flow 属性并重载当前章节
             if (settings && typeof settings.vertical === 'boolean'

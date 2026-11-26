@@ -42,3 +42,15 @@ const pending = highlight.set('1:0', 0, '1:0', 2)
 highlight.clear(); resolveNavigation(); assert.equal(await pending, false)
 assert.equal(highlight.render(), false); assert.ok(removed > 0)
 console.log('PASS: native anchor mapping, CFI, page bounds, following, redraw, clear and stale navigation')
+
+let releaseTurn
+const committedTurn = new Promise(resolve => { releaseTurn = resolve })
+const deferredHighlight = new SpeechHighlight(view, () => {}, () => committedTurn)
+const beforeDeferred = scrolls
+await deferredHighlight.set('0:0', 3, '0:0', 8)
+assert.equal(scrolls, beforeDeferred)
+deferredHighlight.clear()
+releaseTurn()
+await Promise.resolve()
+await Promise.resolve()
+assert.equal(scrolls, beforeDeferred, 'cleared TTS range cannot navigate after an earlier turn completes')

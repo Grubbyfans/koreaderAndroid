@@ -57,6 +57,17 @@
 
 - Gradle/AGP/Kotlin/Compose/AndroidX 版本锁定见 `gradle/libs.versions.toml`。
 
+### Legado-with-MD3 翻页动画调研
+
+- 来源：用户提供的 `legado-with-MD3-main.zip`，仓库为 https://github.com/HapeLee/legado-with-MD3 。
+- ZIP SHA-256：`d172d62d4af7d29bb3012be8f37506176e85f751adc4195f09aec3875aa7e849`。本包未确认 Git commit，不以远端 main 代替版本。
+- 根 `LICENSE` 为 GPL-3.0；`app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/LICENSE.txt` 单独附 MIT、`Copyright (c) 2026 Peyilo`，覆盖该核心目录的许可证据须随未来移植保留。
+- aboutlibraries 的 PageCurl-Core 来源版本为 `c23fd9d`；PlayLikeCurl 为 `915a5a3`、MIT。不能将两项依赖的 MIT 扩大解释为整个外围控制器、平台渲染器和渐变实现均为 MIT。
+- 采用方式：已原样复制 `app/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/` 下 21 个 Kotlin 文件与 MIT LICENSE 至 `reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/`，仅将 BinaryMath 可见性改为 public，供 app 模块中的原渲染器使用；已接入阅读器。阶段 0.1 临时验证宿主已移除。已原样复制 GPL 项目中的 IosCurlTurn、ReaderPageTurnSpeed、IosCurlRenderer 和 IosCurlCanvasRenderer 至 app 模块；新增方向枚举适配，GPL-3.0 许可随 assets 保留。复制上游 CurlMeshCompatibilityTest 和 ShadowProfileTest 至 reader 测试目录，仅将测试注解切换为 JUnit Jupiter。后续移植须继续登记来源、许可及修改范围，并在实际分发时按适用条款处理。
+- 随包许可和逐文件来源清单位于 `app/src/main/assets/licenses/legado-md3/`；新增页面适配及事务代码位于 `reader/.../animation/`，绘制与控制适配位于 `app/.../animation/`。
+- 详细范围见 `docs/08-阅读翻页动画/静读翻页动画移植技术实施方案.md` 第 9 节。
+
+
 
 ## 内置阅读字体
 

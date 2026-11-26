@@ -1,6 +1,6 @@
 // Retain the confirmed playback range across pagination and document reloads.
 export class SpeechHighlight {
-    constructor(view, draw) { this.view = view; this.draw = draw; this.request = null; this.version = 0 }
+    constructor(view, draw, onNavigate = () => {}) { this.onNavigate = onNavigate; this.view = view; this.draw = draw; this.request = null; this.version = 0 }
     clear() {
         this.request = null
         ++this.version
@@ -11,6 +11,9 @@ export class SpeechHighlight {
         const version = ++this.version
         const resolved = resolveSpeechAnchor(this.view, startCfi, startOffset)
         if (!(this.view.renderer?.getContents?.() ?? []).some(x => x.index === resolved.index)) {
+            const pendingTurn = this.onNavigate()
+            if (pendingTurn) await pendingTurn
+            if (version !== this.version) return false
             await this.view.goTo(resolved.index)
             if (version !== this.version) return false
         }
@@ -18,7 +21,8 @@ export class SpeechHighlight {
     }
     render(follow = false) {
         if (!this.request) return false
-        const { startCfi, startOffset, endCfi, endOffset } = this.request
+        const activeRequest = this.request
+        const { startCfi, startOffset, endCfi, endOffset } = activeRequest
         const resolved = resolveSpeechAnchor(this.view, startCfi, startOffset)
         const item = this.view.renderer?.getContents?.().find(x => x.index === resolved.index)
         if (!item?.doc) return false
@@ -34,7 +38,12 @@ export class SpeechHighlight {
         if (follow && !startIsVisible(range, this.view.lastLocation?.range)) {
             const point = range.cloneRange()
             point.collapse(true)
-            Promise.resolve(this.view.renderer?.scrollToAnchor?.(point, true)).catch(() => {})
+            const pending = this.onNavigate()
+            const navigate = () => this.view.renderer?.scrollToAnchor?.(point, true)
+            if (pending) Promise.resolve(pending).then(() => {
+                if (this.request === activeRequest) return navigate()
+            }).catch(() => {})
+            else Promise.resolve(navigate()).catch(() => {})
         }
         for (const other of this.view.renderer?.getContents?.() ?? [])
             if (other !== item) other.overlayer?.remove('__tts_highlight__')
