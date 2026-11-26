@@ -1,0 +1,20 @@
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  s_01cbf74bbc9328::t_9e9429df8810eb 116,1820
+  s_01cbf74bbc9328::t_254dd6960d1f40 21,1785-1810,1838,1864-1865,1903,1905,1908,1939-1940
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0964e76f96e9492a783d42998b06f52ad010aff7",
+  "prompts": {},
+  "sessions": {
+    "s_01cbf74bbc9328": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21577-9ec1-7d33-bf63-5b0276d51c91",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
