@@ -1,0 +1,44 @@
+app/src/main/java/com/yuezhou/reader/ReaderSettings.kt
+  s_bf480910ff8615::t_e4420d0ab9c1a2 13,35,49-50
+  s_bf480910ff8615::t_3812474b7bb2d7 51
+app/src/main/java/com/yuezhou/reader/ReaderApplication.kt
+  s_bf480910ff8615::t_e4420d0ab9c1a2 10,25
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_bf480910ff8615::t_e4420d0ab9c1a2 595,1492,1500,1502,1508,1510,1514,1534
+app/src/main/java/com/yuezhou/reader/ui/settings/SettingsPage.kt
+  s_bf480910ff8615::t_e4420d0ab9c1a2 403
+docs/01-工程与构建/third-party-notices.md
+  s_bf480910ff8615::t_e4420d0ab9c1a2 27,33
+experiments/kokoro/README.md
+  s_bf480910ff8615::t_e4420d0ab9c1a2 1-5
+app/src/test/java/com/yuezhou/reader/ReaderSettingsTest.kt
+  s_bf480910ff8615::t_e4420d0ab9c1a2 7,12-20
+speech/src/main/java/com/yuezhou/reader/speech/SpeechRuntime.kt
+  s_bf480910ff8615::t_e4420d0ab9c1a2 12,61
+tests/verify-apk-native-libraries.py
+  s_bf480910ff8615::t_e4420d0ab9c1a2 1-31
+docs/README.md
+  s_bf480910ff8615::t_d9bbbca814645f 45
+.github/workflows/regression.yml
+  s_bf480910ff8615::t_b9a692075188d6 37-39,42-43
+  s_bf480910ff8615::t_e4420d0ab9c1a2 35-36,40-41,44
+docs/01-工程与构建/BUILD.md
+  s_bf480910ff8615::t_e4420d0ab9c1a2 30,81
+  s_bf480910ff8615::t_28d5486441d48a 83,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af5e45f33df07c55c0d69b9679b31551016c7567",
+  "prompts": {},
+  "sessions": {
+    "s_bf480910ff8615": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a215a3-07d9-7983-84c5-33388ab28d4a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
