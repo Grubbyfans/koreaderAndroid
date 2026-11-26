@@ -1,5 +1,7 @@
 app/src/main/java/com/yuezhou/reader/ui/online/ZLibrarySettingsScreen.kt
   s_01cbf74bbc9328::t_84cd79489f85a9 8,16,20-21,42,55,57,68,83-119,390-407,410,413-414,422-423,435-451,455,458
+app/build.gradle.kts
+  s_01cbf74bbc9328::t_ad609c989e644b 14-15
 ---
 {
   "schema_version": "authorship/3.0.0",
