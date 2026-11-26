@@ -969,6 +969,35 @@ private fun BookshelfScreen() {
                 showOnlineDownloads = false
                 downloadTasksOpen = true
             },
+            cloudTask = downloadTask?.let { task ->
+                com.yuezhou.reader.core.online.download.OnlineDownloadTask(
+                    taskId = "cloud:${task.bookId}",
+                    providerId = "cloud",
+                    remoteId = task.bookId,
+                    bookTitle = task.bookId,
+                    fileName = task.fileName,
+                    receivedBytes = task.received,
+                    totalBytes = task.total,
+                    status = when (task.status) {
+                        DownloadStatus.Downloading -> when (task.phase) {
+                            DownloadPhase.Transferring -> com.yuezhou.reader.core.online.download.DownloadStatus.DOWNLOADING
+                            DownloadPhase.Verifying -> com.yuezhou.reader.core.online.download.DownloadStatus.VERIFYING
+                            DownloadPhase.Extracting, DownloadPhase.Publishing -> com.yuezhou.reader.core.online.download.DownloadStatus.IMPORTING
+                        }
+                        DownloadStatus.Done -> com.yuezhou.reader.core.online.download.DownloadStatus.COMPLETED
+                        DownloadStatus.Failed -> com.yuezhou.reader.core.online.download.DownloadStatus.FAILED
+                    },
+                    errorMessage = task.error,
+                    localBookId = task.bookId.takeIf { task.status == DownloadStatus.Done },
+                )
+            },
+            onCancelCloudTask = {
+                downloadJob?.cancel()
+                downloadTask = null
+                downloadJob = null
+                DownloadForegroundService.stop(context)
+            },
+            onClearCloudTask = { downloadTask = null },
         )
     }
 

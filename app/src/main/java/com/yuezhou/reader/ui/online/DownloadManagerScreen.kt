@@ -63,6 +63,9 @@ fun DownloadManagerScreen(
     onBack: () -> Unit,
     onOpenBook: suspend (String) -> Boolean,
     onOpenLegacyDownloads: () -> Unit,
+    cloudTask: OnlineDownloadTask? = null,
+    onCancelCloudTask: () -> Unit = {},
+    onClearCloudTask: () -> Unit = {},
 ) {
     val tasks by vm.downloadManager.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
     var filter by remember { mutableStateOf(DownloadFilter.ALL) }
@@ -93,7 +96,10 @@ fun DownloadManagerScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = { vm.downloadManager.clearHistory() }) { Text("清空历史") }
+                    TextButton(onClick = {
+                        vm.downloadManager.clearHistory()
+                        if (cloudTask?.status?.active == false) onClearCloudTask()
+                    }) { Text("清空历史") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = YuezhouColors.Surface,
@@ -123,7 +129,7 @@ fun DownloadManagerScreen(
                 }
             }
 
-            val visible = tasks.filter { task ->
+            val visible = (listOfNotNull(cloudTask) + tasks).filter { task ->
                 when (filter) {
                     DownloadFilter.ALL -> true
                     DownloadFilter.ACTIVE -> task.status.active
@@ -155,14 +161,17 @@ fun DownloadManagerScreen(
                     items(visible, key = { it.taskId }) { task ->
                         DownloadTaskRow(
                             task = task,
-                            onCancel = { vm.downloadManager.cancel(task.taskId) },
-                            onRetry = {
+                            onCancel = {
+                                if (task.taskId == cloudTask?.taskId) onCancelCloudTask()
+                                else vm.downloadManager.cancel(task.taskId)
+                            },
+                            onRetry = if (task.taskId == cloudTask?.taskId) null else ({
                                 if (task.errorMessage?.contains("同名") == true) {
                                     confirmTask = task
                                 } else {
                                     vm.downloadManager.retry(task.taskId)
                                 }
-                            },
+                            }),
                             onRead = task.localBookId?.takeIf { task.status == DownloadStatus.COMPLETED }?.let { id ->
                                 {
                                     if (!openingBook) {
@@ -185,7 +194,7 @@ fun DownloadManagerScreen(
                             } else {
                                 null
                             },
-                            onUpload = task.localBookId?.let {
+                            onUpload = task.localBookId?.takeIf { task.taskId != cloudTask?.taskId }?.let {
                                 {
                                     uploadError = null
                                     uploadReport = null
@@ -382,7 +391,7 @@ private fun uploadStatusLabel(status: CloudUploadBridge.Status): String = when (
 private fun DownloadTaskRow(
     task: OnlineDownloadTask,
     onCancel: () -> Unit,
-    onRetry: () -> Unit,
+    onRetry: (() -> Unit)?,
     onRead: (() -> Unit)?,
     onUpload: (() -> Unit)?,
     onName: (() -> Unit)?,
@@ -424,7 +433,7 @@ private fun DownloadTaskRow(
             onName?.let {
                 Button(onClick = it) { Text("命名") }
             }
-            if (task.status == DownloadStatus.FAILED || task.status == DownloadStatus.IMPORT_FAILED) {
+            if (onRetry != null && (task.status == DownloadStatus.FAILED || task.status == DownloadStatus.IMPORT_FAILED)) {
                 Button(onClick = onRetry) {
                     Text(if (task.status == DownloadStatus.IMPORT_FAILED) "重新导入" else "重试下载")
                 }
