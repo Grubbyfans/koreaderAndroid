@@ -137,11 +137,6 @@ class ReaderWebView(context: Context) : WebView(context) {
                 return true
             }
 
-            override fun onDoubleTapEvent(event: MotionEvent): Boolean {
-                com.yuezhou.reader.reader.animation.PageTurnTiming("gesture").mark("double_tap_${event.actionMasked}")
-                return super.onDoubleTapEvent(event)
-            }
-
             override fun onSingleTapUp(event: MotionEvent): Boolean {
                 if (width <= 0) return false
                 val position = event.x / width
@@ -197,7 +192,12 @@ class ReaderWebView(context: Context) : WebView(context) {
                 // 横向主导：交还 WebView 处理（左右翻页等）
                 return false
             }
-        })
+        }).apply {
+            // SimpleOnGestureListener also installs a double-tap listener by default.
+            // Every short tap must reach onSingleTapUp, including the second tap in a pair.
+            // WebView still receives unconsumed events for selection and native gestures.
+            setOnDoubleTapListener(null)
+        }
         setOnTouchListener { _, event ->
             if (onAnimationTouch?.invoke(event) == true) {
                 val cancel = MotionEvent.obtain(event)
