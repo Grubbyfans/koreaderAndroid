@@ -1,0 +1,19 @@
+tests/adb-page-turn-timing.py
+  s_a8d6daa44fef52::t_bd342c4b8978e9 23-27,29,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2a00fea78e383f815e3aec1f202b1a2a9cfbfb29",
+  "prompts": {},
+  "sessions": {
+    "s_a8d6daa44fef52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2170a-287d-7020-a964-0f0b80293428",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
