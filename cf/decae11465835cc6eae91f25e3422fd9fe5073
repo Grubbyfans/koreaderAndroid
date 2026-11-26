@@ -1,0 +1,31 @@
+tests/adb-page-turn-timing.py
+  s_a8d6daa44fef52::t_3de4bbcac1c637 1-44
+app/src/main/java/com/yuezhou/reader/animation/PageTurnOverlay.kt
+  s_a8d6daa44fef52::t_eec547ee9482d1 38,72,122
+app/src/main/java/com/yuezhou/reader/animation/ReaderAnimationController.kt
+  s_a8d6daa44fef52::t_4059d41a55aa30 14,50-51,114-117,138,154-157,188,201,207,210,217,246,287-289
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  s_a8d6daa44fef52::t_e0aea07b08d240 139-143
+reader/src/main/java/com/yuezhou/reader/reader/animation/PageTurnTiming.kt
+  s_a8d6daa44fef52::t_2f719969c8d23c 1-24
+reader/src/main/java/com/yuezhou/reader/reader/animation/PreviewPageProvider.kt
+  s_a8d6daa44fef52::t_afc9234f3fd021 83-84,112,128,130,153
+reader/src/main/java/com/yuezhou/reader/reader/animation/WebPageSnapshots.kt
+  s_a8d6daa44fef52::t_fd2f9a1cd99ddd 37-38,40,43,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cfdecae11465835cc6eae91f25e3422fd9fe5073",
+  "prompts": {},
+  "sessions": {
+    "s_a8d6daa44fef52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2170a-287d-7020-a964-0f0b80293428",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
