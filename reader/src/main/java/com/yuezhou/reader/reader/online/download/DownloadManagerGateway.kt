@@ -10,6 +10,7 @@ sealed interface SystemDownloadState {
     /** 系统任务不存在：可能被用户取消、被清理或从未登记成功。 */
     data object Unknown : SystemDownloadState
     data object Pending : SystemDownloadState
+    data class Running(val receivedBytes: Long, val totalBytes: Long?) : SystemDownloadState
     data class Ready(val contentUri: String, val totalBytes: Long?) : SystemDownloadState
     data class Failed(val reason: String) : SystemDownloadState
 }
@@ -85,7 +86,10 @@ class AndroidDownloadManagerGateway(context: Context) : DownloadManagerGateway {
                     val reason = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
                     SystemDownloadState.Failed(reasonText(reason))
                 }
-                else -> SystemDownloadState.Pending
+                else -> SystemDownloadState.Running(
+                    it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)).coerceAtLeast(0L),
+                    it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)).takeIf { size -> size > 0L },
+                )
             }
         }
     }

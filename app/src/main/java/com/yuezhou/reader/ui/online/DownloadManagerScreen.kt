@@ -76,6 +76,8 @@ fun DownloadManagerScreen(
 
     // 阶段 F：手动上传只允许从已完成任务发起；两个云端分别选择、分别记结果。
     val context = LocalContext.current
+    val webDownloads = remember(context) { DownloadManagerHolder.runtime(context).webDownloads }
+    val webTasks by webDownloads.tasks.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var uploadTask by remember { mutableStateOf<OnlineDownloadTask?>(null) }
     var uploadTargets by remember { mutableStateOf(CloudUploadBridge.Target.entries.toSet()) }
@@ -129,7 +131,10 @@ fun DownloadManagerScreen(
                 }
             }
 
-            val visible = (listOfNotNull(cloudTask) + tasks).filter { task ->
+            val webTaskIds = webTasks.map { it.taskId }.toSet()
+            val visible = (listOfNotNull(cloudTask) + tasks + webTasks.filter { web ->
+                tasks.none { it.taskId == web.taskId }
+            }).filter { task ->
                 when (filter) {
                     DownloadFilter.ALL -> true
                     DownloadFilter.ACTIVE -> task.status.active
@@ -163,6 +168,7 @@ fun DownloadManagerScreen(
                             task = task,
                             onCancel = {
                                 if (task.taskId == cloudTask?.taskId) onCancelCloudTask()
+                                else if (task.taskId in webTaskIds) webDownloads.cancel(task.taskId)
                                 else vm.downloadManager.cancel(task.taskId)
                             },
                             onRetry = if (task.taskId == cloudTask?.taskId) null else ({

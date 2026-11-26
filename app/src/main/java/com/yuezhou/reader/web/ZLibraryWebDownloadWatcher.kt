@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import com.yuezhou.reader.core.online.download.OnlineDownloadTask
+import com.yuezhou.reader.core.online.download.DownloadStatus
 import androidx.core.content.ContextCompat
 import com.yuezhou.reader.reader.online.download.BookDownloadManager
 import com.yuezhou.reader.reader.online.download.DownloadManagerGateway
@@ -17,6 +19,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -35,6 +40,17 @@ class ZLibraryWebDownloadWatcher(
     private val pending = ConcurrentHashMap.newKeySet<Long>()
     private val resolving = ConcurrentHashMap.newKeySet<Long>()
     private var pollJob: Job? = null
+    private val downloads = MutableStateFlow<List<OnlineDownloadTask>>(emptyList())
+    val tasks = downloads.asStateFlow()
+
+    fun cancel(taskId: String) {
+        scope.launch {
+            registry.readAll().firstOrNull { BookDownloadManager.taskIdFor(it.transferId) == taskId }?.let { record ->
+                gateway.remove(record.downloadId)
+                resolve(record.downloadId)
+            }
+        }
+    }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(receiverContext: Context?, intent: Intent?) {
@@ -87,6 +103,12 @@ class ZLibraryWebDownloadWatcher(
                 is SystemDownloadState.Failed -> finishFailure(record, "下载失败：${state.reason}")
                 SystemDownloadState.Unknown -> finishFailure(record, "下载已取消或文件已被移除，请重新发起下载")
                 SystemDownloadState.Pending -> {
+                    showProgress(record, 0L, record.expectedBytes)
+                    pending += downloadId
+                    ensurePolling()
+                }
+                is SystemDownloadState.Running -> {
+                    showProgress(record, state.receivedBytes, state.totalBytes)
                     pending += downloadId
                     ensurePolling()
                 }
@@ -94,6 +116,26 @@ class ZLibraryWebDownloadWatcher(
         } finally {
             resolving -= downloadId
         }
+    }
+
+    private fun showProgress(record: WebDownloadRecord, received: Long, total: Long?) {
+        val task = OnlineDownloadTask(
+            taskId = BookDownloadManager.taskIdFor(record.transferId),
+            providerId = "zlibrary-web",
+            accountScope = record.accountScope,
+            remoteId = record.remoteRef.orEmpty(),
+            bookTitle = record.suggestedFileName ?: "网页下载",
+            fileName = record.suggestedFileName.orEmpty(),
+            status = DownloadStatus.DOWNLOADING,
+            receivedBytes = received,
+            totalBytes = total,
+            createdAt = record.createdAt,
+        )
+        downloads.update { current -> current.filterNot { it.taskId == task.taskId } + task }
+    }
+
+    private fun removeProgress(record: WebDownloadRecord) {
+        downloads.update { tasks -> tasks.filterNot { it.taskId == BookDownloadManager.taskIdFor(record.transferId) } }
     }
 
     private suspend fun finishSuccess(record: WebDownloadRecord, state: SystemDownloadState.Ready) {
@@ -123,6 +165,7 @@ class ZLibraryWebDownloadWatcher(
         gateway.remove(record.downloadId)
         registry.delete(record.downloadId)
         pending -= record.downloadId
+        removeProgress(record)
     }
 
     private suspend fun finishFailure(record: WebDownloadRecord, reason: String) {
@@ -132,6 +175,7 @@ class ZLibraryWebDownloadWatcher(
         gateway.remove(record.downloadId)
         registry.delete(record.downloadId)
         pending -= record.downloadId
+        removeProgress(record)
     }
 
     /** 广播可能因进程未启动而丢失：有未决下载时低频兜底轮询，全部处理完自动停止。 */
@@ -147,6 +191,6 @@ class ZLibraryWebDownloadWatcher(
     }
 
     private companion object {
-        const val POLL_INTERVAL_MS = 30_000L
+        const val POLL_INTERVAL_MS = 1_000L
     }
 }
