@@ -1,0 +1,28 @@
+reader/src/main/java/com/yuezhou/reader/reader/animation/PreviewPageProvider.kt
+  s_a8d6daa44fef52::t_e3e264f382ec07 21,34-35,60,73,114-118,136
+app/src/main/assets/reader/paginator.js
+  s_a8d6daa44fef52::t_e3e264f382ec07 884-885
+app/src/main/assets/reader/bridge.js
+  s_a8d6daa44fef52::t_e3e264f382ec07 320,325-328
+tests/progress-jump.test.mjs
+  s_a8d6daa44fef52::t_93ad645227afec 87,102-133
+app/src/main/java/com/yuezhou/reader/animation/ReaderAnimationController.kt
+  s_a8d6daa44fef52::t_e3e264f382ec07 29,47-49,89,94,96-119,149,165,180-186,192-194,205,212-218,247-251,266-269
+  s_a8d6daa44fef52::t_fda09b3d9f8a86 200-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6efabf38c2deea413319babc637e262d069dde28",
+  "prompts": {},
+  "sessions": {
+    "s_a8d6daa44fef52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2170a-287d-7020-a964-0f0b80293428",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
