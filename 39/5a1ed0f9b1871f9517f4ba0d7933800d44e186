@@ -1,0 +1,19 @@
+app/src/main/java/com/yuezhou/reader/ui/online/ZLibrarySettingsScreen.kt
+  s_01cbf74bbc9328::t_84cd79489f85a9 8,16,20-21,42,55,57,68,83-119,390-407,410,413-414,422-423,435-451,455,458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "395a1ed0f9b1871f9517f4ba0d7933800d44e186",
+  "prompts": {},
+  "sessions": {
+    "s_01cbf74bbc9328": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21577-9ec1-7d33-bf63-5b0276d51c91",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
