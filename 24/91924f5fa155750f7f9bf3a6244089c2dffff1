@@ -1,0 +1,41 @@
+reader/src/main/java/com/yuezhou/reader/reader/animation/PageTurnVisual.kt
+  s_a8d6daa44fef52::t_531b408539ae38 1-22
+reader/src/main/java/com/yuezhou/reader/reader/animation/PreviewPageProvider.kt
+  s_a8d6daa44fef52::t_e25aeada7a26ee 34-37,67,71-78,81-82,85-90,93,98-112,114-118,122,124-133,135-136,141,146-148,156-160,179
+  s_a8d6daa44fef52::t_1046eee039f8a1 113,134
+tests/native-page-turn.test.mjs
+  s_a8d6daa44fef52::t_1046eee039f8a1 1-55
+app/src/main/assets/reader/bridge.js
+  s_a8d6daa44fef52::t_531b408539ae38 39,41,43-47
+tests/progress-jump.test.mjs
+  s_a8d6daa44fef52::t_1046eee039f8a1 134-152
+reader/src/test/java/com/yuezhou/reader/reader/animation/PageTurnVisualTest.kt
+  s_a8d6daa44fef52::t_1046eee039f8a1 1-67
+reader/src/main/java/com/yuezhou/reader/reader/animation/PageSnapshot.kt
+  s_a8d6daa44fef52::t_e25aeada7a26ee 21-22
+app/src/main/java/com/yuezhou/reader/animation/ReaderAnimationController.kt
+  s_a8d6daa44fef52::t_1046eee039f8a1 44,93,181-182
+  s_a8d6daa44fef52::t_531b408539ae38 13,17,43,105-107,135-137,140-150,152-155,157-161,164,174,192-193,213-215,233-236,243,277,297
+app/src/main/assets/reader/paginator.js
+  s_a8d6daa44fef52::t_531b408539ae38 1136-1138
+app/src/main/java/com/yuezhou/reader/animation/PageTurnOverlay.kt
+  s_a8d6daa44fef52::t_531b408539ae38 56-61
+reader/src/main/java/com/yuezhou/reader/reader/animation/WebPageSnapshots.kt
+  s_a8d6daa44fef52::t_531b408539ae38 24-26,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2491924f5fa155750f7f9bf3a6244089c2dffff1",
+  "prompts": {},
+  "sessions": {
+    "s_a8d6daa44fef52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2170a-287d-7020-a964-0f0b80293428",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
