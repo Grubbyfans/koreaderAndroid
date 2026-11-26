@@ -1919,7 +1919,8 @@ private fun BookCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
                     textAlign = TextAlign.Center,
-                    maxLines = 3,
+                    maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(8.dp),
                 )
@@ -1958,9 +1959,11 @@ private fun BookCard(
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
             color = YuezhouColors.TextPrimary,
-            maxLines = 2,
+            minLines = 1,
+            maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = YuezhouDimens.Gap),
+            modifier = Modifier.fillMaxWidth().padding(top = YuezhouDimens.Gap),
         )
 
         book.percent?.let { progress ->
