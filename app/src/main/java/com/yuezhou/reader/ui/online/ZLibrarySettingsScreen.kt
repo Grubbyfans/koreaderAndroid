@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,9 +13,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,7 +52,9 @@ import com.yuezhou.reader.core.online.config.ServerMode
 import com.yuezhou.reader.core.online.config.ZLibraryConfig
 import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
 import com.yuezhou.reader.reader.online.zlibrary.ZLibraryBookProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 /**
  * Z-Library 书源设置（阶段 C1）：服务器、偏好、连接测试、JSON 导入导出、回滚与恢复默认。
@@ -58,6 +65,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit) {
     val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
     val store = remember(context) { ZLibraryConfigStore(context) }
 
@@ -72,6 +80,43 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
     var showLogin by remember { mutableStateOf(false) }
     var loginUser by remember { mutableStateOf("") }
     var loginPassword by remember { mutableStateOf("") }
+    var loginInProgress by remember { mutableStateOf(false) }
+    var loginError by remember { mutableStateOf<String?>(null) }
+
+    fun dismissLogin() {
+        showLogin = false
+        loginPassword = ""
+        loginError = null
+    }
+
+    fun submitLogin() {
+        if (loginInProgress) return
+        val username = loginUser.trim()
+        val password = loginPassword
+        if (username.isEmpty() || password.isBlank()) {
+            loginError = "请输入账号和密码"
+            return
+        }
+        keyboard?.hide()
+        loginError = null
+        loginInProgress = true
+        scope.launch {
+            try {
+                provider.login(username, password).getOrThrow()
+                account = username
+                dismissLogin()
+                message = "登录成功"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                loginError = "登录失败：无法连接服务器，请检查网络和服务器设置后重试"
+            } catch (e: Exception) {
+                loginError = "登录失败：${e.message?.takeIf { it.isNotBlank() } ?: "请稍后重试"}"
+            } finally {
+                loginInProgress = false
+            }
+        }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -342,15 +387,31 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
         }
     }
 
-    if (showLogin) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showLogin = false },
+    if (showLogin && config.servers.baseUrls.isEmpty()) {
+        AlertDialog(
+            onDismissRequest = { dismissLogin() },
+            title = { Text("请先设置服务器") },
+            text = { Text("请在服务器管理中添加并启用服务器。手动模式下还需选中要使用的服务器。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    dismissLogin()
+                    onOpenServerSettings()
+                }) { Text("前往服务器管理") }
+            },
+            dismissButton = {
+                TextButton(onClick = { dismissLogin() }) { Text("取消") }
+            },
+        )
+    } else if (showLogin) {
+        AlertDialog(
+            onDismissRequest = { if (!loginInProgress) dismissLogin() },
             title = { Text("登录 Z-Library") },
             text = {
-                Column {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     OutlinedTextField(
                         value = loginUser,
-                        onValueChange = { loginUser = it },
+                        onValueChange = { loginUser = it; loginError = null },
+                        enabled = !loginInProgress,
                         label = { Text("账号") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -358,7 +419,8 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = loginPassword,
-                        onValueChange = { loginPassword = it },
+                        onValueChange = { loginPassword = it; loginError = null },
+                        enabled = !loginInProgress,
                         label = { Text("密码") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -370,25 +432,30 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (loginInProgress) {
+                        Row(
+                            modifier = Modifier.padding(top = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Text("正在登录…")
+                        }
+                    }
+                    loginError?.let { error ->
+                        Text(
+                            text = error,
+                            modifier = Modifier.padding(top = 12.dp),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        provider.login(loginUser, loginPassword).fold(
-                            onSuccess = {
-                                account = loginUser.trim()
-                                showLogin = false
-                                loginPassword = ""
-                                message = "登录成功"
-                            },
-                            onFailure = { message = "登录失败：${it.message ?: "未知错误"}" },
-                        )
-                    }
-                }) { Text("登录") }
+                TextButton(enabled = !loginInProgress, onClick = { submitLogin() }) { Text("登录") }
             },
             dismissButton = {
-                TextButton(onClick = { showLogin = false; loginPassword = "" }) { Text("取消") }
+                TextButton(enabled = !loginInProgress, onClick = { dismissLogin() }) { Text("取消") }
             },
         )
     }
