@@ -1,0 +1,21 @@
+app/src/main/java/com/yuezhou/reader/ui/online/OnlineLibraryScreen.kt
+  s_01cbf74bbc9328::t_67c6be6be83eb0 30-32,45,182,187-195,201-211
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  s_01cbf74bbc9328::t_eef9f424eccde6 791-799
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "656276a8c5b856c267bdb4198ce439eb96107dcb",
+  "prompts": {},
+  "sessions": {
+    "s_01cbf74bbc9328": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21577-9ec1-7d33-bf63-5b0276d51c91",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
