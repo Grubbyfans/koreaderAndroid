@@ -3,6 +3,7 @@ package com.yuezhou.reader.reader.online.import
 import android.content.Context
 import com.yuezhou.reader.core.protocol.BookNames
 import com.yuezhou.reader.reader.CoverExtractor
+import com.yuezhou.reader.reader.DownloadDirectory
 import com.yuezhou.reader.reader.EpubImportFiles
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.LibraryStore
@@ -46,7 +47,11 @@ class OnlineImportCoordinator(
         val bookId = BookNames.localId(safeName).first
             ?: return@withContext OnlineImportResult.Failed("文件名无效，无法导入")
         val target = File(EpubImporter.epubDir(context), safeName)
-        val replacing = target.isFile
+        val store = LibraryStore(context)
+        val local = store.bookLocation(bookId)
+        val directory = DownloadDirectory(context)
+        val destination = local?.tree ?: directory.uri
+        val replacing = local != null || target.isFile
 
         // 下载前/确定文件名后/正式导入前均需判断；此处是导入前的最后一次拦截。
         if (replacing && !overwriteApproved) return@withContext OnlineImportResult.Conflict
@@ -68,12 +73,18 @@ class OnlineImportCoordinator(
 
             // 新书必须先把正文落到 files/epub/，否则 registerBook 会因正文缺失而失败。
             // 同名同内容则保留原文件与代次，避免阅读位置偏移。
-            val placement = placeBody(staging, target, replacing)
-            backup = placement.backup
-            replaced = placement.replaced
-            newlyWritten = placement.newlyWritten
+            val source = destination?.let { directory.publish(it, staging, safeName) }
+            if (source == null) {
+                val placement = placeBody(staging, target, target.isFile)
+                backup = placement.backup
+                replaced = placement.replaced
+                newlyWritten = placement.newlyWritten
+            }
 
-            val registered = LibraryStore(context).registerBook(safeName, cover, title)
+            val registered = store.registerBook(
+                safeName, cover, title, source, destination,
+                sourceSize = pending.length(),
+            )
             if (registered.isFailure) {
                 if (replaced && backup != null) safeMove(backup!!, target)
                 if (newlyWritten) target.delete()
@@ -95,6 +106,7 @@ class OnlineImportCoordinator(
                 ),
             )
             backup?.delete()
+            if (source != null) target.delete()
             OnlineImportResult.Success(localBookId, safeName)
         } catch (e: Exception) {
             if (replaced && backup != null) runCatching { safeMove(backup!!, target) }
