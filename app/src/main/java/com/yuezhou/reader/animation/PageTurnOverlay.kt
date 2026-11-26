@@ -53,6 +53,12 @@ internal class PageTurnOverlay(context: Context) : View(context) {
         visibility = VISIBLE
     }
 
+    /** Retain the destination while WebView navigation catches up after an interrupted visual. */
+    fun showPage(committed: Boolean) {
+        config = null; values = null
+        fadeProgress = if (committed) 1f else 0f
+    }
+
     fun curl(configuration: CurlConfig, pose: CurlValues) {
         config = configuration; values = pose; invalidate()
     }

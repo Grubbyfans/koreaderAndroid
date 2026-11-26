@@ -21,13 +21,16 @@ class WebPageSnapshots(private val view: ReaderWebView) : AutoCloseable {
 
     data class State(val cfi: String, val chapter: Int, val text: String, val atStart: Boolean, val atEnd: Boolean)
 
+    suspend fun committedState(): State = request(
+        "Promise.resolve(window.__readerTurnCommit).then(()=>window.__reader.snapshotState())",
+    )
     suspend fun state(): State = request("window.__reader.snapshotState()")
     suspend fun locate(cfi: String): State = request(
         "window.__reader.goToCfi(${JSONObject.quote(cfi)}).then(ok=>{if(!ok)throw Error('Preview navigation failed');return window.__reader.snapshotState()})",
     )
     suspend fun adjacent(direction: Int): State {
         require(direction == -1 || direction == 1)
-        return request("window.__reader.${if (direction > 0) "next" else "prev"}().then(()=>window.__reader.snapshotState())")
+        return request("window.__reader.commitPageTurn($direction).then(()=>window.__reader.snapshotState())")
     }
 
     suspend fun capture(): Bitmap = withContext(Dispatchers.Main.immediate) {

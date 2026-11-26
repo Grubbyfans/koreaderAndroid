@@ -18,6 +18,8 @@ class PageSnapshotPool(private val byteLimit: Long = 32L * 1024 * 1024) : AutoCl
 
     fun get(key: PageSnapshotKey): Bitmap? = pages[key]
 
+    fun contains(key: PageSnapshotKey): Boolean = pages.containsKey(key)
+
     fun put(key: PageSnapshotKey, bitmap: Bitmap) {
         require(!bitmap.isRecycled)
         require(bitmap.width == key.width && bitmap.height == key.height)

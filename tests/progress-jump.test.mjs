@@ -131,3 +131,22 @@ for (const mode of ['fade', 'ios_curl']) {
         assert.equal(attributes.has('native-page-turn'), true)
     })
 }
+
+for (const fails of [false, true]) {
+    test(`native commit releases its instant-turn marker after ${fails ? 'failure' : 'success'}`, async () => {
+        const { reader, view } = makeReader(0.315)
+        const attributes = new Map([['animated', 'slide']])
+        view.renderer.setAttribute = (name, value) => attributes.set(name, value)
+        view.renderer.removeAttribute = name => attributes.delete(name)
+        view.renderer.getAttribute = name => attributes.get(name) ?? null
+        view.next = async () => {
+            assert.equal(attributes.has('instant-page-turn'), true)
+            assert.equal(attributes.has('animated'), false)
+            if (fails) throw Error('chapter unavailable')
+        }
+        if (fails) await assert.rejects(reader.commitPageTurn(1), /chapter unavailable/)
+        else await reader.commitPageTurn(1)
+        assert.equal(attributes.has('instant-page-turn'), false)
+        assert.equal(attributes.get('animated'), 'slide')
+    })
+}

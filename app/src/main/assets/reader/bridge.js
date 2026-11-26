@@ -36,9 +36,15 @@ window.__reader = {
     async commitPageTurn(direction) {
         const renderer = view.renderer
         const animated = renderer.getAttribute('animated')
+        const instant = renderer.getAttribute('instant-page-turn')
         renderer.removeAttribute('animated')
+        renderer.setAttribute('instant-page-turn', '')
         try { if (direction > 0) await view.next(); else await view.prev() }
-        finally { if (animated !== null) renderer.setAttribute('animated', animated) }
+        finally {
+            if (animated !== null) renderer.setAttribute('animated', animated)
+            if (instant === null) renderer.removeAttribute('instant-page-turn')
+            else renderer.setAttribute('instant-page-turn', instant)
+        }
     },
     // Read-only inspection shared by primary and isolated preview instances.
     snapshotState() { return pageSnapshotState(view) },

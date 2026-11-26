@@ -31,6 +31,10 @@ class PreviewPageProvider(
     private var opened: CompletableDeferred<Unit>? = null
     private var current: PageSnapshotKey? = null
     private val adjacent = mutableMapOf<Int, PageSnapshotKey>()
+    private val states = mutableMapOf<PageSnapshotKey, WebPageSnapshots.State>()
+    private val neighbors = mutableMapOf<PageSnapshotKey, MutableMap<Int, PageSnapshotKey>>()
+    private var preparedOrigin: PageSnapshotKey? = null
+    var preferredDirection = 1
     var isPreparing = false
         private set
 
@@ -60,64 +64,98 @@ class PreviewPageProvider(
         isPreparing = false
         preparation?.cancel(); preparation = null
         revision++
-        current = null; adjacent.clear(); pool.close()
+        clearSnapshots()
         preview?.let(configure)
     }
 
-    fun prepare(cfi: String) {
+    fun prepare(cfi: String) = prepare(cfi, ahead = false)
+
+    /** The destination is already a verified snapshot; warm its neighbor during the visual. */
+    fun prepareAhead(cfi: String) {
+        if (pool.get(key(cfi)) != null) prepare(cfi, ahead = true)
+    }
+
+    private fun prepare(cfi: String, ahead: Boolean) {
         val helper = inspector ?: return
         val ready = opened ?: return
+        val origin = key(cfi)
+        if (current == origin && (isPreparing || preparedOrigin == origin)) return
         val stamp = ++generation
         preparation?.cancel()
-        current = null; adjacent.clear()
+        current = origin.takeIf { pool.get(it) != null }
+        adjacent.clear()
+        neighbors[origin]?.forEach { (direction, target) ->
+            if (pool.contains(target)) adjacent[direction] = target
+        }
+        preparedOrigin = null
         isPreparing = true
         preparation = scope.launch {
+            var completed = false
             try {
                 withTimeout(10000) {
                     ready.await()
                     if (primary.width <= 0 || primary.height <= 0) return@withTimeout
-                    val main = WebPageSnapshots(primary)
-                    try {
-                        val state = main.state()
-                        if (state.cfi != cfi || stamp != generation) return@withTimeout
-                        pool.close()
-                        val origin = key(cfi)
-                        // Keep software drawing off the visible WebView: it can blank its window output.
-                        // The preview must match the primary page before it supplies the origin image.
-                        val alignedOrigin = helper.locate(cfi)
-                        if (alignedOrigin.text != state.text) error("Preview pagination differs from current page")
-                        val bitmap = helper.capture()
-                        if (stamp != generation) { bitmap.recycle(); return@withTimeout }
-                        pool.put(origin, bitmap)
-                        current = origin
-                        // The next page is ready before work on the previous page begins.
-                        for (direction in listOf(1, -1)) {
+                    val state = if (ahead) states[origin] ?: return@withTimeout else {
+                        val main = WebPageSnapshots(primary)
+                        try { main.state() } finally { main.close() }
+                    }
+                    if (state.cfi != cfi || stamp != generation) return@withTimeout
+                    if (pool.get(origin) == null) {
+                        val aligned = helper.locate(cfi)
+                        if (aligned.text != state.text) error("Preview pagination differs from current page")
+                        val image = helper.capture()
+                        if (stamp != generation) { image.recycle(); return@withTimeout }
+                        pool.put(origin, image)
+                    }
+                    states[origin] = state
+                    current = origin
+                    onPrepared()
+                    if (stamp != generation) return@withTimeout
+                    // Reuse the old current page for reversal; only capture the newly exposed edge.
+                    for (direction in listOf(preferredDirection, -preferredDirection)) {
+                        if (adjacent[direction]?.let(pool::contains) == true) continue
+                        val known = neighbors[origin]?.get(direction)
+                        val target = if (known != null) helper.locate(known.cfi) else {
                             val aligned = helper.locate(cfi)
                             if (aligned.text != state.text) error("Preview pagination differs from current page")
                             if ((direction > 0 && aligned.atEnd) || (direction < 0 && aligned.atStart)) continue
-                            val target = helper.adjacent(direction)
-                            if (target.cfi == cfi) continue
-                            val image = helper.capture()
-                            if (stamp != generation) { image.recycle(); return@withTimeout }
-                            val targetKey = key(target.cfi)
-                            pool.put(targetKey, image)
-                            adjacent[direction] = targetKey
+                            helper.adjacent(direction)
                         }
-                    } finally { main.close() }
+                        if (target.cfi == cfi) continue
+                        val image = helper.capture()
+                        if (stamp != generation) { image.recycle(); return@withTimeout }
+                        val targetKey = key(target.cfi)
+                        pool.put(targetKey, image)
+                        states[targetKey] = target
+                        neighbors.getOrPut(origin) { mutableMapOf() }[direction] = targetKey
+                        neighbors.getOrPut(targetKey) { mutableMapOf() }[-direction] = origin
+                        adjacent[direction] = targetKey
+                        onPrepared() // Wake the requested direction as soon as its page is ready.
+                        if (stamp != generation) return@withTimeout
+                    }
+                    completed = true
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: OutOfMemoryError) {
-                if (stamp == generation) { current = null; adjacent.clear(); pool.close(); onFailure(error) }
+                if (stamp == generation) { clearSnapshots(); onFailure(error) }
             } catch (error: Exception) {
                 if (stamp == generation) onFailure(error)
             } finally {
                 if (stamp == generation) {
+                    states.keys.retainAll { pool.contains(it) }
+                    neighbors.keys.retainAll { pool.contains(it) }
+                    if (completed) preparedOrigin = origin
                     isPreparing = false
                     onPrepared()
                 }
             }
         }
+    }
+
+    private fun clearSnapshots() {
+        current = null; adjacent.clear(); pool.close()
+        states.clear(); neighbors.clear(); preparedOrigin = null
     }
 
     private fun key(cfi: String) = PageSnapshotKey(session, revision, cfi, primary.width, primary.height)
@@ -138,7 +176,6 @@ class PreviewPageProvider(
         opened?.cancel(); opened = null
         inspector?.close(); inspector = null
         preview?.let { parent.removeView(it); it.release() }; preview = null
-        current = null; adjacent.clear()
-        pool.close()
+        clearSnapshots()
     }
 }

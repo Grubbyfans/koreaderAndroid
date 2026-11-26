@@ -1133,7 +1133,9 @@ export class Paginator extends HTMLElement {
                 index: this.#adjacentIndex(dir),
                 anchor: prev ? () => 1 : () => 0,
             })
-            if (shouldGo || !this.hasAttribute('animated')) await wait(100)
+            // Native commits/previews already await layout and visual readiness explicitly.
+            if (!this.hasAttribute('instant-page-turn') &&
+                (shouldGo || !this.hasAttribute('animated'))) await wait(100)
         } finally { this.#locked = false }
     }
     prev(distance) {
