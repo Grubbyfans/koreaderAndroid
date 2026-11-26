@@ -2,21 +2,29 @@ package com.yuezhou.reader.reader.animation
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.selects.select
 
-/** A new input may finish the visual, but never cancels or duplicates the navigation that follows it. */
+/** Accelerate the remaining frames without dropping the visual or cancelling navigation. */
 suspend fun awaitPageTurnVisual(
     finishRequested: Deferred<Unit>,
-    render: suspend CoroutineScope.() -> Unit,
+    render: suspend CoroutineScope.(speed: () -> Int) -> Unit,
     showFinalFrame: () -> Unit,
+    continuous: Boolean = false,
 ) = coroutineScope {
-    val visual = launch(block = render)
-    select<Unit> {
-        visual.onJoin { }
-        finishRequested.onAwait { visual.cancelAndJoin() }
-    }
+    render { if (finishRequested.isCompleted) 3 else if (continuous) 2 else 1 }
     showFinalFrame()
+}
+
+/** Shared by the fade and curl renderers; timestamps stay continuous when speed changes. */
+class PageTurnFrameTime {
+    private var previous: Long? = null
+    private var virtual = 0L
+
+    fun frame(time: Long, speed: Int): Long {
+        val last = previous
+        if (last == null) virtual = time
+        else virtual += (time - last).coerceAtLeast(0) * speed
+        previous = time
+        return virtual
+    }
 }

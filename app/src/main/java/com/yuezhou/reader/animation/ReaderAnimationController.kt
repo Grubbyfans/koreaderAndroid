@@ -5,7 +5,11 @@ import android.widget.FrameLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.MonotonicFrameClock
 import androidx.compose.runtime.withFrameNanos
+import com.yuezhou.reader.reader.animation.PageTurnFrameTime
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import com.yuezhou.reader.reader.ReaderWebView
 import com.yuezhou.reader.reader.animation.PageTurnTransaction
 import com.yuezhou.reader.reader.animation.PreviewPageProvider
@@ -42,6 +46,8 @@ internal class ReaderAnimationController(
     private var motion: Job? = null
     private var finishVisual: CompletableDeferred<Unit>? = null
     private var publishingCommit = false
+    private var lastTapTime = 0L
+    private var continuousTurn = false
     private var renderAvailable = true
     private var pendingFallbackDirection: Int? = null
     private var dragToken: PageTurnTransaction.Token? = null
@@ -102,6 +108,9 @@ internal class ReaderAnimationController(
             // The bridge disables slide for native modes, so a renderer failure falls back instantly.
             return false
         }
+        val now = android.os.SystemClock.uptimeMillis()
+        continuousTurn = lastTapTime != 0L && now - lastTapTime < 300L
+        lastTapTime = now
         pages.preferredDirection = direction
         pendingTurn = direction // Bound the backlog to the latest requested direction.
         finishVisual?.complete(Unit)
@@ -134,30 +143,39 @@ internal class ReaderAnimationController(
         transaction.settle(token)
         val finishRequested = CompletableDeferred<Unit>()
         finishVisual = finishRequested
+        val continuous = !manual && continuousTurn
         if (commit) pages.prepareAhead(token.target.cfi)
         motion = scope.launch {
             try {
-                awaitPageTurnVisual(finishRequested, render = {
-                    if (mode == "ios_curl") {
-                        if (!manual) curl.begin(if (direction > 0) ReaderTurnDirection.NEXT else ReaderTurnDirection.PREVIOUS,
-                            token.origin.width, token.origin.height, parent.resources.displayMetrics.density, scope, automatic = true)
-                        curl.rendererReady()
-                        val settle = launch { curl.settle(commit, velocity) }
-                        while (settle.isActive) {
-                            withFrameNanos { }
+                awaitPageTurnVisual(finishRequested, render = { speed ->
+                    val parentClock = coroutineContext[MonotonicFrameClock]!!
+                    val timeline = PageTurnFrameTime()
+                    val clock = object : MonotonicFrameClock {
+                        override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R =
+                            parentClock.withFrameNanos { onFrame(timeline.frame(it, speed())) }
+                    }
+                    withContext(clock) {
+                        if (mode == "ios_curl") {
+                            if (!manual) curl.begin(if (direction > 0) ReaderTurnDirection.NEXT else ReaderTurnDirection.PREVIOUS,
+                                token.origin.width, token.origin.height, parent.resources.displayMetrics.density, this, automatic = true)
+                            curl.rendererReady()
+                            val settle = launch { curl.settle(commit, velocity) }
+                            while (settle.isActive) {
+                                withFrameNanos { }
+                                curl.config?.let { overlay.curl(it, curl.values) }
+                            }
+                            settle.join()
                             curl.config?.let { overlay.curl(it, curl.values) }
-                        }
-                        settle.join()
-                        curl.config?.let { overlay.curl(it, curl.values) }
-                    } else {
-                        Animatable(if (manual) overlay.fadeProgress else 0f).animateTo(if (commit) 1f else 0f, tween(360, easing = FastOutSlowInEasing)) {
-                            overlay.fadeProgress = value
+                        } else {
+                            Animatable(if (manual) overlay.fadeProgress else 0f).animateTo(if (commit) 1f else 0f, tween(360, easing = FastOutSlowInEasing)) {
+                                overlay.fadeProgress = value
+                            }
                         }
                     }
                 }, showFinalFrame = {
                     overlay.showPage(commit)
                     curl.reset()
-                })
+                }, continuous = continuous)
                 if (finishVisual === finishRequested) finishVisual = null
                 if (!commit) {
                     transaction.finish(token); overlay.clear(); curl.reset()
@@ -289,7 +307,11 @@ internal class ReaderAnimationController(
     }
 
     fun cancel(clearPending: Boolean = true) {
-        if (clearPending) pendingTurn = null
+        if (clearPending) {
+            pendingTurn = null
+            lastTapTime = 0L
+            continuousTurn = false
+        }
         if (dragToken != null || deferredDragDirection != null) swallowGesture = true
         deferredDragDirection = null
         pendingFallbackDirection = null
