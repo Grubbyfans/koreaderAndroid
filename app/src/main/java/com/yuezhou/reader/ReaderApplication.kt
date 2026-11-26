@@ -7,7 +7,7 @@ import com.yuezhou.reader.speech.SpeechRuntime
 /**
  * 应用级装配：在进程启动时为朗读服务注入与 Activity/WebView 无关的依赖（方案 §9.1）。
  *
- * 正式版只装配系统 TTS；测试版子类会额外注入 Kokoro 引擎提供者。
+ * 测试版和正式版均使用系统 TTS。
  *
  * 阶段 C 进程守卫：`:zlibraryweb` 网页进程只承载 WebView，不初始化 Room（进度端口）、
  * 同步服务、阅读器或 TTS/Kokoro。应用未声明 ContentProvider / AndroidX Startup，
@@ -22,6 +22,6 @@ open class ReaderApplication : Application() {
         installSpeechEngines()
     }
 
-    /** 变体扩展点：测试版在此注入 Kokoro 提供者；仅主进程会执行。 */
+    /** 实验构建可在主进程注入自定义引擎。 */
     protected open fun installSpeechEngines() {}
 }

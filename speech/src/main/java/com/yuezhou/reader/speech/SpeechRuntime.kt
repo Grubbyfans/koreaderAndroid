@@ -9,7 +9,7 @@ import com.yuezhou.reader.core.speech.SpeechSynthesizer
 /**
  * 朗读运行时的应用级装配点（技术方案 §9.1）。
  *
- * app 在 `Application.onCreate()` 注入进度写入端口；测试版还可注入 Kokoro 引擎提供者。
+ * app 在 `Application.onCreate()` 注入进度写入端口；独立实验构建可注入 Kokoro 提供者。
  * 服务只依赖这里的端口，不反向依赖 app / reader 模块。
  */
 object SpeechRuntime {
@@ -58,7 +58,7 @@ data class KokoroImportResult(
 )
 
 /**
- * Kokoro 引擎提供者：由测试版变体实现并注入，正式版不实现（用户只看到系统 TTS）。
+ * Kokoro 引擎提供者供独立实验构建使用。
  */
 interface KokoroEngineProvider {
 

@@ -4,10 +4,20 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.yuezhou.reader.core.speech.SpeechEngineType
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ReaderSettingsTest {
+    @Test
+    fun legacyKokoroPreferenceUsesSystemTtsWhenEngineIsUnavailable() {
+        val stored = ReaderPreferences(speechEngine = "kokoro", speechVoice = "system-voice")
+
+        assertEquals(SpeechEngineType.SYSTEM_TTS, stored.effectiveSpeechEngine(kokoroAvailable = false))
+        assertEquals(SpeechEngineType.KOKORO, stored.effectiveSpeechEngine(kokoroAvailable = true))
+        assertEquals("system-voice", stored.speechVoice)
+    }
+
     @Test
     fun separateEditsFromTheSameSnapshotBothSurvive() {
         val theme = stringPreferencesKey("theme")

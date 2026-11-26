@@ -27,7 +27,7 @@
 | 静读正式版渠道调试包 | `:app:assembleProductionDebug` | `app/build/outputs/apk/production/debug/app-production-debug.apk` |
 | 静读 Release 本地安装包 | `:app:assembleProductionRelease` | `app/build/outputs/apk/production/release/app-production-release.apk` |
 
-测试版包名为 `com.yuezhou.reader.tts.test`，版本名带 `-tts-test`。它包含 sherpa-onnx 运行时和测试入口，可与包名为 `com.yuezhou.reader` 的「静读」同时安装。`productionRelease` 暂用仓库内的 Debug 密钥，供旧版覆盖安装和本地验证。对外发布时应改用独立的正式签名密钥。使用明确的变体任务，避免 `:app:assembleDebug` 同时构建两个 Debug 变体。
+测试版包名为 `com.yuezhou.reader.tts.test`，版本名带 `-tts-test`。可与包名为 `com.yuezhou.reader` 的「静读」同时安装。`productionRelease` 暂用仓库内的 Debug 密钥，供旧版覆盖安装和本地验证。对外发布时应改用独立的正式签名密钥。使用明确的变体任务，避免 `:app:assembleDebug` 同时构建两个 Debug 变体。
 
 ### 测试版签名固定（2026-11-24）
 
@@ -78,29 +78,11 @@ node --test tests/*.test.mjs
 ./gradlew :app:lintProductionDebug
 ```
 
-## 阶段 B 试音（仅 ttsTestDebug）
+## 朗读构建
 
-Kokoro 模型不随 APK 分发。把官方包解压后复制到测试版私有目录：
+测试版和正式版都使用 Android 系统 TTS。Kokoro 引擎、模型管理和试音入口暂停随 APK 分发，实验代码保留在 `experiments/kokoro/`。旧版选过 Kokoro 的设备会回退到系统 TTS，仍可选用系统音色。既有模型文件和偏好保留在应用数据中。
 
-```bash
-PKG=com.yuezhou.reader.tts.test
-adb push <解压目录> /sdcard/Android/data/$PKG/files/tts-models/
-adb shell "run-as $PKG sh -c 'mkdir -p files/tts-models && cp -r /sdcard/Android/data/$PKG/files/tts-models/* files/tts-models/'"
-```
-
-在目标机（S25+ / Android 16）上，应用进程看不到 adb 直接写入外部目录的子目录，必须用 `run-as` 复制到内部 `files/`；试音代码读取 `filesDir/tts-models/<model-id>`。
-
-通过 ADB 启动自动试音。测试版桌面只显示「静读测试版」主入口。
-
-```bash
-adb shell am start -n $PKG/com.yuezhou.reader.tts.KokoroTrialActivity \
-  --ez autorun true --es model int8 --es speeds 0.8,1.0,1.2,1.5
-adb logcat -s KokoroTrial:I
-```
-
-模型标识：`int8` → `kokoro-int8-multi-lang-v1_1`，`fp32` → `kokoro-multi-lang-v1_1`。
-WAV 落在 `files/trials/`，可用 `adb exec-out run-as $PKG cat files/trials/<name>.wav > out.wav` 取回。
-该 Activity 与 sherpa-onnx AAR 只存在于 `ttsTest` 变体，正式包不含。
+从旧的含 Kokoro 构建切换时，先运行 `./gradlew :app:clean`，以清除旧 APK 的增量打包残留。打包后可运行 `python3 tests/verify-apk-native-libraries.py <APK路径>`，检查 Sherpa-ONNX 和 ONNX Runtime 原生库。
 
 注意：
 

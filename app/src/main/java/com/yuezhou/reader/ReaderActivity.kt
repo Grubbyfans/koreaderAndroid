@@ -592,7 +592,7 @@ private fun ReaderScreen(
         val id = bookId ?: return
         val (fileName, source) = openedSource ?: return
         val prefs = latestPrefs
-        val engine = if (prefs.speechEngine == "kokoro" && SpeechRuntime.kokoroAvailable) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS
+        val engine = prefs.effectiveSpeechEngine(SpeechRuntime.kokoroAvailable)
         val novelParsing = engine == SpeechEngineType.KOKORO
         speechPreparationJob?.cancel()
         speechPreparationJob = scope.launch {
@@ -1489,7 +1489,7 @@ private fun SettingsControls(
                     modifier = Modifier.weight(1f),
                 )
             }
-            // 朗读引擎：测试版装配 Kokoro 后才显示切换；正式版固定系统 TTS。
+            val usingKokoro = prefs.effectiveSpeechEngine(kokoroModels.isNotEmpty()) == SpeechEngineType.KOKORO
             if (kokoroModels.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("引擎", style = MaterialTheme.typography.bodyMedium)
@@ -1497,21 +1497,21 @@ private fun SettingsControls(
                     TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "system")) }) {
                         Text(
                             "系统 TTS",
-                            color = if (prefs.speechEngine != "kokoro") MaterialTheme.colorScheme.primary
+                            color = if (!usingKokoro) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (prefs.speechEngine != "kokoro") FontWeight.Bold else FontWeight.Normal,
+                            fontWeight = if (!usingKokoro) FontWeight.Bold else FontWeight.Normal,
                         )
                     }
                     TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "kokoro")) }) {
                         Text(
                             "Kokoro",
-                            color = if (prefs.speechEngine == "kokoro") MaterialTheme.colorScheme.primary
+                            color = if (usingKokoro) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (prefs.speechEngine == "kokoro") FontWeight.Bold else FontWeight.Normal,
+                            fontWeight = if (usingKokoro) FontWeight.Bold else FontWeight.Normal,
                         )
                     }
                 }
-                if (prefs.speechEngine == "kokoro") {
+                if (usingKokoro) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("模型", style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.width(12.dp))
@@ -1531,7 +1531,7 @@ private fun SettingsControls(
                     }
                 }
             }
-            if (prefs.speechEngine != "kokoro") {
+            if (!usingKokoro) {
                 SpeechVoicePreference(voices, prefs.speechVoice) { name ->
                     onPrefsChange(prefs.copy(speechVoice = name))
                 }

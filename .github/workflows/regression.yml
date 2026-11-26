@@ -32,3 +32,13 @@ jobs:
           :app:testTtsTestDebugUnitTest :app:testProductionDebugUnitTest
           :core:testDebugUnitTest :reader:testDebugUnitTest
           :speech:testDebugUnitTest :novel-text:test
+      - name: Verify system TTS packaging for both distributions
+        run: |
+          ./gradlew --no-daemon --console=plain \
+            :app:assembleTtsTestDebug :app:assembleTtsTestRelease \
+            :app:assembleProductionDebug :app:assembleProductionRelease
+          python3 tests/verify-apk-native-libraries.py \
+            app/build/outputs/apk/ttsTest/debug/*.apk \
+            app/build/outputs/apk/ttsTest/release/*.apk \
+            app/build/outputs/apk/production/debug/*.apk \
+            app/build/outputs/apk/production/release/*.apk

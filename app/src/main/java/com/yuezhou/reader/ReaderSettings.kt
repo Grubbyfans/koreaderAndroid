@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.yuezhou.reader.core.speech.SpeechEngineType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -31,13 +32,12 @@ data class ReaderPreferences(
     val speechRate: Float = 1.0f,
     /** 朗读音色名（TextToSpeech.setVoice 入参）；空串表示用引擎默认音色。 */
     val speechVoice: String = "",
-    /** 朗读引擎：system=系统 TTS，kokoro=内置 Kokoro（仅测试版可用）。 */
+    /** 保存的朗读引擎偏好；实验构建提供 Kokoro 时可恢复旧选择。 */
     val speechEngine: String = "system",
     /** Kokoro 模型 ID；空串表示用提供者的默认模型。 */
     val kokoroModel: String = "",
     /** Kokoro 中文音色 ID。 */
     val kokoroSpeaker: Int = 3,
-    /** 实验性小说解析，仅 Kokoro 使用；默认关闭。 */
     val fontId: String = "book",
     val fontWeight: Int = 0,
     /** 开启时按书内位置判断是否从云端续读，退出或切出时上传已确认的本机进度。 */
@@ -45,6 +45,9 @@ data class ReaderPreferences(
     /** 阅读亮度（0.0..1.0）；-1f 表示未设置，跟随系统。 */
     val brightness: Float = -1f,
 )
+
+internal fun ReaderPreferences.effectiveSpeechEngine(kokoroAvailable: Boolean): SpeechEngineType =
+    if (speechEngine == "kokoro" && kokoroAvailable) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS
 
 private val Context.readerDataStore by preferencesDataStore(name = "reader_settings")
 

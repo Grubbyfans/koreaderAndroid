@@ -42,7 +42,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [内置Sherpa-ONNX_Kokoro_TTS技术改造方案_v3.3.md](<03-TTS与语音/内置Sherpa-ONNX_Kokoro_TTS技术改造方案_v3.3.md>) | 离线 TTS 改造方案 **v3.3（现行适用版本）** |
+| [内置Sherpa-ONNX_Kokoro_TTS技术改造方案_v3.3.md](<03-TTS与语音/内置Sherpa-ONNX_Kokoro_TTS技术改造方案_v3.3.md>) | 离线 TTS 实验方案 v3.3（当前分发包使用系统 TTS） |
 | [内置Sherpa-ONNX_Kokoro_TTS技术改造方案.md](<03-TTS与语音/内置Sherpa-ONNX_Kokoro_TTS技术改造方案.md>) | 离线 TTS 改造方案 v3.1（历史版本） |
 | [TTS验收报告.md](<03-TTS与语音/TTS验收报告.md>) | 内置 Kokoro TTS 改造验收报告 |
 | [tts-engine-investigation.md](<03-TTS与语音/tts-engine-investigation.md>) | 第三方 TTS 语音引擎接入调研与复盘 |

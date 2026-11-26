@@ -400,7 +400,7 @@ internal fun SettingsPage(
                 SpeechBackgroundSettings()
             }
 
-            if (modelManagerOpen) {
+            if (modelManagerOpen && SpeechRuntime.kokoro != null) {
                 KokoroModelManagerDialog(
                     models = modelInfos,
                     diagnostics = speechDiagnostics,

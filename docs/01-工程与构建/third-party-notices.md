@@ -24,13 +24,13 @@
   仅参考其揭示的 CREngine XPointer 格式与空白折叠行为（属协议事实，非代码），
   避免 AGPL 传染。参考副本保存在 `.workbuddy/ref/`（不入库）。
 
-## sherpa-onnx Android 运行时（阶段 A 已核验，尚未接入构建）
+## sherpa-onnx Android 运行时（Kokoro 实验依赖）
 
 - **版本**：`sherpa-onnx-1.13.4.aar`（官方 GitHub Release 产物）
 - **来源**：https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-1.13.4.aar
 - **SHA-256**：`03f9c4df965f21c71269365a7951a7f23b5696fddd093fa318c80d65550ab780`
 - **许可证**：Apache-2.0
-- **本地位置**：`speech/libs/sherpa-onnx-1.13.4.aar`（未入库；当前 `speech/build.gradle.kts` **未引用**，阶段 B 接入）
+- **本地位置**：`speech/libs/sherpa-onnx-1.13.4.aar`（仓库保留的实验依赖；测试版和正式版均不引用）
 - **核验结果**：
   - ABI：`arm64-v8a`、`armeabi-v7a`、`x86`、`x86_64` 四套 JNI。
   - 每个 ABI 含 `libonnxruntime.so`、`libsherpa-onnx-c-api.so`、`libsherpa-onnx-cxx-api.so`、`libsherpa-onnx-jni.so`。
