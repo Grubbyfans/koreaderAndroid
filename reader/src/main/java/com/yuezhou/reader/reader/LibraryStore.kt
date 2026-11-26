@@ -3,21 +3,25 @@ package com.yuezhou.reader.reader
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.yuezhou.reader.core.protocol.CoverFile
 import com.yuezhou.reader.core.protocol.LibraryBook
 import com.yuezhou.reader.core.protocol.LibraryCatalog
 import com.yuezhou.reader.core.protocol.LibraryCatalogData
 import com.yuezhou.reader.core.protocol.ProgressRecords
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+import java.io.IOException
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
@@ -38,22 +42,43 @@ import java.time.format.DateTimeFormatter
  */
 class LibraryStore(private val context: Context) {
 
+    companion object {
+        private val catalogMutex = Mutex()
+        private val progressMutex = Mutex()
+        private val shelfVisibilityLock = Any()
+    }
+
+    internal suspend fun <T> withCatalogMutation(block: suspend () -> T): T =
+        catalogMutex.withLock { block() }
+
     private val root: File
         get() = File(context.filesDir, "library").apply { mkdirs() }
 
     private val libraryFile: File get() = File(root, "library.json")
     /** 正文目录：复用 EpubImporter 的 files/epub/，与 WebViewAssetLoader 的 /epub/ handler 对齐。 */
-    private val booksDir: File get() = EpubImporter.epubDir(context)
+    private val booksDir: File by lazy { EpubImporter.epubDir(context) }
     private val coversDir: File get() = File(root, "covers").apply { mkdirs() }
-    private val progressDir: File get() = File(root, "progress").apply { mkdirs() }
+    private val progressDir: File get() = File(root, "progress")
     /** 显示名映射：bookId → EPUB 元数据书名（本地展示用，不写入 library.json 以保持协议 title=bookId）。 */
     private val titlesFile: File get() = File(root, "display_titles.json")
+
+    private val authorPrefs by lazy { context.getSharedPreferences("shelf_authors_v1", Context.MODE_PRIVATE) }
+    private val authorIndex by lazy {
+        ShelfAuthorIndex(
+            read = { key -> authorPrefs.getString(key, null) },
+            write = { entries ->
+                val editor = authorPrefs.edit()
+                entries.forEach { (key, value) -> editor.putString(key, value) }
+                editor.apply()
+            },
+        )
+    }
 
     private val shelfPrefs = context.getSharedPreferences("bookshelf_visibility", Context.MODE_PRIVATE)
 
     fun hiddenBookIds(): Set<String> = shelfPrefs.getStringSet("hidden", emptySet()).orEmpty().toSet()
 
-    fun setBooksHidden(bookIds: Set<String>, hidden: Boolean) {
+    fun setBooksHidden(bookIds: Set<String>, hidden: Boolean) = synchronized(shelfVisibilityLock) {
         val previous = hiddenBookIds()
         shelfPrefs.edit().putStringSet("hidden", if (hidden) previous + bookIds else previous - bookIds).apply()
     }
@@ -65,6 +90,7 @@ class LibraryStore(private val context: Context) {
     /** 当前内存中的书库（列表 + 封面解码缓存），供 UI 直接读取。 */
     data class Snapshot(
         val books: List<Entry>,
+        val error: String? = null,
     )
 
     /** 单本书的展示信息：协议字段 + 本地展示用的封面/进度/书名。 */
@@ -88,17 +114,20 @@ class LibraryStore(private val context: Context) {
     )
 
     /** 读取本地书库快照。书库文件不存在或损坏时返回空列表（不覆盖原文件）。 */
-    suspend fun snapshot(includeCoverBytes: Boolean = true): Snapshot = withContext(Dispatchers.IO) {
+    suspend fun snapshot(includeCoverBytes: Boolean = true, includeProgress: Boolean = true): Snapshot = withContext(Dispatchers.IO) {
         val entries = if (libraryFile.exists()) {
             try {
                 val catalog = LibraryCatalog.decode(libraryFile.readText())
                 val titles = readTitles()
                 catalog.books.mapNotNull { book ->
-                    toEntry(book, titles[book.bookId] ?: book.bookId, includeCoverBytes)
+                    ensureActive()
+                    toEntry(book, titles[book.bookId] ?: book.bookId, includeCoverBytes, includeProgress)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                // 书库损坏：按方案约定保留原文件，返回空列表由上层提示，不静默清空。
-                emptyList()
+                Log.e("LibraryStore", "无法读取本地书库", e)
+                return@withContext Snapshot(emptyList(), "无法读取本地书库，原文件已保留")
             }
         } else {
             emptyList()
@@ -106,33 +135,67 @@ class LibraryStore(private val context: Context) {
         Snapshot(entries)
     }
 
+    /** File presence checks only, for cloud badges, scans and download conflict checks. */
+    suspend fun availableBookIds(): Set<String> = availableBookKeys(LibraryBook::bookId)
+
+    internal suspend fun availableFileNames(): Set<String> = availableBookKeys(LibraryBook::fileName)
+
+    private suspend fun availableBookKeys(key: (LibraryBook) -> String): Set<String> = withContext(Dispatchers.IO) {
+        val catalog = try {
+            readCatalog()
+        } catch (e: IOException) {
+            Log.w("LibraryStore", "无法读取本地书库", e)
+            return@withContext emptySet()
+        }
+        val directory = booksDir
+        catalog.books.asSequence()
+            .filter { book -> sourceUri(book) != null || File(directory, book.fileName).isFile }
+            .map(key)
+            .toSet()
+    }
+
+    internal suspend fun uploadEntry(bookId: String): Entry? = withContext(Dispatchers.IO) {
+        val book = catalogBook(bookId) ?: return@withContext null
+        toEntry(book, readTitles()[bookId] ?: bookId, includeCoverBytes = false, includeProgress = false)
+    }
+
     suspend fun shelfAuthors(books: List<Entry>): Map<String, List<String>> = withContext(Dispatchers.IO) {
-        buildMap {
-            for (book in books) {
-                ensureActive()
-                val source = book.sourceUri
-                val authors = if (source == null) {
-                    CoverExtractor.extractAuthors(File(book.localPath))
-                } else {
-                    runCatching {
-                        context.contentResolver.openFileDescriptor(source, "r")?.use { descriptor ->
-                            CoverExtractor.extractAuthors(File("/proc/self/fd/${descriptor.fd}"))
-                        }.orEmpty()
-                    }.getOrDefault(emptyList())
-                }
-                if (authors.isNotEmpty()) put(book.bookId, authors)
+        authorIndex.resolve(books, Entry::bookId) { book ->
+            ensureActive()
+            val source = book.sourceUri
+            val stamp = authorStamp(book.fileName, source)
+            cachedOrRead(book.bookId, stamp) {
+                if (source == null) CoverExtractor.extractAuthors(File(book.localPath))
+                else runCatching {
+                    context.contentResolver.openFileDescriptor(source, "r")?.use { descriptor ->
+                        CoverExtractor.extractAuthors(File("/proc/self/fd/${descriptor.fd}"))
+                    }
+                }.getOrNull()
             }
         }
     }
 
-    private fun toEntry(book: LibraryBook, title: String, includeCoverBytes: Boolean): Entry? {
-        // 正文必须真实存在，否则列表条目视为失效（本地删除后残留记录）。
+    suspend fun authorsFor(book: Entry): List<String> = shelfAuthors(listOf(book))[book.bookId].orEmpty()
+
+    private fun authorStamp(fileName: String, source: Uri?): String? {
+        val generation = EpubFileGeneration.of(context, fileName, source)
+        val modifiedAt = generation.substringAfterLast('-').toLongOrNull()
+        if (modifiedAt == null || modifiedAt <= 0 || generation.contains("--")) return null
+        return "${source ?: fileName}|$generation"
+    }
+
+    private fun toEntry(
+        book: LibraryBook,
+        title: String,
+        includeCoverBytes: Boolean,
+        includeProgress: Boolean,
+    ): Entry? {
         val source = sourceUri(book)
         val epub = File(booksDir, book.fileName)
         if (source == null && !epub.isFile) return null
         val coverFile = book.coverPath?.let { File(root, it) }
         val cover = coverFile?.takeIf { includeCoverBytes }?.let(::readCover)
-        val progress = readProgress(book.bookId)
+        val progress = if (includeProgress) readProgress(book.bookId) else null
         return Entry(
             bookId = book.bookId,
             fileName = book.fileName,
@@ -161,9 +224,23 @@ class LibraryStore(private val context: Context) {
     private fun sourceUri(book: LibraryBook): Uri? =
         book.raw["localSourceUri"]?.jsonPrimitive?.contentOrNull?.let(Uri::parse)
 
+    private fun readCatalog(): LibraryCatalogData =
+        if (libraryFile.exists()) {
+            try {
+                LibraryCatalog.decode(libraryFile.readText())
+            } catch (e: Exception) {
+                throw IOException("无法读取本地书库，原文件已保留", e)
+            }
+        } else {
+            LibraryCatalog.decode(LibraryCatalog.emptyJson())
+        }
+
     private fun catalogBook(bookId: String): LibraryBook? =
-        if (libraryFile.isFile) LibraryCatalog.decode(libraryFile.readText()).books.find { it.bookId == bookId }
-        else null
+        readCatalog().books.find { it.bookId == bookId }
+
+    internal suspend fun bookSize(bookId: String): Long = withContext(Dispatchers.IO) {
+        catalogBook(bookId)?.size ?: readBookSize(bookId)
+    }
 
     data class BookLocation(val fileName: String, val uri: Uri?, val tree: Uri?)
 
@@ -186,51 +263,55 @@ class LibraryStore(private val context: Context) {
      * @param fileName 目标文件名（含 .epub，已 sanitize，正文须已存在于 files/epub/）。
      * @param coverPng 提取出的封面 PNG（可为 null 表示无封面）。
      */
-    suspend fun registerBook(
+    internal fun registerBookLocked(
         fileName: String,
         coverPng: ByteArray?,
         title: String? = null,
         source: Uri? = null,
         sourceTree: Uri? = null,
         sourceSize: Long? = null,
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val target = File(booksDir, fileName)
-            if (source == null && !target.isFile)
-                return@withContext Result.failure(IllegalStateException("正文不存在: $fileName"))
-
-            val bookId = com.yuezhou.reader.core.protocol.BookNames.localId(fileName).first
-                ?: return@withContext Result.failure(IllegalStateException("无效 EPUB 文件名: $fileName"))
-
-            // 书名：写入本地显示名映射（不写 library.json，保持协议 title=bookId）
-            if (!title.isNullOrBlank()) {
-                writeTitle(bookId, title)
+        authors: List<String>? = null,
+    ): String {
+        val target = File(booksDir, fileName)
+        check(source != null || target.isFile) { "正文不存在: $fileName" }
+        val bookId = com.yuezhou.reader.core.protocol.BookNames.localId(fileName).first
+            ?: error("无效 EPUB 文件名: $fileName")
+        val catalog = readCatalog()
+        val previous = catalog.books.firstOrNull { it.bookId == bookId }
+        val newCover = coverPng?.takeIf { it.isNotEmpty() }?.let(CoverFile::encode)
+        val coverPath = if (newCover != null) "covers/$bookId.json" else previous?.coverPath
+        val coverVersion = if (newCover != null) java.util.UUID.randomUUID().toString().replace("-", "")
+        else previous?.coverVersion
+        val updatedCatalog = updatedCatalog(
+            catalog, bookId, fileName, sourceSize ?: target.length(), coverPath, coverVersion, source, sourceTree,
+        )
+        if (newCover == null) {
+            libraryFile.writeAtomically(updatedCatalog)
+        } else {
+            val coverFile = File(coversDir, "$bookId.json")
+            val oldCover = coverFile.takeIf { it.exists() }?.readText()
+            coverFile.writeAtomically(newCover)
+            try {
+                libraryFile.writeAtomically(updatedCatalog)
+            } catch (e: Exception) {
+                if (oldCover != null) coverFile.writeAtomically(oldCover) else coverFile.delete()
+                throw e
             }
-
-            // 封面：有则写 covers/<bookId>.json，否则移除旧封面
-            var coverPath: String? = null
-            var coverVersion: String? = null
-            if (coverPng != null && coverPng.isNotEmpty()) {
-                val coverFile = File(coversDir, "$bookId.json")
-                coverFile.writeText(CoverFile.encode(coverPng))
-                coverPath = "covers/$bookId.json"
-                coverVersion = java.util.UUID.randomUUID().toString().replace("-", "")
-            } else {
-                File(coversDir, "$bookId.json").delete()
-            }
-
-            // 登记 library.json
-            val size = sourceSize ?: target.length()
-            upsertCatalog(bookId, fileName, size, coverPath, coverVersion, source, sourceTree)
-
-            setBooksHidden(setOf(bookId), false)
-            Result.success(bookId)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
+        if (!title.isNullOrBlank()) writeTitle(bookId, title)
+        try {
+            val stamp = if (authors != null) authorStamp(fileName, source) else null
+            if (stamp != null && authors != null) authorIndex.record(bookId, stamp, authors)
+            else authorPrefs.edit().remove(bookId).apply()
+        } catch (e: Exception) {
+            Log.w("LibraryStore", "无法保存作者索引", e)
+        }
+        setBooksHidden(setOf(bookId), false)
+        return bookId
     }
 
-    private fun upsertCatalog(
+    private fun updatedCatalog(
+        catalog: LibraryCatalogData,
         bookId: String,
         fileName: String,
         size: Long,
@@ -238,11 +319,7 @@ class LibraryStore(private val context: Context) {
         coverVersion: String?,
         source: Uri?,
         sourceTree: Uri?,
-    ) {
-        val existing: List<LibraryBook> = if (libraryFile.exists()) {
-            try { LibraryCatalog.decode(libraryFile.readText()).books } catch (e: Exception) { emptyList() }
-        } else emptyList()
-
+    ): String {
         val now = now()
         val newRaw = buildJsonObject {
             put("schemaVersion", 2)
@@ -271,39 +348,38 @@ class LibraryStore(private val context: Context) {
             raw = newRaw,
         )
 
-        val merged = existing.filter { it.bookId != bookId } + newBook
-        val catalog = LibraryCatalogData(
-            books = merged.sortedBy { it.bookId },
-            coverDirectoryReady = true,
-            schemaVersion = 2,
-            raw = buildJsonObject { put("schemaVersion", 2); put("coverDirectoryReady", true) },
-        )
-        libraryFile.writeText(LibraryCatalog.encode(catalog))
+        val merged = catalog.books.filter { it.bookId != bookId } + newBook
+        return LibraryCatalog.encode(catalog.copy(books = merged.sortedBy { it.bookId }, coverDirectoryReady = true))
     }
 
     /** 保存阅读进度（CFI/XPointer + 百分比），复用 ProgressRecords 协议。 */
-    suspend fun saveProgress(bookId: String, location: String, percent: Double?) {
+    suspend fun saveProgress(bookId: String, location: String, percent: Double?): Boolean =
         withContext(Dispatchers.IO) {
-            try {
-                val size = catalogBook(bookId)?.size ?: readBookSize(bookId)
-                val now = now()
-                val record = com.yuezhou.reader.core.protocol.CloudProgress(
-                    bookId = bookId,
-                    title = bookId,
-                    size = size,
-                    xpointer = location,
-                    percent = percent,
-                    revision = 1,
-                    writeId = java.util.UUID.randomUUID().toString().replace("-", ""),
-                    deviceId = deviceId(),
-                    updatedAt = now,
-                )
-                File(progressDir, "$bookId.json").writeText(ProgressRecords.encode(record))
-            } catch (e: Exception) {
-                // 进度写失败不阻断阅读，仅忽略。
+            progressMutex.withLock {
+                try {
+                    val size = runCatching { catalogBook(bookId)?.size }.getOrNull() ?: readBookSize(bookId)
+                    val record = com.yuezhou.reader.core.protocol.CloudProgress(
+                        bookId = bookId,
+                        title = bookId,
+                        size = size,
+                        xpointer = location,
+                        percent = percent,
+                        revision = 1,
+                        writeId = java.util.UUID.randomUUID().toString().replace("-", ""),
+                        deviceId = deviceId(),
+                        updatedAt = now(),
+                    )
+                    val directory = progressDir.apply { mkdirs() }
+                    File(directory, "$bookId.json").writeAtomically(ProgressRecords.encode(record))
+                    true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("LibraryStore", "无法保存阅读进度", e)
+                    false
+                }
             }
         }
-    }
 
     /** 读取某本书保存的位置（CFI/XPointer）。无进度返回 null。 */
     suspend fun savedLocation(bookId: String): String? = savedProgress(bookId)?.first
@@ -317,48 +393,46 @@ class LibraryStore(private val context: Context) {
 
     /** 删除登记的本机原件与书架条目，保留阅读进度。 */
     suspend fun removeBooks(bookIds: Collection<String>, isOpen: (String) -> Boolean): BookDeletion = withContext(Dispatchers.IO) {
-        val existing: List<LibraryBook> = if (libraryFile.exists()) {
-            try { LibraryCatalog.decode(libraryFile.readText()).books } catch (e: Exception) { emptyList() }
-        } else emptyList()
-        val removed = ArrayList<String>()
-        val failures = linkedMapOf<String, String>()
-        for (bookId in bookIds) {
-            try {
-                check(!isOpen(bookId)) { "请先关闭正在阅读的书籍" }
-                val book = existing.firstOrNull { it.bookId == bookId } ?: error("书架条目已不存在")
-                val source = sourceUri(book)
-                if (source == null) {
-                    val file = File(booksDir, book.fileName)
-                    check(!file.exists() || file.delete()) { "无法删除应用私有文件" }
-                } else {
-                    val document = DocumentFile.fromSingleUri(context, source)
-                    check(document?.delete() == true) { "无法删除所选目录中的 EPUB，请检查文件及目录授权" }
+        withCatalogMutation {
+            val catalog = readCatalog()
+            val existing = catalog.books
+            val removed = ArrayList<String>()
+            val failures = linkedMapOf<String, String>()
+            for (bookId in bookIds) {
+                try {
+                    check(!isOpen(bookId)) { "请先关闭正在阅读的书籍" }
+                    val book = existing.firstOrNull { it.bookId == bookId } ?: error("书架条目已不存在")
+                    val source = sourceUri(book)
+                    if (source == null) {
+                        val file = File(booksDir, book.fileName)
+                        check(!file.exists() || file.delete()) { "无法删除应用私有文件" }
+                    } else {
+                        val document = DocumentFile.fromSingleUri(context, source)
+                        check(document?.delete() == true) { "无法删除所选目录中的 EPUB，请检查文件及目录授权" }
+                    }
+                    // 封面
+                    book.coverPath?.let { File(root, it).delete() }
+                    File(coversDir, "$bookId.json").delete()
+                    // 显示名映射
+                    removeTitle(bookId)
+                    removed.add(bookId)
+                } catch (e: Exception) {
+                    failures[bookId] = e.message ?: "删除失败"
                 }
-                // 封面
-                book.coverPath?.let { File(root, it).delete() }
-                File(coversDir, "$bookId.json").delete()
-                // 显示名映射
-                removeTitle(bookId)
-                removed.add(bookId)
-            } catch (e: Exception) {
-                failures[bookId] = e.message ?: "删除失败"
             }
+            if (removed.isNotEmpty()) {
+                // 从 library.json 摘除已移除项
+                val kept = existing.filter { it.bookId !in removed }
+                libraryFile.writeAtomically(LibraryCatalog.encode(catalog.copy(books = kept)))
+                runCatching {
+                    val editor = authorPrefs.edit()
+                    removed.forEach { editor.remove(it) }
+                    editor.apply()
+                }
+                setBooksHidden(removed.toSet(), false)
+            }
+            BookDeletion(removed, failures)
         }
-        if (removed.isNotEmpty()) {
-            // 从 library.json 摘除已移除项
-            val kept = existing.filter { it.bookId !in removed }
-            val catalog = LibraryCatalogData(
-                books = kept.sortedBy { it.bookId },
-                coverDirectoryReady = true,
-                schemaVersion = 2,
-                raw = buildJsonObject { put("schemaVersion", 2); put("coverDirectoryReady", true) },
-            )
-            libraryFile.writeText(LibraryCatalog.encode(catalog))
-            // 同步清理显示名映射文件（若已空则删除）
-            cleanupTitlesIfEmpty()
-            setBooksHidden(removed.toSet(), false)
-        }
-        BookDeletion(removed, failures)
     }
 
     /** 读取进度：返回 (percent, location, lastReadAtMillis)。无进度返回 null。 */
@@ -405,28 +479,25 @@ class LibraryStore(private val context: Context) {
     private fun writeTitle(bookId: String, title: String) {
         try {
             val jo = if (titlesFile.exists()) {
-                try { org.json.JSONObject(titlesFile.readText()) } catch (e: Exception) { org.json.JSONObject() }
+                org.json.JSONObject(titlesFile.readText())
             } else org.json.JSONObject()
             jo.put(bookId, title)
-            titlesFile.writeText(jo.toString())
-        } catch (e: Exception) { /* 忽略 */ }
+            titlesFile.writeAtomically(jo.toString())
+        } catch (e: Exception) {
+            Log.w("LibraryStore", "无法更新本地书名", e)
+        }
     }
 
     /** 从显示名映射中移除某本书。 */
     private fun removeTitle(bookId: String) {
         try {
             if (!titlesFile.exists()) return
-            val jo = try { org.json.JSONObject(titlesFile.readText()) } catch (e: Exception) { org.json.JSONObject() }
+            val jo = org.json.JSONObject(titlesFile.readText())
             if (jo.has(bookId)) jo.remove(bookId)
-            titlesFile.writeText(jo.toString())
-        } catch (e: Exception) { /* 忽略 */ }
-    }
-
-    /** 显示名映射为空时删除文件，避免残留空文件。 */
-    private fun cleanupTitlesIfEmpty() {
-        try {
-            if (titlesFile.exists() && readTitles().isEmpty()) titlesFile.delete()
-        } catch (e: Exception) { /* 忽略 */ }
+            titlesFile.writeAtomically(jo.toString())
+        } catch (e: Exception) {
+            Log.w("LibraryStore", "无法更新本地书名", e)
+        }
     }
 
     private fun readBookSize(bookId: String): Long {

@@ -1,6 +1,6 @@
 package com.yuezhou.reader.reader.online.importtest
 
-import com.yuezhou.reader.reader.online.import.OnlineImportCoordinator
+import com.yuezhou.reader.reader.EpubImportFiles
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -21,10 +21,9 @@ class OnlineImportCoordinatorTest {
         val staging = File(dir, "staging.tmp").apply { writeBytes("new-book".toByteArray()) }
         val target = File(dir, "book.epub")
 
-        val placement = OnlineImportCoordinator.placeBody(staging, target, replacing = false)
+        val placement = EpubImportFiles.install(staging, target)
 
         assertTrue(placement.newlyWritten)
-        assertFalse(placement.replaced)
         assertNull(placement.backup)
         assertTrue(target.isFile)
         assertArrayEquals("new-book".toByteArray(), target.readBytes())
@@ -36,10 +35,9 @@ class OnlineImportCoordinatorTest {
         val target = File(dir, "book.epub").apply { writeBytes("same".toByteArray()) }
         val staging = File(dir, "staging.tmp").apply { writeBytes("same".toByteArray()) }
 
-        val placement = OnlineImportCoordinator.placeBody(staging, target, replacing = true)
+        val placement = EpubImportFiles.install(staging, target)
 
         assertFalse(placement.newlyWritten)
-        assertFalse(placement.replaced)
         assertNull(placement.backup)
         assertArrayEquals("same".toByteArray(), target.readBytes())
         assertFalse(staging.exists())
@@ -50,13 +48,15 @@ class OnlineImportCoordinatorTest {
         val target = File(dir, "book.epub").apply { writeBytes("old".toByteArray()) }
         val staging = File(dir, "staging.tmp").apply { writeBytes("new".toByteArray()) }
 
-        val placement = OnlineImportCoordinator.placeBody(staging, target, replacing = true)
+        val placement = EpubImportFiles.install(staging, target)
 
-        assertTrue(placement.replaced)
         assertFalse(placement.newlyWritten)
         val backup = placement.backup
         assertNotNull(backup)
         assertEquals("old", backup!!.readText())
         assertEquals("new", target.readText())
+        placement.rollback(target)
+        assertEquals("old", target.readText())
+        assertFalse(backup.exists())
     }
 }

@@ -59,6 +59,18 @@ adb shell dumpsys package com.yuezhou.reader.tts.test | Select-String 'versionNa
 
 macOS / Linux 使用 `./gradlew :app:assembleTtsTestDebug`，安装时使用表中的测试版 APK 路径。若连接了多台设备，在安装和版本核对命令中使用 `adb -s <设备序列号>` 指定目标设备。打包后可用 SDK Build Tools 的 `aapt dump badging <APK路径>` 核对显示名称、包名和版本。
 
+### 回归测试
+
+GitHub Actions 的 `Reader regression` 对两个应用变体和各共享模块运行 JVM 测试，并单独运行阅读 WebView 的 Node 测试。本地可用同一组任务复现：
+
+```bash
+node --test tests/*.test.mjs
+./gradlew :app:testTtsTestDebugUnitTest :app:testProductionDebugUnitTest \
+  :core:testDebugUnitTest :reader:testDebugUnitTest :speech:testDebugUnitTest :novel-text:test
+```
+
+回归覆盖作者索引回填和缓存复用、阅读位置确认期间翻页、下载入队后导入及书架刷新。设备回归使用独立模拟器和合成数据，检查旧 Room 数据库升级、阅读器打开 EPUB，以及 WebDAV 下载后在书架打开。
+
 ### Lint
 
 ```bash

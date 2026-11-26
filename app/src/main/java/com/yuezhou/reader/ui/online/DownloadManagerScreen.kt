@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.YuezhouColors
+import com.yuezhou.reader.core.online.provider.CloudBookProvider
 import com.yuezhou.reader.core.online.download.DownloadStatus
 import com.yuezhou.reader.core.online.download.OnlineDownloadTask
 import com.yuezhou.reader.reader.online.upload.CloudUploadBridge
@@ -62,10 +63,6 @@ fun DownloadManagerScreen(
     vm: OnlineLibraryViewModel,
     onBack: () -> Unit,
     onOpenBook: suspend (String) -> Boolean,
-    onOpenLegacyDownloads: () -> Unit,
-    cloudTask: OnlineDownloadTask? = null,
-    onCancelCloudTask: () -> Unit = {},
-    onClearCloudTask: () -> Unit = {},
 ) {
     val tasks by vm.downloadManager.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
     var filter by remember { mutableStateOf(DownloadFilter.ALL) }
@@ -100,7 +97,6 @@ fun DownloadManagerScreen(
                 actions = {
                     TextButton(onClick = {
                         vm.downloadManager.clearHistory()
-                        if (cloudTask?.status?.active == false) onClearCloudTask()
                     }) { Text("清空历史") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -132,7 +128,7 @@ fun DownloadManagerScreen(
             }
 
             val webTaskIds = webTasks.map { it.taskId }.toSet()
-            val visible = (listOfNotNull(cloudTask) + tasks + webTasks.filter { web ->
+            val visible = (tasks + webTasks.filter { web ->
                 tasks.none { it.taskId == web.taskId }
             }).filter { task ->
                 when (filter) {
@@ -154,8 +150,6 @@ fun DownloadManagerScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text("暂无符合条件的下载任务", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = onOpenLegacyDownloads) { Text("查看云端下载任务") }
                 }
             } else {
                 LazyColumn(
@@ -167,17 +161,16 @@ fun DownloadManagerScreen(
                         DownloadTaskRow(
                             task = task,
                             onCancel = {
-                                if (task.taskId == cloudTask?.taskId) onCancelCloudTask()
-                                else if (task.taskId in webTaskIds) webDownloads.cancel(task.taskId)
+                                if (task.taskId in webTaskIds) webDownloads.cancel(task.taskId)
                                 else vm.downloadManager.cancel(task.taskId)
                             },
-                            onRetry = if (task.taskId == cloudTask?.taskId) null else ({
+                            onRetry = {
                                 if (task.errorMessage?.contains("同名") == true) {
                                     confirmTask = task
                                 } else {
                                     vm.downloadManager.retry(task.taskId)
                                 }
-                            }),
+                            },
                             onRead = task.localBookId?.takeIf { task.status == DownloadStatus.COMPLETED }?.let { id ->
                                 {
                                     if (!openingBook) {
@@ -200,7 +193,7 @@ fun DownloadManagerScreen(
                             } else {
                                 null
                             },
-                            onUpload = task.localBookId?.takeIf { task.taskId != cloudTask?.taskId }?.let {
+                            onUpload = task.localBookId?.takeIf { vm.registry.get(task.providerId) !is CloudBookProvider }?.let {
                                 {
                                     uploadError = null
                                     uploadReport = null
@@ -209,9 +202,6 @@ fun DownloadManagerScreen(
                                 }
                             },
                         )
-                    }
-                    item {
-                        TextButton(onClick = onOpenLegacyDownloads) { Text("查看云端下载任务") }
                     }
                 }
             }

@@ -8,7 +8,9 @@ import com.yuezhou.reader.core.online.model.BookDownloadRequest
 import com.yuezhou.reader.core.online.model.DownloadResult
 import com.yuezhou.reader.core.online.model.ProviderErrorCode
 import com.yuezhou.reader.core.online.model.ProviderException
-import com.yuezhou.reader.core.online.provider.CatalogBookProvider
+import com.yuezhou.reader.core.online.provider.BookProvider
+import com.yuezhou.reader.core.online.provider.CloudBookProvider
+import com.yuezhou.reader.core.online.provider.ProviderCapability
 import com.yuezhou.reader.core.online.provider.ProviderRegistry
 import com.yuezhou.reader.reader.EpubImportFiles
 import com.yuezhou.reader.reader.LibraryStore
@@ -16,8 +18,13 @@ import com.yuezhou.reader.reader.db.AppDatabase
 import com.yuezhou.reader.reader.online.import.OnlineImportResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,7 +73,7 @@ class BookDownloadManager(
 ) {
     private val semaphore = Semaphore(MAX_CONCURRENT)
     private val jobs = ConcurrentHashMap<String, Job>()
-    private val lastProgressAt = mutableMapOf<String, Long>()
+    private val queueMutation = Mutex()
     private val running = AtomicInteger(0)
     private val acceptLocks = ConcurrentHashMap<String, Mutex>()
 
@@ -80,7 +87,15 @@ class BookDownloadManager(
      * 启动时恢复：临时目录直接清理；pending 文件只有在归属、可读、EPUB 校验都通过时才保留。
      * 待命名/待覆盖/导入失败状态保留给用户处理；已完成任务不重复导入。
      */
-    suspend fun recoverInterrupted(): Int = withContext(Dispatchers.IO) {
+    fun startRecovery(): Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        recoverInterrupted()
+    }
+
+    suspend fun recoverInterrupted(): Int = queueMutation.withLock {
+        withContext(Dispatchers.IO) { recoverTasks() }
+    }
+
+    private suspend fun recoverTasks(): Int {
         files.temporaryDir().listFiles()?.forEach { it.delete() }
         var count = 0
 
@@ -111,6 +126,7 @@ class BookDownloadManager(
         }
 
         for (task in repository.unfinished()) {
+            if (jobs.containsKey(task.taskId)) continue
             when (task.status) {
                 DownloadStatus.AWAITING_NAME, DownloadStatus.IMPORT_FAILED -> {
                     if (!hasValidPending(task)) {
@@ -132,11 +148,14 @@ class BookDownloadManager(
                 DownloadStatus.VERIFYING,
                 DownloadStatus.IMPORTING,
                 -> {
-                    if (hasValidPending(task)) {
+                    val pending = pendingFile(task)
+                    if (pending.isFile && validatePending(task, pending) == null) {
                         // 不自动重复导入：保留文件，交给用户显式重试，避免重复写书库/映射。
                         repository.save(
                             task.copy(
                                 status = DownloadStatus.IMPORT_FAILED,
+                                localPath = pending.path,
+                                receivedBytes = pending.length(),
                                 errorMessage = "任务被中断，可重试导入（不会重新下载）",
                                 errorCode = null,
                                 updatedAt = System.currentTimeMillis(),
@@ -144,6 +163,7 @@ class BookDownloadManager(
                         )
                     } else {
                         deleteManagedFile(task.localPath)
+                        pending.delete()
                         repository.save(
                             task.copy(
                                 status = DownloadStatus.FAILED,
@@ -161,7 +181,7 @@ class BookDownloadManager(
         }
 
         count += cleanupOrphanPending()
-        count
+        return count
     }
 
     /** 入队：文件名已知时先检查同名，未确认覆盖则不发起网络请求。 */
@@ -170,26 +190,33 @@ class BookDownloadManager(
         title: String,
         overwriteApproved: Boolean = false,
     ): String = withContext(Dispatchers.IO) {
-        val safeName = EpubImportFiles.fileName(request.fileName)
-        val exists = localBookNames().contains(safeName)
-        val now = System.currentTimeMillis()
-        val task = OnlineDownloadTask(
-            taskId = UUID.randomUUID().toString(),
-            providerId = request.providerId,
-            accountScope = request.accountScope,
-            remoteId = request.remoteId,
-            bookTitle = title.ifBlank { safeName },
-            fileName = safeName,
-            totalBytes = request.expectedSize,
-            status = if (exists && !overwriteApproved) DownloadStatus.FAILED else DownloadStatus.QUEUED,
-            errorMessage = if (exists && !overwriteApproved) "本地已存在同名书籍，请确认覆盖后再下载" else null,
-            overwriteApproved = overwriteApproved,
-            createdAt = now,
-            updatedAt = now,
-        )
-        repository.save(task)
-        if (task.status == DownloadStatus.QUEUED) launch(task)
-        task.taskId
+        queueMutation.withLock {
+            val duplicate = repository.unfinished().firstOrNull {
+                it.status.active && it.providerId == request.providerId &&
+                    it.accountScope == request.accountScope && it.remoteId == request.remoteId
+            }
+            if (duplicate != null) return@withLock duplicate.taskId
+            val safeName = EpubImportFiles.fileName(request.fileName)
+            val exists = localBookNames().contains(safeName)
+            val now = System.currentTimeMillis()
+            val task = OnlineDownloadTask(
+                taskId = UUID.randomUUID().toString(),
+                providerId = request.providerId,
+                accountScope = request.accountScope,
+                remoteId = request.remoteId,
+                bookTitle = title.ifBlank { safeName },
+                fileName = safeName,
+                totalBytes = request.expectedSize,
+                status = if (exists && !overwriteApproved) DownloadStatus.FAILED else DownloadStatus.QUEUED,
+                errorMessage = if (exists && !overwriteApproved) "本地已存在同名书籍，请确认覆盖后再下载" else null,
+                overwriteApproved = overwriteApproved,
+                createdAt = now,
+                updatedAt = now,
+            )
+            repository.save(task)
+            if (task.status == DownloadStatus.QUEUED) launch(task)
+            task.taskId
+        }
     }
 
     /**
@@ -407,61 +434,67 @@ class BookDownloadManager(
     /** 显式重试：优先复用有效 pending；网页任务无暂存文件时不重新申请下载链接。 */
     fun retry(taskId: String, overwriteApproved: Boolean = false) {
         scope.launch {
-            val current = repository.find(taskId) ?: return@launch
-            if (current.status.active || current.status == DownloadStatus.AWAITING_NAME) return@launch
-            val importOnly = current.status == DownloadStatus.IMPORT_FAILED
-            if ((importOnly || current.providerId == ZLIBRARY_WEB_PROVIDER_ID) && !hasValidPending(current)) {
-                repository.save(
-                    current.copy(
-                        status = DownloadStatus.FAILED,
-                        localPath = null,
-                        errorCode = ProviderErrorCode.IO,
-                        errorMessage = "暂存文件已失效，请重新下载",
-                        updatedAt = System.currentTimeMillis(),
-                    ),
+            queueMutation.withLock {
+                val current = repository.find(taskId) ?: return@launch
+                if (current.status.active || current.status == DownloadStatus.AWAITING_NAME) return@launch
+                val importOnly = current.status == DownloadStatus.IMPORT_FAILED
+                if ((importOnly || current.providerId == ZLIBRARY_WEB_PROVIDER_ID) && !hasValidPending(current)) {
+                    repository.save(
+                        current.copy(
+                            status = DownloadStatus.FAILED,
+                            localPath = null,
+                            errorCode = ProviderErrorCode.IO,
+                            errorMessage = "暂存文件已失效，请重新下载",
+                            updatedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                    return@launch
+                }
+                val exists = localBookNames().contains(current.fileName)
+                if (exists && !overwriteApproved && !current.overwriteApproved) {
+                    repository.save(
+                        current.copy(
+                            status = if (hasPendingFile(current)) DownloadStatus.IMPORT_FAILED else DownloadStatus.FAILED,
+                            errorMessage = "本地已存在同名书籍，请确认覆盖",
+                            overwriteApproved = false,
+                            updatedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                    return@launch
+                }
+                val next = current.copy(
+                    status = DownloadStatus.QUEUED,
+                    overwriteApproved = current.overwriteApproved || overwriteApproved,
+                    errorCode = null,
+                    errorMessage = null,
+                    receivedBytes = if (hasPendingFile(current)) current.receivedBytes else 0L,
+                    updatedAt = System.currentTimeMillis(),
                 )
-                return@launch
+                repository.save(next)
+                launch(next, importOnly = importOnly)
             }
-            val exists = localBookNames().contains(current.fileName)
-            if (exists && !overwriteApproved) {
-                repository.save(
-                    current.copy(
-                        status = DownloadStatus.IMPORT_FAILED,
-                        errorMessage = "本地已存在同名书籍，请确认覆盖",
-                        overwriteApproved = false,
-                        updatedAt = System.currentTimeMillis(),
-                    ),
-                )
-                return@launch
-            }
-            val next = current.copy(
-                status = DownloadStatus.QUEUED,
-                overwriteApproved = current.overwriteApproved || overwriteApproved,
-                errorCode = null,
-                errorMessage = null,
-                receivedBytes = if (hasPendingFile(current)) current.receivedBytes else 0L,
-                updatedAt = System.currentTimeMillis(),
-            )
-            repository.save(next)
-            launch(next, importOnly = importOnly)
         }
     }
 
     fun cancel(taskId: String) {
-        jobs.remove(taskId)?.cancel()
         scope.launch {
-            val current = repository.find(taskId) ?: return@launch
-            deleteManagedFile(current.localPath)
-            handoffStore.readAll()
-                .filter { taskIdFor(it.transferId) == taskId }
-                .forEach { handoffStore.delete(it.transferId) }
-            repository.save(
-                current.copy(
-                    status = DownloadStatus.CANCELLED,
-                    localPath = null,
-                    updatedAt = System.currentTimeMillis(),
-                ),
-            )
+            queueMutation.withLock {
+                jobs[taskId]?.cancelAndJoin()
+                val current = repository.find(taskId) ?: return@launch
+                if (!DownloadStatus.canTransit(current.status, DownloadStatus.CANCELLED)) return@launch
+                deleteManagedFile(current.localPath)
+                pendingFile(current).delete()
+                handoffStore.readAll()
+                    .filter { taskIdFor(it.transferId) == taskId }
+                    .forEach { handoffStore.delete(it.transferId) }
+                repository.save(
+                    current.copy(
+                        status = DownloadStatus.CANCELLED,
+                        localPath = null,
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+            }
         }
     }
 
@@ -531,141 +564,168 @@ class BookDownloadManager(
     }
 
     private fun launch(task: OnlineDownloadTask, importOnly: Boolean = false) {
-        jobs[task.taskId] = scope.launch { run(task, importOnly) }
+        val job = scope.launch(start = CoroutineStart.LAZY) { run(task, importOnly) }
+        jobs[task.taskId] = job
+        job.invokeOnCompletion { jobs.remove(task.taskId, job) }
+        job.start()
     }
 
     private suspend fun run(initial: OnlineDownloadTask, importOnly: Boolean) {
         running.incrementAndGet()
-        semaphore.withPermit {
-            var task = initial
-            var attempts = task.attempts
-            while (true) {
-                try {
-                    task = transit(task, DownloadStatus.PREPARING)
-                    notifier.start(task.bookTitle)
+        try {
+            semaphore.withPermit {
+                var task = initial
+                var attempts = task.attempts
+                while (true) {
+                    try {
+                        task = transit(task, DownloadStatus.PREPARING)
+                        notifier.start(task.bookTitle)
 
-                    val pending = pendingFile(task)
-                    if (!pending.isFile) {
-                        // 网页任务没有可复用暂存文件时只能提示重新下载，不解析网页书源、不重新申请链接。
-                        if (importOnly || task.providerId == ZLIBRARY_WEB_PROVIDER_ID) {
-                            throw ProviderException(ProviderErrorCode.IO, "暂存文件已失效，请重新下载")
+                        val pending = pendingFile(task)
+                        if (!pending.isFile) {
+                            // 网页任务没有可复用暂存文件时只能提示重新下载，不解析网页书源、不重新申请链接。
+                            if (importOnly || task.providerId == ZLIBRARY_WEB_PROVIDER_ID) {
+                                throw ProviderException(ProviderErrorCode.IO, "暂存文件已失效，请重新下载")
+                            }
+                            val provider = registry.get(task.providerId)
+                                ?.takeIf { ProviderCapability.DOWNLOAD in it.capabilities }
+                                ?: throw ProviderException(ProviderErrorCode.INVALID_CONFIG, "书源不可用")
+                            val temp = File.createTempFile("${task.taskId}-", ".part", files.temporaryDir())
+                            task = task.copy(localPath = temp.path, receivedBytes = 0L, status = DownloadStatus.DOWNLOADING)
+                            repository.save(task)
+                            val (result, transferred) = transfer(task, provider, temp)
+                            task = transferred
+                            when (result) {
+                                is DownloadResult.Cancelled -> {
+                                    temp.delete()
+                                    transit(task.copy(localPath = null), DownloadStatus.CANCELLED)
+                                    return@withPermit
+                                }
+                                is DownloadResult.Failed -> {
+                                    temp.delete()
+                                    throw ProviderException(result.code, result.message)
+                                }
+                                is DownloadResult.Success -> {
+                                    safeMove(temp, pending)
+                                    task = task.copy(localPath = pending.path, receivedBytes = pending.length(), totalBytes = pending.length())
+                                }
+                            }
+                        } else {
+                            // 已有 pending（只重试导入/外部交接）：补齐 PREPARING → DOWNLOADING。
+                            task = transit(task.copy(localPath = pending.path), DownloadStatus.DOWNLOADING)
+                            repository.save(task)
                         }
-                        val provider = registry.get(task.providerId) as? CatalogBookProvider
-                            ?: throw ProviderException(ProviderErrorCode.INVALID_CONFIG, "书源不可用")
-                        val temp = File.createTempFile("${task.taskId}-", ".part", files.temporaryDir())
-                        task = task.copy(localPath = temp.path, receivedBytes = 0L, status = DownloadStatus.DOWNLOADING)
-                        repository.save(task)
-                        val result = provider.download(
-                            BookDownloadRequest(
-                                providerId = task.providerId,
-                                accountScope = task.accountScope,
-                                remoteId = task.remoteId,
-                                fileName = task.fileName,
-                                remotePath = temp.path,
-                                expectedSize = task.totalBytes,
-                            ),
-                            onProgress = { received, total -> reportProgress(task, received, total) },
-                            isBookOpen = isBookOpen,
-                        )
-                        when (result) {
-                            is DownloadResult.Cancelled -> {
-                                temp.delete()
-                                task = transit(task, DownloadStatus.CANCELLED)
-                                repository.save(task)
-                                return@withPermit
-                            }
-                            is DownloadResult.Failed -> {
-                                temp.delete()
-                                throw ProviderException(result.code, result.message)
-                            }
-                            is DownloadResult.Success -> {
-                                safeMove(temp, pending)
-                                task = task.copy(localPath = pending.path, receivedBytes = pending.length())
-                            }
-                        }
-                    } else {
-                        // 已有 pending（只重试导入/外部交接）：补齐 PREPARING → DOWNLOADING。
-                        task = transit(task.copy(localPath = pending.path), DownloadStatus.DOWNLOADING)
-                        repository.save(task)
-                    }
 
-                    task = transit(task, DownloadStatus.VERIFYING)
-                    repository.save(task)
-                    task = transit(task, DownloadStatus.IMPORTING)
-                    repository.save(task)
-                    val imported = importer.import(
-                        pending = pending,
-                        fileName = task.fileName,
-                        providerId = task.providerId,
-                        accountScope = task.accountScope,
-                        remoteId = task.remoteId,
-                        overwriteApproved = task.overwriteApproved,
-                        isBookOpen = isBookOpen,
-                    )
-                    when (imported) {
-                        is OnlineImportResult.Success -> {
-                            pending.delete()
-                            task = task.copy(
-                                status = DownloadStatus.COMPLETED,
-                                localBookId = imported.bookId,
-                                localPath = null,
-                                errorMessage = null,
-                                updatedAt = System.currentTimeMillis(),
-                            )
-                            repository.save(task)
-                            refreshSignal.notifyImportSucceeded()
-                        }
-                        is OnlineImportResult.Conflict -> {
-                            task = task.copy(
-                                status = DownloadStatus.IMPORT_FAILED,
-                                errorMessage = "本地已存在同名书籍，请确认覆盖",
-                                updatedAt = System.currentTimeMillis(),
-                            )
-                            repository.save(task)
-                        }
-                        is OnlineImportResult.Failed -> {
-                            task = task.copy(
-                                status = DownloadStatus.IMPORT_FAILED,
-                                errorMessage = imported.message,
-                                updatedAt = System.currentTimeMillis(),
-                            )
-                            repository.save(task)
-                        }
-                    }
-                    break
-                } catch (cancelled: CancellationException) {
-                    deleteManagedFile(task.localPath)
-                    repository.save(
-                        task.copy(
-                            status = DownloadStatus.CANCELLED,
-                            localPath = null,
+                        task = transit(task, DownloadStatus.VERIFYING)
+                        validatePending(task, pending)?.let { throw ProviderException(ProviderErrorCode.IO, it) }
+                        task = transit(task, DownloadStatus.IMPORTING)
+                        withContext(NonCancellable) { importAndFinish(task, pending) }
+                        break
+                    } catch (cancelled: CancellationException) {
+                        // cancel() waits for the worker before cleaning files and changing the row.
+                        throw cancelled
+                    } catch (e: Exception) {
+                        attempts += 1
+                        val code = if (e is ProviderException) e.code else ProviderErrorCode.NETWORK
+                        deleteManagedFile(task.localPath)
+                        task = task.copy(
+                            attempts = attempts,
+                            errorCode = code,
+                            errorMessage = e.message ?: "下载失败",
                             updatedAt = System.currentTimeMillis(),
-                        ),
-                    )
-                    throw cancelled
-                } catch (e: Exception) {
-                    attempts += 1
-                    val code = if (e is ProviderException) e.code else ProviderErrorCode.NETWORK
-                    deleteManagedFile(task.localPath)
-                    task = task.copy(
-                        attempts = attempts,
-                        errorCode = code,
-                        errorMessage = e.message ?: "下载失败",
-                        updatedAt = System.currentTimeMillis(),
-                    )
-                    if (DownloadRetryPolicy.shouldRetry(code, attempts)) {
-                        task = task.copy(status = DownloadStatus.QUEUED, localPath = null)
+                        )
+                        if (DownloadRetryPolicy.shouldRetry(code, attempts)) {
+                            task = task.copy(status = DownloadStatus.QUEUED, localPath = null)
+                            repository.save(task)
+                            continue
+                        }
+                        task = task.copy(status = DownloadStatus.FAILED, localPath = null)
                         repository.save(task)
-                        continue
+                        break
                     }
-                    task = task.copy(status = DownloadStatus.FAILED, localPath = null)
-                    repository.save(task)
-                    break
                 }
             }
+        } finally {
+            if (running.decrementAndGet() == 0) notifier.stop()
         }
-        jobs.remove(initial.taskId)
-        if (running.decrementAndGet() == 0) notifier.stop()
+    }
+
+    private suspend fun transfer(
+        task: OnlineDownloadTask,
+        provider: BookProvider,
+        temp: File,
+    ): Pair<DownloadResult, OnlineDownloadTask> = coroutineScope {
+        var latest = task
+        val progress = Channel<Pair<Long, Long?>>(Channel.CONFLATED)
+        val writer = launch {
+            for ((received, total) in progress) {
+                latest = latest.copy(
+                    receivedBytes = received,
+                    totalBytes = total ?: latest.totalBytes,
+                    updatedAt = System.currentTimeMillis(),
+                )
+                repository.save(latest)
+                notifier.update(latest.bookTitle, received, latest.totalBytes ?: 0L)
+            }
+        }
+        var lastUpdate = 0L
+        val result = try {
+            provider.download(
+                BookDownloadRequest(
+                    providerId = task.providerId,
+                    accountScope = task.accountScope,
+                    remoteId = task.remoteId,
+                    fileName = task.fileName,
+                    remotePath = temp.path,
+                    expectedSize = task.totalBytes,
+                ),
+                onProgress = { received, total ->
+                    val now = System.nanoTime()
+                    if (lastUpdate == 0L || now - lastUpdate >= 700_000_000L || received == total) {
+                        lastUpdate = now
+                        progress.trySend(received to total)
+                    }
+                },
+                isBookOpen = isBookOpen,
+            )
+        } finally {
+            progress.close()
+        }
+        writer.join()
+        result to latest
+    }
+
+    private suspend fun importAndFinish(task: OnlineDownloadTask, pending: File) {
+        val imported = importer.import(
+            pending = pending,
+            fileName = task.fileName,
+            providerId = task.providerId,
+            accountScope = task.accountScope,
+            remoteId = task.remoteId,
+            overwriteApproved = task.overwriteApproved,
+            isBookOpen = isBookOpen,
+        )
+        val updated = when (imported) {
+            is OnlineImportResult.Success -> task.copy(
+                status = DownloadStatus.COMPLETED,
+                localBookId = imported.bookId,
+                localPath = null,
+                errorMessage = null,
+            )
+            is OnlineImportResult.Conflict -> task.copy(
+                status = DownloadStatus.IMPORT_FAILED,
+                errorMessage = "本地已存在同名书籍，请确认覆盖",
+            )
+            is OnlineImportResult.Failed -> task.copy(
+                status = DownloadStatus.IMPORT_FAILED,
+                errorMessage = imported.message,
+            )
+        }
+        repository.save(updated.copy(updatedAt = System.currentTimeMillis()))
+        if (imported is OnlineImportResult.Success) {
+            pending.delete()
+            refreshSignal.notifyImportSucceeded()
+        }
     }
 
     private suspend fun transit(task: OnlineDownloadTask, next: DownloadStatus): OnlineDownloadTask {
@@ -673,20 +733,6 @@ class BookDownloadManager(
         val updated = task.copy(status = next, updatedAt = System.currentTimeMillis())
         repository.save(updated)
         return updated
-    }
-
-    private fun reportProgress(base: OnlineDownloadTask, received: Long, total: Long?) {
-        val now = System.currentTimeMillis()
-        if (now - (lastProgressAt[base.taskId] ?: 0L) < 700L && received != total) return
-        lastProgressAt[base.taskId] = now
-        val updated = base.copy(
-            status = DownloadStatus.DOWNLOADING,
-            receivedBytes = received,
-            totalBytes = total ?: base.totalBytes,
-            updatedAt = now,
-        )
-        scope.launch { repository.save(updated) }
-        notifier.update(base.bookTitle, received, total ?: base.totalBytes ?: 0L)
     }
 
     private fun safeMove(from: File, to: File) {
@@ -705,8 +751,12 @@ class BookDownloadManager(
         if (!hasPendingFile(task)) return false
         val file = File(task.localPath!!)
         if (!file.isFile) return false
-        return importer.validate(file) == null
+        return validatePending(task, file) == null
     }
+
+    private suspend fun validatePending(task: OnlineDownloadTask, file: File): String? =
+        if (registry.get(task.providerId) is CloudBookProvider) importer.validateCloudBook(file)
+        else importer.validate(file)
 
     private fun isManagedPendingPath(path: String): Boolean {
         return runCatching {
@@ -753,7 +803,7 @@ class BookDownloadManager(
                 externalSource = ContentResolverExternalDownloadSource(context),
                 handoffStore = DownloadHandoffStore(files.handoffDir()),
                 localBookNames = {
-                    LibraryStore(context).snapshot().books.map { it.fileName }.toSet()
+                    LibraryStore(context).availableFileNames()
                 },
                 isBookOpen = isBookOpen,
                 notifier = notifier,

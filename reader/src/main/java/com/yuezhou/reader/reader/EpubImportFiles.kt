@@ -17,12 +17,48 @@ internal object EpubImportFiles {
 
     fun validate(file: File) = CoverExtractor.validatePackage(file)
 
-    fun install(staging: File, target: File) {
-        if (target.isFile && sameContent(staging, target)) {
+    data class Placement(val backup: File? = null, val newlyWritten: Boolean = false) {
+        fun commit() {
+            backup?.delete()
+        }
+
+        fun rollback(target: File) {
+            if (backup != null) moveReplacing(backup, target)
+            else if (newlyWritten) target.delete()
+        }
+    }
+
+    fun install(staging: File, target: File): Placement {
+        if (!target.isFile) {
+            moveReplacing(staging, target)
+            return Placement(newlyWritten = true)
+        }
+        if (sameContent(staging, target)) {
             // 重复打开同一文件时复用正文，保留 mtime 和已有朗读位置。
             staging.delete()
-            return
+            return Placement()
         }
+
+        val backup = File.createTempFile(".epub-backup-", ".tmp", target.parentFile)
+        try {
+            // Keep the original at its published path until the atomic replacement is ready.
+            backup.delete()
+            try {
+                Files.createLink(backup.toPath(), target.toPath())
+            } catch (_: IOException) {
+                Files.copy(target.toPath(), backup.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+            } catch (_: UnsupportedOperationException) {
+                Files.copy(target.toPath(), backup.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+            }
+            moveReplacing(staging, target)
+            return Placement(backup)
+        } catch (e: Exception) {
+            backup.delete()
+            throw e
+        }
+    }
+
+    private fun moveReplacing(staging: File, target: File) {
         try {
             Files.move(staging.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         } catch (_: AtomicMoveNotSupportedException) {

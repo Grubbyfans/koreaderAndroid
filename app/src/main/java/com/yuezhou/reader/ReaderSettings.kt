@@ -40,7 +40,7 @@ data class ReaderPreferences(
     /** 实验性小说解析，仅 Kokoro 使用；默认关闭。 */
     val fontId: String = "book",
     val fontWeight: Int = 0,
-    /** 是否开启自动进度同步：开启时进入书籍自动拉取云端进度覆盖本地，退出/切出时自动上传覆盖云端。 */
+    /** 开启时按书内位置判断是否从云端续读，退出或切出时上传已确认的本机进度。 */
     val autoSync: Boolean = false,
     /** 阅读亮度（0.0..1.0）；-1f 表示未设置，跟随系统。 */
     val brightness: Float = -1f,

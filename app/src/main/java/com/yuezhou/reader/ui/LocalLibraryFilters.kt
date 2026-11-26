@@ -56,6 +56,24 @@ internal enum class LibrarySort(val label: String) {
     RECENT("最近阅读"), TITLE("按书名"),
 }
 
+internal fun localLibraryResults(
+    books: List<LibraryStore.Entry>,
+    query: String,
+    filter: ReadingFilter,
+    sort: LibrarySort,
+    authors: Map<String, List<String>>,
+): List<LibraryStore.Entry> {
+    val matches = books.filter { book ->
+        filter.matches(book) && (query.isEmpty() || book.title.contains(query, ignoreCase = true) ||
+            book.fileName.contains(query, ignoreCase = true) ||
+            authors[book.bookId].orEmpty().any { it.contains(query, ignoreCase = true) })
+    }
+    return when (sort) {
+        LibrarySort.RECENT -> matches.sortedByDescending { it.lastReadAt ?: Long.MIN_VALUE }
+        LibrarySort.TITLE -> matches.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+    }
+}
+
 @Composable
 internal fun LocalLibraryFilters(
     query: String,

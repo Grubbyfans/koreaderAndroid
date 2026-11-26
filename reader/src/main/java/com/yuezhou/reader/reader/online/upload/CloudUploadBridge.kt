@@ -70,7 +70,7 @@ class CloudUploadBridge(
             val sync = CloudSync(context)
             val store = LibraryStore(context)
             return CloudUploadBridge(
-                findEntry = { store.snapshot().books.firstOrNull { it.bookId == bookId } },
+                findEntry = { store.uploadEntry(bookId) },
                 send = { kind, entry ->
                     val backend = sync.backend(forced = kind)
                     if (backend == null) {

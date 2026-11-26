@@ -39,7 +39,7 @@ class DownloadDirectory(private val context: Context) {
         DocumentFile.fromTreeUri(context, tree)?.takeIf { it.isDirectory && it.canWrite() }
             ?: throw IOException("下载目录无法写入，请在设置中重新选择")
 
-    internal fun publish(tree: Uri, source: File, fileName: String): Uri {
+    internal fun <T> publish(tree: Uri, source: File, fileName: String, commit: (Uri) -> T): T {
         val directory = writableDirectory(tree)
         val existing = directory.findFile(fileName)
         if (existing != null && !existing.isFile) {
@@ -66,8 +66,9 @@ class DownloadDirectory(private val context: Context) {
             if (resolver.openInputStream(staged.uri)?.use { it.read() }?.let { it >= 0 } != true) {
                 throw IOException("无法读取所选目录中的 EPUB")
             }
+            val result = commit(staged.uri)
             installed = true
-            return staged.uri
+            return result
         } finally {
             if (!installed) {
                 staged.delete()

@@ -14,6 +14,8 @@ interface DownloadImporter {
     /** 返回 null 表示通过；否则为失败原因。 */
     suspend fun validate(file: File): String?
 
+    suspend fun validateCloudBook(file: File): String? = validate(file)
+
     suspend fun extractTitle(file: File): String?
 
     suspend fun import(
@@ -33,6 +35,15 @@ class AndroidDownloadImporter(context: Context) : DownloadImporter {
     override suspend fun validate(file: File): String? = withContext(Dispatchers.IO) {
         val result = EpubValidator.validate(file)
         if (result.valid) null else result.reason ?: "EPUB 校验失败"
+    }
+
+    override suspend fun validateCloudBook(file: File): String? = withContext(Dispatchers.IO) {
+        try {
+            CoverExtractor.validatePackage(file)
+            null
+        } catch (e: Exception) {
+            e.message ?: "EPUB 校验失败"
+        }
     }
 
     override suspend fun extractTitle(file: File): String? = withContext(Dispatchers.IO) {

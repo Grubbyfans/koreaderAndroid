@@ -2,8 +2,17 @@ package com.yuezhou.reader.reader.online.download
 
 import com.yuezhou.reader.core.online.download.DownloadStatus
 import com.yuezhou.reader.core.online.download.OnlineDownloadTask
+import com.yuezhou.reader.core.online.model.BookDownloadRequest
+import com.yuezhou.reader.core.online.model.BookPage
+import com.yuezhou.reader.core.online.model.ConnectionState
+import com.yuezhou.reader.core.online.model.DownloadResult
+import com.yuezhou.reader.core.online.model.OnlineBook
+import com.yuezhou.reader.core.online.model.UploadResult
+import com.yuezhou.reader.core.online.provider.CloudBookProvider
+import com.yuezhou.reader.core.online.provider.ProviderCapability
 import com.yuezhou.reader.core.online.provider.ProviderRegistry
 import com.yuezhou.reader.reader.online.import.OnlineImportResult
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -501,12 +510,81 @@ class BookDownloadManagerTest {
         assertEquals(1, f.store.all().size)
     }
 
+    @Test
+    fun `网盘传输进入同一个持久化队列且只导入一次`() = runTest {
+        val provider = FakeCloudProvider()
+        val f = fixture(UnconfinedTestDispatcher(testScheduler), ProviderRegistry(listOf(provider)))
+        val request = BookDownloadRequest("webdav", "account", "book", "book.epub", expectedSize = 8)
+
+        val id = f.manager.enqueue(request, "book")
+        provider.started.await()
+        assertEquals(id, f.manager.enqueue(request, "book"))
+        assertEquals(DownloadStatus.DOWNLOADING, f.store.find(id)?.status)
+        provider.resume.complete(Unit)
+
+        val completed = f.store.find(id)
+        assertEquals(DownloadStatus.COMPLETED, completed?.status)
+        assertEquals(4L, completed?.receivedBytes)
+        assertEquals(4L, completed?.totalBytes)
+        assertEquals(1, provider.transfers)
+        assertEquals(1, f.importer.importCalls.size)
+        assertEquals(1L, f.manager.libraryVersion.value)
+    }
+
+    @Test
+    fun `重启能找回已移动至暂存区但尚未更新任务记录的网盘文件`() = runTest {
+        val f = fixture(UnconfinedTestDispatcher(testScheduler))
+        val id = "webdav-task"
+        val pending = pendingFile(f, id)
+        val partial = File(f.files.temporaryDir(), "$id.part")
+        f.store.save(task(id, DownloadStatus.DOWNLOADING, partial.path, "book.epub", providerId = "webdav"))
+
+        f.manager.recoverInterrupted()
+
+        assertEquals(DownloadStatus.IMPORT_FAILED, f.store.find(id)?.status)
+        assertEquals(pending.path, f.store.find(id)?.localPath)
+        f.manager.retry(id)
+        assertEquals(DownloadStatus.COMPLETED, f.store.find(id)?.status)
+        assertEquals(1, f.importer.importCalls.size)
+    }
+
+    private class FakeCloudProvider : CloudBookProvider {
+        val started = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        var transfers = 0
+
+        override val id = "webdav"
+        override val displayName = "WebDAV"
+        override val capabilities = setOf(ProviderCapability.DOWNLOAD)
+        override suspend fun getConnectionState() = ConnectionState.Connected
+        override suspend fun getBookDetail(remoteId: String): OnlineBook = error("not used")
+        override suspend fun listBooks(directory: String, cursor: String?, force: Boolean): BookPage = error("not used")
+        override suspend fun upload(localBook: File) = UploadResult.NotSupported
+
+        override suspend fun download(
+            request: BookDownloadRequest,
+            onProgress: (Long, Long?) -> Unit,
+            isBookOpen: (String) -> Boolean,
+        ): DownloadResult {
+            transfers++
+            onProgress(1L, 4L)
+            started.complete(Unit)
+            resume.await()
+            File(checkNotNull(request.remotePath)).writeText("EPUB")
+            onProgress(4L, 4L)
+            return DownloadResult.Success(request.fileName, "")
+        }
+    }
+
     // —— 测试装配 ——
 
-    private fun fixture(dispatcher: CoroutineDispatcher): Fixture {
+    private fun fixture(
+        dispatcher: CoroutineDispatcher,
+        registry: ProviderRegistry = ProviderRegistry(),
+    ): Fixture {
         val f = Fixture(root)
         f.manager = BookDownloadManager(
-            registry = ProviderRegistry(),
+            registry = registry,
             repository = f.store,
             files = f.files,
             importer = f.importer,

@@ -319,9 +319,9 @@ class ReaderWebView(context: Context) : WebView(context) {
         }
     }
 
-    fun verifyJump(requestId: String, cfi: String, restoreCfi: String) = whenReaderReady {
+    fun verifyJump(requestId: String, cfi: String, restoreCfi: String, expectedCfi: String? = null) = whenReaderReady {
         evaluateJavascript(
-            "window.__reader.verifyJump(${jsonQuote(requestId)}, ${jsonQuote(cfi)}, ${jsonQuote(restoreCfi)})",
+            "window.__reader.verifyJump(${jsonQuote(requestId)}, ${jsonQuote(cfi)}, ${jsonQuote(restoreCfi)}, ${expectedCfi?.let(::jsonQuote) ?: "null"})",
             null,
         )
     }
@@ -366,7 +366,10 @@ class ReaderWebView(context: Context) : WebView(context) {
 
     suspend fun xPointerToCfi(xpointer: String): String? = convertPosition("xPointerToCfi", xpointer)
 
-    private suspend fun convertPosition(method: String, position: String): String? {
+    suspend fun comparePositions(remoteCfi: String, localCfi: String): Int? =
+        convertPosition("comparePositions", remoteCfi, localCfi)?.toIntOrNull()
+
+    private suspend fun convertPosition(method: String, vararg positions: String): String? {
         if (released) return null
         val requestId = UUID.randomUUID().toString()
         val result = CompletableDeferred<String?>()
@@ -375,7 +378,7 @@ class ReaderWebView(context: Context) : WebView(context) {
             whenReaderReady {
                 if (requestId in pendingConversions) {
                     evaluateJavascript(
-                        "window.__reader.$method(${jsonQuote(requestId)}, ${jsonQuote(position)})",
+                        "window.__reader.$method(${jsonQuote(requestId)}, ${positions.joinToString(", ", transform = ::jsonQuote)})",
                         null,
                     )
                 }
@@ -475,6 +478,7 @@ class ReaderWebView(context: Context) : WebView(context) {
                 ReaderEvent.JumpVerified(
                     requestId = obj["requestId"] as? String ?: "",
                     verified = obj["verified"] == true,
+                    stale = obj["stale"] == true,
                     fraction = (obj["fraction"] as? Number)?.toDouble(),
                 )
             }

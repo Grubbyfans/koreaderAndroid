@@ -39,6 +39,7 @@ class ZLibraryWebDownloadWatcher(
 ) {
     private val pending = ConcurrentHashMap.newKeySet<Long>()
     private val resolving = ConcurrentHashMap.newKeySet<Long>()
+    private val started = java.util.concurrent.atomic.AtomicBoolean(false)
     private var pollJob: Job? = null
     private val downloads = MutableStateFlow<List<OnlineDownloadTask>>(emptyList())
     val tasks = downloads.asStateFlow()
@@ -61,6 +62,7 @@ class ZLibraryWebDownloadWatcher(
     }
 
     fun start() {
+        if (!started.compareAndSet(false, true)) return
         runCatching {
             // DownloadManager 的完成广播来自系统 DownloadProvider；Android 14+ 用
             // RECEIVER_NOT_EXPORTED 会收不到。广播里只有 downloadId，完成与否仍以
@@ -77,7 +79,7 @@ class ZLibraryWebDownloadWatcher(
 
     /** Provider 登记：只表示「开始观察」，立即查询一次当前状态。 */
     fun onEnqueued(downloadId: Long) {
-        if (downloadId <= 0L) return
+        if (downloadId <= 0L || !started.get()) return
         pending += downloadId
         scope.launch { resolve(downloadId) }
     }

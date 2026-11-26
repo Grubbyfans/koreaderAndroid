@@ -6,8 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -19,8 +17,6 @@ import java.io.File
  * 保证同一本书重复导入时覆盖旧文件（配合文件代次 fileGeneration 语义）。
  */
 object EpubImporter {
-    private val importMutex = Mutex()
-
     /** 私有 EPUB 根目录：files/epub/。 */
     fun epubDir(context: Context): File = File(context.filesDir, "epub").apply { mkdirs() }
 
@@ -34,39 +30,50 @@ object EpubImporter {
      * - 通过 [LibraryStore] 登记 library.json、提取并保存封面。
      */
     suspend fun import(context: Context, uri: Uri): Result<File> = withContext(Dispatchers.IO) {
-        importMutex.withLock {
-            val dir = epubDir(context)
-            val staging = File.createTempFile(".epub-import-", ".tmp", dir)
-            try {
-                val name = displayName(context, uri) ?: "book-${System.currentTimeMillis()}.epub"
-                val safeName = EpubImportFiles.fileName(name)
-                val target = File(dir, safeName)
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    staging.outputStream().use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            currentCoroutineContext().ensureActive()
-                            val n = input.read(buffer)
-                            if (n < 0) break
-                            output.write(buffer, 0, n)
-                        }
+        val dir = epubDir(context)
+        val staging = File.createTempFile(".epub-import-", ".tmp", dir)
+        try {
+            val name = displayName(context, uri) ?: "book-${System.currentTimeMillis()}.epub"
+            val safeName = EpubImportFiles.fileName(name)
+            val target = File(dir, safeName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                staging.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        output.write(buffer, 0, n)
                     }
-                } ?: throw IllegalStateException("无法读取 EPUB，请从文件管理器重新选择")
-                EpubImportFiles.validate(staging)
-                val cover = CoverExtractor.extract(staging)
-                val title = CoverExtractor.extractTitle(staging)
-                currentCoroutineContext().ensureActive()
-                EpubImportFiles.install(staging, target)
-                LibraryStore(context).registerBook(safeName, cover, title).getOrThrow()
+                }
+            } ?: throw IllegalStateException("无法读取 EPUB，请从文件管理器重新选择")
+            EpubImportFiles.validate(staging)
+            val cover = CoverExtractor.extract(staging)
+            val title = CoverExtractor.extractTitle(staging)
+            val authors = CoverExtractor.extractAuthors(staging)
+            currentCoroutineContext().ensureActive()
+            val store = LibraryStore(context)
+            store.withCatalogMutation {
+                val bookId = com.yuezhou.reader.core.protocol.BookNames.localId(safeName).first
+                    ?: error("无效 EPUB 文件名: $safeName")
+                store.bookLocation(bookId) // 校验已存在的书库，再修改正文。
+                val placement = EpubImportFiles.install(staging, target)
+                try {
+                    store.registerBookLocked(safeName, cover, title, authors = authors)
+                } catch (e: Exception) {
+                    placement.rollback(target)
+                    throw e
+                }
+                placement.commit()
                 Result.success(target)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: OutOfMemoryError) {
-                Result.failure(IllegalStateException("内存不足，请关闭其他应用后重试导入"))
-            } catch (e: Exception) {
-                Result.failure(e)
-            } finally { staging.delete() }
-        }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: OutOfMemoryError) {
+            Result.failure(IllegalStateException("内存不足，请关闭其他应用后重试导入"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally { staging.delete() }
     }
 
     private fun displayName(context: Context, uri: Uri): String? {

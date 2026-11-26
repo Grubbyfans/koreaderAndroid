@@ -9,13 +9,7 @@ import com.yuezhou.reader.core.online.model.SearchQuery
 import com.yuezhou.reader.core.online.model.UploadResult
 import java.io.File
 
-/**
- * 书源统一接口。
- *
- * 设计修正（阶段 A 核对实际源码后）：下载由书源直接落盘到应用管理路径并返回最终文件名，
- * 而非由调用方传入 target，以便委托现有 `CloudSync.downloadBook()` 的临时文件与导入流程。
- * 下载任务队列、进度节流与重启恢复由后续阶段的 BookDownloadManager 负责。
- */
+/** 书源将正文传输到请求的暂存路径，下载队列负责校验、发布和书库登记。 */
 interface BookProvider {
     val id: String
     val displayName: String

@@ -126,6 +126,7 @@ import com.yuezhou.reader.ui.components.LibraryGridIcon
 import com.yuezhou.reader.ui.LibrarySort
 import com.yuezhou.reader.ui.LocalLibraryFilters
 import com.yuezhou.reader.ui.ReadingFilter
+import com.yuezhou.reader.ui.localLibraryResults
 import com.yuezhou.reader.ui.settings.SettingsPage
 import com.yuezhou.reader.ui.settings.SettingsRoute
 import com.yuezhou.reader.ui.navigation.ShelfNavigator
@@ -201,6 +202,7 @@ private fun BookshelfScreen() {
     var status by remember { mutableStateOf<String?>(null) }
     // 刷新触发计数：+1 触发重新加载书库
     var refreshKey by remember { mutableStateOf(0) }
+    var loadedShelfVersion by remember { mutableStateOf(0) }
     // 仅用于进程重建恢复；运行期间的导航真源是 ShelfNavigator.committedKey。
     var restoredTab by rememberSaveable(stateSaver = TabSaver) { mutableStateOf(Tab.书架) }
     // 管理态（多选删除）：非空表示进入管理态，集合为已勾选的 bookId
@@ -226,25 +228,16 @@ private fun BookshelfScreen() {
     val searching = query.isNotEmpty()
     val shelfBooks = remember(books, hiddenBooks) { books.filter { it.bookId !in hiddenBooks } }
     val localBookIds = remember(books) { books.mapTo(mutableSetOf()) { it.bookId } }
-    val visibleAuthorCache = remember(shelfBooks) { android.util.LruCache<String, List<String>>(256) }
-    var shelfAuthors by remember(shelfBooks) { mutableStateOf<Map<String, List<String>>?>(null) }
-    LaunchedEffect(shelfBooks, searching) {
+    var shelfAuthors by remember(shelfBooks, loadedShelfVersion) { mutableStateOf<Map<String, List<String>>?>(null) }
+    LaunchedEffect(shelfBooks, searching, loadedShelfVersion) {
         if (searching && shelfAuthors == null) shelfAuthors = store.shelfAuthors(shelfBooks)
     }
     val visibleBooks = remember(shelfBooks, query, readingFilter, librarySort, shelfAuthors) {
-        val matching = shelfBooks.filter { book ->
-            readingFilter.matches(book) && (!searching || book.title.contains(query, ignoreCase = true) ||
-                book.fileName.contains(query, ignoreCase = true) ||
-                shelfAuthors?.get(book.bookId).orEmpty().any { it.contains(query, ignoreCase = true) })
-        }
-        when (librarySort) {
-            LibrarySort.RECENT -> matching.sortedByDescending { it.lastReadAt ?: Long.MIN_VALUE }
-            LibrarySort.TITLE -> matching.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
-        }
+        localLibraryResults(shelfBooks, query, readingFilter, librarySort, shelfAuthors.orEmpty())
     }
     val removedBooks = books.filter { it.bookId in hiddenBooks }
     val cloudSync = remember { CloudSync(context) }
-    // 在线书库统一入口：书源状态由 ViewModel 独立持有，Activity 只保留详情/下载等既有状态。
+    // 在线书源状态和下载队列由 ViewModel 提供。
     val onlineVm: OnlineLibraryViewModel = viewModel()
 
     // 唯一的已提交导航状态：currentTab / 当前书源均由页面 key 派生。
@@ -322,13 +315,10 @@ private fun BookshelfScreen() {
     // 列表缓存状态（方案 §12.1：显示最后成功获取时间与是否命中缓存）
     var remoteFetchedAt by remember { mutableStateOf(0L) }
     var remoteFromCache by remember { mutableStateOf(false) }
-    // 待下载/详情选中的书
     var detailBook by remember { mutableStateOf<CloudSync.RemoteBook?>(null) }
-    // 当前下载任务（同一时间最多一个）；null 表示无任务
-    var downloadTask by remember { mutableStateOf<DownloadTask?>(null) }
-    // 下载协程 Job：用于取消后台下载
-    var downloadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    var downloadTasksOpen by remember { mutableStateOf(false) }
+    var detailProviderId by remember { mutableStateOf<String?>(null) }
+    var cloudDownloadEnqueuing by remember { mutableStateOf(false) }
+    val downloadTasks by onlineVm.downloadManager.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
     var confirmCloudDelete by remember { mutableStateOf(false) }
     var deletingCloudBook by remember { mutableStateOf(false) }
 
@@ -360,7 +350,7 @@ private fun BookshelfScreen() {
                     } catch (e: Exception) {
                         // 持久授权失败不阻断单次扫描
                     }
-                    val existingIds = store.snapshot(includeCoverBytes = false).books.map { it.bookId }.toSet()
+                    val existingIds = store.availableBookIds()
                     val result = LocalScanner.scan(context, uri, existingIds)
                     scanResult = result
                     scanUri = uri
@@ -395,8 +385,11 @@ private fun BookshelfScreen() {
     // 初次加载 + 每次 refreshKey 变化时重新加载书库
     LaunchedEffect(refreshKey) {
         loading = true
-        books = store.snapshot(includeCoverBytes = false).books
+        val snapshot = store.snapshot(includeCoverBytes = false)
+        books = snapshot.books
+        snapshot.error?.let { status = it }
         hiddenBooks = store.hiddenBookIds()
+        loadedShelfVersion = refreshKey
         loading = false
     }
 
@@ -633,7 +626,7 @@ private fun BookshelfScreen() {
                         if (currentTab == Tab.书架 || currentTab == Tab.云端 || currentTab == Tab.发现) {
                             IconButton(enabled = !pagerBusy, onClick = { showOnlineDownloads = true }) {
                                 AnimatedDownloadIcon(
-                                    downloading = downloadTask?.status == DownloadStatus.Downloading,
+                                    downloading = downloadTasks.any { it.status.active },
                                 )
                             }
                         }
@@ -848,13 +841,8 @@ private fun BookshelfScreen() {
                             librarySort = librarySort,
                             authorSearchLoading = searching && shelfAuthors == null,
                             authors = shelfAuthors.orEmpty(),
-                            lookupAuthor = { book ->
-                                val authors = visibleAuthorCache.get(book.bookId)
-                                    ?: store.shelfAuthors(listOf(book))[book.bookId].orEmpty().also {
-                                        visibleAuthorCache.put(book.bookId, it)
-                                    }
-                                authors.takeIf { it.isNotEmpty() }?.joinToString("、")
-                            },
+                            lookupAuthor = { book -> store.authorsFor(book).takeIf { it.isNotEmpty() }?.joinToString("、") },
+                            authorRefreshKey = loadedShelfVersion,
                             gridMode = localGridMode,
                             selecting = selecting,
                             navigationLocked = pagerBusy,
@@ -881,7 +869,12 @@ private fun BookshelfScreen() {
                             onRefresh = {
                                 if (!pagerBusy && provider != null) refreshRemoteLibrary(provider)
                             },
-                            onOpenDetail = { if (!pagerBusy) detailBook = it },
+                            onOpenDetail = {
+                                if (!pagerBusy && provider != null) {
+                                    detailProviderId = provider
+                                    detailBook = it
+                                }
+                            },
                             onOpenDownloads = { showOnlineDownloads = true },
                             onOpenSettings = {
                                 if (page is ShelfPage.Cloud) {
@@ -930,7 +923,7 @@ private fun BookshelfScreen() {
         }
     }
 
-    // 统一下载管理（阶段 E）：在线任务与既有云端下载入口并列，不改动原下载弹窗。
+    // 统一下载管理。
     if (showOnlineDownloads) {
         DownloadManagerScreen(
             vm = onlineVm,
@@ -949,39 +942,6 @@ private fun BookshelfScreen() {
                 }
                 available
             },
-            onOpenLegacyDownloads = {
-                showOnlineDownloads = false
-                downloadTasksOpen = true
-            },
-            cloudTask = downloadTask?.let { task ->
-                com.yuezhou.reader.core.online.download.OnlineDownloadTask(
-                    taskId = "cloud:${task.bookId}",
-                    providerId = "cloud",
-                    remoteId = task.bookId,
-                    bookTitle = task.bookId,
-                    fileName = task.fileName,
-                    receivedBytes = task.received,
-                    totalBytes = task.total,
-                    status = when (task.status) {
-                        DownloadStatus.Downloading -> when (task.phase) {
-                            DownloadPhase.Transferring -> com.yuezhou.reader.core.online.download.DownloadStatus.DOWNLOADING
-                            DownloadPhase.Verifying -> com.yuezhou.reader.core.online.download.DownloadStatus.VERIFYING
-                            DownloadPhase.Extracting, DownloadPhase.Publishing -> com.yuezhou.reader.core.online.download.DownloadStatus.IMPORTING
-                        }
-                        DownloadStatus.Done -> com.yuezhou.reader.core.online.download.DownloadStatus.COMPLETED
-                        DownloadStatus.Failed -> com.yuezhou.reader.core.online.download.DownloadStatus.FAILED
-                    },
-                    errorMessage = task.error,
-                    localBookId = task.bookId.takeIf { task.status == DownloadStatus.Done },
-                )
-            },
-            onCancelCloudTask = {
-                downloadJob?.cancel()
-                downloadTask = null
-                downloadJob = null
-                DownloadForegroundService.stop(context)
-            },
-            onClearCloudTask = { downloadTask = null },
         )
     }
 
@@ -1086,7 +1046,7 @@ private fun BookshelfScreen() {
                         deletingCloudBook = true
                         scope.launch {
                             try {
-                                val result = cloudSync.deleteRemoteBook(detail.bookId, forced = onlineVm.selectedBackendKind())
+                                val result = cloudSync.deleteRemoteBook(detail.bookId, forced = detailProviderId?.let(onlineVm::backendKindOf))
                                 confirmCloudDelete = false
                                 if (result.success) {
                                     detailBook = null
@@ -1106,7 +1066,10 @@ private fun BookshelfScreen() {
             },
         )
     } else if (detail != null) {
-        val taskRunning = downloadTask?.status == DownloadStatus.Downloading
+        val providerId = detailProviderId
+        val taskRunning = cloudDownloadEnqueuing || downloadTasks.any {
+            it.providerId == providerId && it.remoteId == detail.bookId && it.status.active
+        }
         CloudBookDetailsSheet(
             onDismissRequest = { detailBook = null },
             title = { Text(detail.bookId, maxLines = 2, overflow = TextOverflow.Ellipsis) },
@@ -1149,8 +1112,7 @@ private fun BookshelfScreen() {
                     }) { Text("打开") }
                 }
                 TextButton(enabled = !taskRunning, onClick = {
-                    detailBook = null
-                    // Android 13+ 先请求通知权限（前台服务进度通知需要）
+                    if (providerId == null) return@TextButton
                     if (Build.VERSION.SDK_INT >= 33 &&
                         androidx.core.content.ContextCompat.checkSelfPermission(
                             context,
@@ -1159,152 +1121,25 @@ private fun BookshelfScreen() {
                     ) {
                         requestNotificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     }
-                    // 后台启动下载，不阻塞阅读；同时只有一个任务
-                    downloadTask = DownloadTask(
-                        bookId = detail.bookId,
-                        fileName = detail.fileName,
-                        total = detail.size,
-                    )
-                    // 启动前台服务保活：切后台/锁屏时系统不冻结进程网络，避免 readTimeout 导致下载失败
-                    DownloadForegroundService.start(context, detail.fileName)
-                    // 用 lifecycleScope 而非 rememberCoroutineScope：切后台/锁屏不取消，下载持续到 Activity 销毁
-                    downloadJob = lifecycleOwner.lifecycleScope.launch {
-                            val result = try {
-                                cloudSync.downloadBook(
-                                    book = detail,
-                                    isOpen = ReaderActivity::isBookOpen,
-                                    forced = onlineVm.selectedBackendKind(),
-                                    onProgress = { received, total, phase ->
-                                        downloadTask = downloadTask?.copy(
-                                            received = received,
-                                            total = total,
-                                            phase = when (phase) {
-                                                com.yuezhou.reader.reader.CloudSync.DownloadPhase.Transferring -> DownloadPhase.Transferring
-                                                com.yuezhou.reader.reader.CloudSync.DownloadPhase.Verifying -> DownloadPhase.Verifying
-                                                com.yuezhou.reader.reader.CloudSync.DownloadPhase.Extracting -> DownloadPhase.Extracting
-                                                com.yuezhou.reader.reader.CloudSync.DownloadPhase.Publishing -> DownloadPhase.Publishing
-                                            },
-                                        )
-                                        DownloadForegroundService.updateProgress(context, detail.fileName, received, total)
-                                    },
-                                )
+                    cloudDownloadEnqueuing = true
+                    scope.launch {
+                        try {
+                            onlineVm.enqueueCloudDownload(detail, providerId)
+                            detailBook = null
+                            showOnlineDownloads = true
                         } catch (e: CancellationException) {
-                            downloadTask = null
-                            downloadJob = null
-                            DownloadForegroundService.stop(context)
-                            return@launch
+                            throw e
+                        } catch (e: Exception) {
+                            detailBook = null
+                            snackbarHostState.showSnackbar("无法创建下载任务：${e.message ?: "请重试"}")
+                        } finally {
+                            cloudDownloadEnqueuing = false
                         }
-                        DownloadForegroundService.stop(context)
-                        if (result.isSuccess) {
-                            downloadTask = downloadTask?.copy(status = DownloadStatus.Done, received = downloadTask?.total ?: detail.size)
-                            refreshKey++
-                            snackbarHostState.showSnackbar("已下载：${detail.bookId}")
-                        } else {
-                            downloadTask = downloadTask?.copy(
-                                status = DownloadStatus.Failed,
-                                error = result.exceptionOrNull()?.message,
-                            )
-                            snackbarHostState.showSnackbar("下载失败：${result.exceptionOrNull()?.message}")
-                        }
-                        downloadJob = null
                     }
                 }) { Text(if (taskRunning) "下载中…" else if (detail.local) "重新下载" else "下载") }
             },
             dismissButton = {
                 TextButton(onClick = { detailBook = null }) { Text("关闭") }
-            },
-        )
-    }
-
-    // 下载任务弹窗：顶部下载图标点击后展示当前任务状态
-    if (downloadTasksOpen) {
-        val task = downloadTask
-        AlertDialog(
-            onDismissRequest = { downloadTasksOpen = false },
-            title = { Text("下载任务") },
-            text = {
-                if (task == null) {
-                    Text("暂无下载任务", color = YuezhouColors.TextSecondary)
-                } else {
-                    Column {
-                        Text(task.fileName, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.height(8.dp))
-                        when (task.status) {
-                            DownloadStatus.Downloading -> {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CircularProgressIndicator(
-                                        progress = if (task.total > 0) {
-                                            (task.received.toFloat() / task.total).coerceIn(0f, 1f)
-                                        } else 0f,
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        if (task.total > 0) "${task.percent}%" else "下载中…",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = YuezhouColors.Brand,
-                                    )
-                                }
-                                Spacer(Modifier.height(6.dp))
-                                LinearProgressIndicator(
-                                    progress = if (task.total > 0) {
-                                        (task.received.toFloat() / task.total).coerceIn(0f, 1f)
-                                    } else 0f,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        when (task.phase) {
-                                            DownloadPhase.Transferring -> "${formatSize(task.received)} / ${formatSize(task.total)}"
-                                            DownloadPhase.Verifying -> "正在校验文件…"
-                                            DownloadPhase.Extracting -> "正在提取封面…"
-                                            DownloadPhase.Publishing -> "正在保存到本机…"
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = YuezhouColors.TextSecondary,
-                                    )
-                                }
-                            }
-                            DownloadStatus.Done -> {
-                                Text("下载完成", style = MaterialTheme.typography.bodyMedium, color = YuezhouColors.Brand)
-                            }
-                            DownloadStatus.Failed -> {
-                                Text("下载失败", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-                                task.error?.let {
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(it, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                // 下载完成后可清除任务；下载中可取消
-                when (task?.status) {
-                    DownloadStatus.Downloading -> {
-                        TextButton(onClick = {
-                            downloadJob?.cancel()
-                            downloadTask = null
-                            downloadJob = null
-                            DownloadForegroundService.stop(context)
-                            downloadTasksOpen = false
-                            scope.launch { snackbarHostState.showSnackbar("已取消下载") }
-                        }) { Text("取消下载", color = MaterialTheme.colorScheme.error) }
-                    }
-                    DownloadStatus.Done, DownloadStatus.Failed -> {
-                        TextButton(onClick = {
-                            downloadTask = null
-                            downloadTasksOpen = false
-                        }) { Text("清除") }
-                    }
-                    null -> {}
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { downloadTasksOpen = false }) { Text("关闭") }
             },
         )
     }
@@ -1343,7 +1178,7 @@ private fun BookshelfScreen() {
                         refreshKey++
                         // 重新扫描刷新「已在库」状态
                         scanUri?.let { u ->
-                            val ids = store.snapshot(includeCoverBytes = false).books.map { it.bookId }.toSet()
+                            val ids = store.availableBookIds()
                             scanResult = LocalScanner.scan(context, u, ids)
                         }
                     } else {
@@ -1433,25 +1268,6 @@ private fun ScanResultDialog(
     )
 }
 
-/** 单一下载任务状态（同一时间最多一个任务）。 */
-private data class DownloadTask(
-    val bookId: String,
-    val fileName: String,
-    val total: Long,
-    val received: Long = 0L,
-    val status: DownloadStatus = DownloadStatus.Downloading,
-    val phase: DownloadPhase = DownloadPhase.Transferring,
-    val error: String? = null,
-) {
-    val percent: Int
-        get() = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0
-}
-
-private enum class DownloadStatus { Downloading, Done, Failed }
-
-/** 下载所处阶段（传输 vs 落盘），用于进度文案。 */
-private enum class DownloadPhase { Transferring, Verifying, Extracting, Publishing }
-
 /** 自绘下载图标（material-icons-core 无 Download，用描边路径绘制向下箭头+托盘）。 */
 private val DownloadIcon: ImageVector by lazy {
     ImageVector.Builder(
@@ -1537,6 +1353,8 @@ internal fun CloudBookshelfContent(
     onSetup: () -> Unit,
     onRefresh: () -> Unit,
     onOpenDetail: (CloudSync.RemoteBook) -> Unit,
+    coversEnabled: Boolean,
+    loadCover: suspend (CloudSync.RemoteBook) -> ByteArray?,
 ) {
     val cloudContext = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember(cloudContext) { LibraryUiPrefs(cloudContext) }
@@ -1611,7 +1429,12 @@ internal fun CloudBookshelfContent(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(books, key = { it.bookId }) { book ->
-                        CloudBookCard(book = book, onClick = { onOpenDetail(book) })
+                        CloudBookCard(
+                            book = book,
+                            onClick = { onOpenDetail(book) },
+                            coversEnabled = coversEnabled,
+                            loadCover = loadCover,
+                        )
                     }
                 }
             }
@@ -1630,7 +1453,15 @@ private fun formatFetchedAt(millis: Long): String {
 private fun CloudBookCard(
     book: CloudSync.RemoteBook,
     onClick: () -> Unit,
+    coversEnabled: Boolean,
+    loadCover: suspend (CloudSync.RemoteBook) -> ByteArray?,
 ) {
+    val cover = androidx.compose.runtime.key(book.cloudCover, book.coverPng) {
+        val bytes by produceState(book.coverPng, coversEnabled) {
+            if (coversEnabled && value == null) value = loadCover(book)
+        }
+        bytes
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1645,7 +1476,6 @@ private fun CloudBookCard(
                 .background(CoverPlaceholder.color(book.bookId)),
             contentAlignment = Alignment.Center,
         ) {
-            val cover = book.coverPng
             if (cover != null) {
                 CoverImage(
                     bytes = cover,
@@ -1743,7 +1573,7 @@ private fun LocalBookDetailDialog(
     onEnterSelect: () -> Unit,
 ) {
     val authors by produceState(emptyList<String>(), book, store) {
-        value = store.shelfAuthors(listOf(book))[book.bookId].orEmpty()
+        value = store.authorsFor(book)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1784,6 +1614,7 @@ private fun BookshelfContent(
     authorSearchLoading: Boolean,
     authors: Map<String, List<String>>,
     lookupAuthor: suspend (LibraryStore.Entry) -> String?,
+    authorRefreshKey: Int,
     gridMode: Boolean,
     selecting: Set<String>?,
     navigationLocked: Boolean,
@@ -1839,7 +1670,7 @@ private fun BookshelfContent(
             ) {
                 lazyItems(books, key = { it.bookId }) { book ->
                     val indexed = authors[book.bookId]?.joinToString("、")
-                    val author by produceState(indexed, book, indexed) {
+                    val author by produceState(indexed, book, indexed, authorRefreshKey) {
                         value = indexed ?: lookupAuthor(book)
                     }
                     BookListRow(

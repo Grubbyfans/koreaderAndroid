@@ -66,7 +66,11 @@ window.__reader = {
         }
     },
 
-    async verifyJump(requestId, cfi, restoreCfi) {
+    async verifyJump(requestId, cfi, restoreCfi, expectedCfi) {
+        if (expectedCfi && view.lastLocation?.cfi !== expectedCfi) {
+            post('jumpVerified', { requestId, verified: false, fraction: null, stale: true })
+            return
+        }
         let verified = false
         let fraction = null
         try {
@@ -137,6 +141,30 @@ window.__reader = {
 
     async cfiToXPointer(requestId, cfi) {
         const value = await XPointer.cfiToXPointer(view, cfi)
+        post('positionConverted', { requestId, value })
+    },
+
+    async comparePositions(requestId, remoteCfi, localCfi) {
+        let value = null
+        try {
+            const remote = view.resolveCFI(remoteCfi)
+            const local = view.resolveCFI(localCfi)
+            const sections = view.book.sections
+            if (sections[remote.index] && sections[local.index]) {
+                if (remote.index !== local.index) {
+                    value = String(Math.sign(remote.index - local.index))
+                } else {
+                    const content = view.renderer?.getContents?.().find(item => item.index === local.index)
+                    const doc = content?.doc ?? await sections[local.index].createDocument()
+                    const remoteRange = remote.anchor(doc)
+                    const localRange = local.anchor(doc)
+                    if (remoteRange && localRange)
+                        value = String(Math.sign(remoteRange.compareBoundaryPoints(Range.START_TO_START, localRange)))
+                }
+            }
+        } catch {
+            // Invalid or unresolvable anchors need explicit confirmation.
+        }
         post('positionConverted', { requestId, value })
     },
 

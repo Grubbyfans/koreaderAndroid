@@ -1,6 +1,7 @@
 package com.yuezhou.reader.reader
 
 import android.content.Context
+import android.util.LruCache
 import com.yuezhou.reader.core.cloud.CloudBackend
 import com.yuezhou.reader.core.cloud.CloudException
 import com.yuezhou.reader.core.cloud.CloudService
@@ -11,6 +12,7 @@ import com.yuezhou.reader.core.cloud.ProgressPayload
 import com.yuezhou.reader.core.cloud.BackendKind
 import com.yuezhou.reader.core.cloud.baidu.BaiduBackend
 import com.yuezhou.reader.core.cloud.webdav.WebDavBackend
+import com.yuezhou.reader.core.online.model.CloudCoverReference
 import com.yuezhou.reader.core.protocol.BookNames
 import com.yuezhou.reader.core.protocol.CloudProgress
 import com.yuezhou.reader.core.protocol.LibraryCatalog
@@ -18,13 +20,12 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 
-private val downloadMutex = Mutex()
 
 /**
  * 云同步桥接层：把本地 [CloudCredentials] 转成具体的 [CloudBackend]，
@@ -37,11 +38,11 @@ class CloudSync(private val context: Context) {
 
     private val credentialStore = CloudCredentialStore(context)
 
-    /** 封面内存缓存：namespace/bookId -> PNG bytes（进程内加速，磁盘持久化在 [CloudCache]）。 */
-    private val coverCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray?>()
-
-    /** 封面失败防抖：namespace/bookId -> true（本轮进程内避免失败封面随重组反复请求）。 */
-    private val coverFailed = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private val coverCache = object : LruCache<CloudCoverReference, ByteArray>(4 * 1024 * 1024) {
+        override fun sizeOf(key: CloudCoverReference, value: ByteArray): Int = value.size
+    }
+    private val coverLocks = List(16) { Mutex() }
+    private val coverRequests = Semaphore(3)
 
     /** 云端书库持久化缓存（列表按日历日 + 封面按版本）。 */
     private val cache = CloudCache(context)
@@ -64,6 +65,7 @@ class CloudSync(private val context: Context) {
         val local: Boolean,
         /** 封面 PNG（已从云端拉取，可能为 null 表示无封面/拉取失败）。 */
         val coverPng: ByteArray? = null,
+        val cloudCover: CloudCoverReference? = null,
     )
 
     /** 云端书库列表结果。 */
@@ -171,7 +173,7 @@ class CloudSync(private val context: Context) {
         val catalog = CloudService(backend).index().books.associateBy { it.bookId }
         val store = LibraryStore(context)
         val hidden = store.hiddenBookIds()
-        val books = store.snapshot().books.filterNot { it.bookId in hidden }
+        val books = store.snapshot(includeCoverBytes = false, includeProgress = false).books.filterNot { it.bookId in hidden }
         val syncedIds = books.filter { catalog[it.bookId]?.size == it.size }.map { it.bookId }.toSet()
         UploadSelection(backend.backendId, backendLabelOf(backend), books, syncedIds)
     }
@@ -200,6 +202,7 @@ class CloudSync(private val context: Context) {
             val selectedBackend = checkNotNull(backend)
             selectedBackend.ensureAuthorized()
             val service = CloudService(selectedBackend)
+            val store = LibraryStore(context)
             for (entry in books) {
                 if (isStopped(entry.bookId)) {
                     cancelled++
@@ -224,6 +227,7 @@ class CloudSync(private val context: Context) {
                     } ?: File(EpubImporter.epubDir(context), entry.fileName)
                     size = epub.length()
                     check(epub.isFile && size > 0L) { "本地 EPUB 不存在或为空" }
+                    val cover = entry.coverPng ?: entry.coverFile?.let(store::readCover)
                     service.uploadBook(
                         epub,
                         entry.fileName,
@@ -240,7 +244,7 @@ class CloudSync(private val context: Context) {
                             onProgress(entry.bookId, BookUploadProgress(status, percent))
                         },
                         onBodyUploaded = { uploadedFileName = it },
-                        makeCover = entry.coverPng?.let { png ->
+                        makeCover = cover?.let { png ->
                             { com.yuezhou.reader.core.protocol.CoverFile.encode(png) }
                         },
                     )
@@ -376,7 +380,7 @@ class CloudSync(private val context: Context) {
             if (cached != null) {
                 collector.recordCacheHit("列表")
                 val t0 = System.currentTimeMillis()
-                val fromCacheBooks = decodeCachedBooks(cached.raw, backend)
+                val fromCacheBooks = decodeCachedBooks(cached.raw, ns)
                 Log.d("CloudSync", "listBooks cache hit: decode=${System.currentTimeMillis() - t0}ms, books=${fromCacheBooks.size}")
                 collector.recordPhase("读列表", System.currentTimeMillis() - start)
                 diagnostics.append("读云端书库", collector.snapshot())
@@ -395,7 +399,7 @@ class CloudSync(private val context: Context) {
             val index = service.index()
 
             // 本地已存在的 bookId 集合，用于封面角标
-            val localIds = LibraryStore(context).snapshot().books.map { it.bookId }.toSet()
+            val localIds = LibraryStore(context).availableBookIds()
 
             val books = index.books.map { b ->
                 RemoteBook(
@@ -405,7 +409,7 @@ class CloudSync(private val context: Context) {
                     coverPath = b.coverPath,
                     coverVersion = b.coverVersion,
                     local = b.bookId in localIds,
-                    coverPng = b.coverPath?.let { fetchCover(backend, ns, b.bookId, b.coverVersion ?: "") },
+                    cloudCover = b.coverPath?.let { CloudCoverReference(it, b.coverVersion.orEmpty(), ns) },
                 )
             }
             val fetchedAt = System.currentTimeMillis()
@@ -475,14 +479,13 @@ class CloudSync(private val context: Context) {
     }
 
     /** 从缓存的 library.json 原文重建 RemoteBook 列表（封面按版本走本地缓存，不联网）。 */
-    private suspend fun decodeCachedBooks(raw: String, backend: CloudBackend): List<RemoteBook> {
+    private suspend fun decodeCachedBooks(raw: String, ns: String): List<RemoteBook> {
         val index = try {
             com.yuezhou.reader.core.protocol.LibraryCatalog.decode(raw)
         } catch (e: Exception) {
             return emptyList()
         }
-        val ns = backend.backendId
-        val localIds = LibraryStore(context).snapshot().books.map { it.bookId }.toSet()
+        val localIds = LibraryStore(context).availableBookIds()
         return index.books.map { b ->
             RemoteBook(
                 bookId = b.bookId,
@@ -491,53 +494,47 @@ class CloudSync(private val context: Context) {
                 coverPath = b.coverPath,
                 coverVersion = b.coverVersion,
                 local = b.bookId in localIds,
-                coverPng = b.coverPath?.let { fetchCover(backend, ns, b.bookId, b.coverVersion ?: "") },
+                cloudCover = b.coverPath?.let { CloudCoverReference(it, b.coverVersion.orEmpty(), ns) },
             )
         }
     }
 
-    /** 拉取单张封面（带内存 + 持久化缓存）。返回 PNG bytes 或 null。 */
-    private suspend fun fetchCover(
-        backend: CloudBackend,
-        namespace: String,
-        bookId: String,
-        coverVersion: String,
-    ): ByteArray? {
-        val memKey = "$namespace/$bookId"
-        // 内存缓存命中
-        coverCache[memKey]?.let { return it }
-        if (coverFailed[memKey] == true) return null
+    /** Loads a visible cover for the same account and version that supplied its catalog row. */
+    suspend fun loadCover(reference: CloudCoverReference, forced: BackendKind): ByteArray? = withContext(Dispatchers.IO) {
+        val bookId = reference.path.removePrefix("covers/").removeSuffix(".json")
+        if (reference.path != "covers/$bookId.json" || !BookNames.valid(bookId)) return@withContext null
 
-        // 持久化缓存（按版本）
-        when (val c = cache.readCover(namespace, bookId, coverVersion)) {
-            is CloudCache.CoverResult.Hit -> {
-                coverCache[memKey] = c.pngBytes
-                return c.pngBytes
+        val lock = coverLocks[(reference.backendId.hashCode() xor bookId.hashCode()) and (coverLocks.size - 1)]
+        lock.withLock {
+            val backend = backend(forced = forced)?.takeIf { it.backendId == reference.backendId } ?: return@withLock null
+            coverCache.get(reference)?.let { return@withLock it }
+            when (val cached = cache.readCover(reference.backendId, bookId, reference.version)) {
+                is CloudCache.CoverResult.Hit -> cached.pngBytes?.let {
+                    coverCache.put(reference, it)
+                    return@withLock it
+                }
+                CloudCache.CoverResult.Failed -> return@withLock null
+                CloudCache.CoverResult.Miss -> Unit
             }
-            CloudCache.CoverResult.Failed -> {
-                coverFailed[memKey] = true
-                return null
-            }
-            CloudCache.CoverResult.Miss -> Unit
-        }
 
-        // 联网拉取
-        val t0 = System.currentTimeMillis()
-        val bytes = try {
-            val raw = backend.downloadBytes("covers/$bookId.json", 128 * 1024).toString(Charsets.UTF_8)
-            com.yuezhou.reader.core.protocol.CoverFile.decode(raw).pngBytes
-        } catch (e: Exception) {
-            null
+            coverRequests.withPermit {
+                val bytes = try {
+                    val raw = backend.downloadBytes(reference.path, 128 * 1024).toString(Charsets.UTF_8)
+                    com.yuezhou.reader.core.protocol.CoverFile.decode(raw).pngBytes
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+                if (bytes != null) {
+                    coverCache.put(reference, bytes)
+                    cache.writeCover(reference.backendId, bookId, reference.version, bytes)
+                } else {
+                    cache.markCoverFailed(reference.backendId, bookId, reference.version)
+                }
+                bytes
+            }
         }
-        Log.d("CloudSync", "fetchCover $bookId: network ${System.currentTimeMillis() - t0}ms, hit=${bytes != null}")
-        if (bytes != null) {
-            coverCache[memKey] = bytes
-            cache.writeCover(namespace, bookId, coverVersion, bytes)
-        } else {
-            coverFailed[memKey] = true
-            cache.markCoverFailed(namespace, bookId, coverVersion)
-        }
-        return bytes
     }
 
     /** 后端显示名（中文）。 */
@@ -546,123 +543,48 @@ class CloudSync(private val context: Context) {
         BackendKind.WebDav -> "WebDAV"
     }
 
-    /**
-     * 下载阶段，供 UI 展示下载当前所处阶段（传输 vs 落盘），避免落盘耗时被误判为「卡住」。
-     */
-    enum class DownloadPhase { Transferring, Verifying, Extracting, Publishing }
-
-    /**
-     * 从云端下载一本书到本地并登记书库。
-     *
-     * 对齐方案 §11.5 下载：下载正文到 files/epub/（临时文件 → 校验 → 发布），
-     * 成功后提取封面/书名登记本地书库。返回最终落盘的文件名。
-     *
-     * @param onProgress 下载进度回调（received, total, phase）。
-     *   传输阶段 total 固定为 [book.size]（不被 HTTP Content-Length 污染，避免进度停在 98%）；
-     *   落盘阶段（校验/提取/发布）用 synthetic 进度 0..100 表示，phase 标明当前步骤。
-     */
-    suspend fun downloadBook(
+    /** 只传输到下载队列的暂存文件，正文发布和书库登记由同一个导入入口完成。 */
+    internal suspend fun downloadBookTo(
         book: RemoteBook,
-        isOpen: (String) -> Boolean,
-        onProgress: ((received: Long, total: Long, phase: DownloadPhase) -> Unit)? = null,
-        forced: BackendKind? = null,
-    ): Result<String> = withContext(Dispatchers.IO) {
-        downloadMutex.withLock {
+        target: File,
+        backend: CloudBackend,
+        onProgress: (received: Long, total: Long?) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        require(BookNames.cloudId(book.fileName).first == book.bookId) { "云端 EPUB 文件名无效" }
+        backend.ensureAuthorized()
+        val stat = try {
+            backend.stat("books/${book.fileName}")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        val size = stat?.size?.takeIf { it > 0 } ?: book.size
+        if (size !in 1..LibraryCatalog.MAX_SIZE) throw CloudException(ErrorCode.INVALID_INPUT, "云端文件大小无效")
+        if (target.parentFile?.usableSpace?.let { it >= size } != true) {
+            throw java.io.IOException("应用存储空间不足")
+        }
+        backend.downloadTo("books/${book.fileName}", target, maxBytes = size) { received, _ ->
+            onProgress(received, size)
+        }
+        if (target.length() != size) throw java.io.IOException("下载大小与云端不符，请先更新书库")
+
+        if (book.size != size) {
+            // 保留云端大小纠正，但仅在完整 EPUB 已确认后发布。
+            CoverExtractor.validatePackage(target)
             try {
-                require(BookNames.cloudId(book.fileName).first == book.bookId) {
-                    "云端 EPUB 文件名无效"
-                }
-                check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
-                val directory = DownloadDirectory(context)
-                val backend = backend(forced = forced) ?: return@withLock Result.failure(
-                    IllegalStateException("尚未配置云后端"),
+                CloudService(backend).repairPublication(
+                    bookId = book.bookId,
+                    fileName = book.fileName,
+                    size = size,
+                    coverPath = book.coverPath,
+                    coverVersion = book.coverVersion,
                 )
-                backend.ensureAuthorized()
-
-                // 以云端实际文件大小为权威：library.json 里的 size 可能因外部端写入错误
-                // （如 KOReader 端登记的占位值）而失真，直接用它会导致进度/大小显示错误，
-                // 更严重的是 maxBytes 被错误值截断下载。这里用 stat 拿到真实大小做兜底。
-                val declaredSize = book.size
-                var effectiveSize = declaredSize
-                val remoteStat = try {
-                    backend.stat("books/${book.fileName}")
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    null
-                }
-                if (remoteStat != null && remoteStat.size > 0) {
-                    effectiveSize = remoteStat.size
-                }
-                Log.d("CloudSync", "download ${book.fileName}: declaredSize=$declaredSize, statSize=${remoteStat?.size}, effectiveSize=$effectiveSize")
-                check(effectiveSize in 1..(1024L * 1024 * 1024)) { "云端文件大小无效，请确认文件在云端完整" }
-
-                val store = LibraryStore(context)
-                // 下载前清理历史残留的 .part 临时文件（主动取消/进程被杀遗留）
-                TempFileCleanup.clean(context)
-                val local = store.bookLocation(book.bookId)
-                val destination = local?.tree ?: directory.uri
-                val fileName = local?.fileName ?: book.fileName
-                val target = File(EpubImporter.epubDir(context), fileName)
-                check(target.parentFile?.usableSpace?.let { it >= effectiveSize } == true) { "应用存储空间不足" }
-                val tmp = File.createTempFile("download-", ".part", target.parentFile)
-                try {
-                    // 传输阶段：onProgress 统一用「字节」语义，received=已下载字节，total=有效总大小，
-                    // 让 UI 正确显示「x.x MB / 8.1 MB」。传输进度封顶在 95%（留 5% 给落盘阶段）。
-                    backend.downloadTo("books/${book.fileName}", tmp, maxBytes = effectiveSize) { received, _ ->
-                        val cappedReceived = (received.toDouble() * 0.95).toLong().coerceAtMost(effectiveSize)
-                        onProgress?.invoke(cappedReceived, effectiveSize, DownloadPhase.Transferring)
-                    }
-                    check(tmp.length() == effectiveSize) { "下载大小与云端不符，请先更新书库" }
-
-                    // 落盘阶段：校验（解压校验整个 EPUB）→ 提取封面/书名 → 发布，均无字节进度，
-                    // 用 effectiveSize 的 96%~100% 区间模拟推进，让进度条从 95% 平滑收尾到 100%。
-                    onProgress?.invoke(effectiveSize * 96 / 100, effectiveSize, DownloadPhase.Verifying)
-                    CoverExtractor.validatePackage(tmp)
-                    check(!isOpen(book.bookId)) { "请关闭正在阅读的书籍后再下载" }
-                    onProgress?.invoke(effectiveSize * 97 / 100, effectiveSize, DownloadPhase.Extracting)
-                    val cover = CoverExtractor.extract(tmp)
-                    val title = CoverExtractor.extractTitle(tmp)
-                    onProgress?.invoke(effectiveSize * 98 / 100, effectiveSize, DownloadPhase.Publishing)
-                    val source = destination?.let { directory.publish(it, tmp, fileName) }
-                    if (source == null) {
-                        Files.move(
-                            tmp.toPath(), target.toPath(),
-                            StandardCopyOption.ATOMIC_MOVE,
-                            StandardCopyOption.REPLACE_EXISTING,
-                        )
-                    }
-                    store.registerBook(fileName, cover, title, source, destination, effectiveSize).getOrThrow()
-                    if (source != null) target.delete()
-                    invalidateListCache()
-
-                    // 下载成功后发现 library.json 里的 size 与实际不符（常见于外部上传登记时
-                    // 后端返回了错误的 size），主动回写修正云端列表，让后续列表/详情显示正确大小，
-                    // 也同步 KOReader 端。
-                    if (declaredSize != effectiveSize) {
-                        runCatching {
-                            CloudService(backend).repairPublication(
-                                bookId = book.bookId,
-                                fileName = book.fileName,
-                                size = effectiveSize,
-                                coverPath = book.coverPath,
-                                coverVersion = book.coverVersion,
-                            )
-                            invalidateListCache()
-                        }
-                    }
-
-                    onProgress?.invoke(effectiveSize, effectiveSize, DownloadPhase.Publishing)
-                    Result.success(fileName)
-                } finally {
-                    // 主动取消时文件流可能仍占用，delete 失败则注册 deleteOnExit 兜底，
-                    // 确保临时文件最终被清理，不残留占空间。
-                    if (!tmp.delete()) tmp.deleteOnExit()
-                }
+                invalidateListCache()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Result.failure(e)
+                Log.w("CloudSync", "正文已下载，无法修正云端书籍大小", e)
             }
         }
     }
@@ -749,8 +671,7 @@ class CloudSync(private val context: Context) {
         try {
             val backend = backend() ?: return@withContext "尚未配置云后端"
             backend.ensureAuthorized()
-            val size = LibraryStore(context).snapshot().books
-                .firstOrNull { it.bookId == bookId }?.size ?: 0L
+            val size = LibraryStore(context).bookSize(bookId)
             CloudService(backend).uploadProgress(
                 bookId = bookId,
                 progress = ProgressPayload(
@@ -777,7 +698,9 @@ class CloudSync(private val context: Context) {
 
     private suspend fun readRemoteProgress(backend: CloudBackend, bookId: String): CloudProgress? {
         backend.ensureAuthorized()
-        return CloudService(backend).downloadProgress(bookId)
+        return CloudService(backend).downloadProgress(bookId)?.also { progress ->
+            if (progress.bookId != bookId) throw CloudException(ErrorCode.CONFLICT, "云端进度书名不匹配")
+        }
     }
 
     private fun parseUpdatedAt(s: String): Long? = try {

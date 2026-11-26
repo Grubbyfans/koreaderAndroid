@@ -21,7 +21,7 @@ class EpubImportFilesTest {
             val target = File(root, "book.epub").apply { writeText("same book"); setLastModified(1_000_000L) }
             val generation = target.lastModified()
             val staging = File(root, "stage").apply { writeText("same book") }
-            EpubImportFiles.install(staging, target)
+            EpubImportFiles.install(staging, target).commit()
             assertEquals(generation, target.lastModified())
             assertFalse(staging.exists())
         } finally { root.deleteRecursively() }
@@ -34,7 +34,7 @@ class EpubImportFilesTest {
             assertThrows(Exception::class.java) { EpubImportFiles.install(File(root, "missing"), target) }
             assertEquals("old book", target.readText())
             val staging = File(root, "stage").apply { writeText("new book") }
-            EpubImportFiles.install(staging, target)
+            EpubImportFiles.install(staging, target).commit()
             assertEquals("new book", target.readText())
         } finally { root.deleteRecursively() }
     }

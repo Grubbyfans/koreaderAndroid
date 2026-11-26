@@ -22,6 +22,7 @@ import com.yuezhou.reader.core.online.provider.CloudBookProvider
 import com.yuezhou.reader.reader.online.config.ZLibraryConfigStore
 import com.yuezhou.reader.reader.CloudCredentialStore
 import com.yuezhou.reader.reader.CloudSync
+import com.yuezhou.reader.reader.online.cloud.CloudBookProviderBase
 import com.yuezhou.reader.reader.online.zlibrary.ZLibraryBookProvider
 import com.yuezhou.reader.ui.LibraryUiPrefs
 import kotlinx.coroutines.CancellationException
@@ -371,11 +372,24 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
             bookId = it.remoteId,
             fileName = it.fileName,
             size = it.fileSize ?: 0L,
-            coverPath = null,
-            coverVersion = null,
+            coverPath = it.cloudCover?.path,
+            coverVersion = it.cloudCover?.version,
             local = it.local,
             coverPng = it.coverPng,
+            cloudCover = it.cloudCover,
         )
+    }
+
+    suspend fun loadCloudBookCover(book: CloudSync.RemoteBook, providerId: String): ByteArray? {
+        val reference = book.cloudCover ?: return book.coverPng
+        val kind = backendKindOf(providerId) ?: return null
+        return try {
+            cloudSync.loadCover(reference, kind)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
     }
 
     // —— 检索型书源：输入状态 ——
@@ -550,6 +564,11 @@ class OnlineLibraryViewModel(application: Application) : AndroidViewModel(applic
         val id = providerId
         detailSeq[id] = (detailSeq[id] ?: 0) + 1
         states[id] = stateOf(id).copy(detail = null, detailLoading = false, detailMessage = null)
+    }
+
+    suspend fun enqueueCloudDownload(book: CloudSync.RemoteBook, providerId: String) {
+        val provider = registry.get(providerId) as? CloudBookProviderBase ?: error("云书源不可用")
+        downloadManager.enqueue(provider.downloadRequest(book), title = book.bookId)
     }
 
     /** 从详情页发起下载：文件名唯一性检查与覆盖确认在管理器/导入协调器中完成。 */

@@ -80,13 +80,13 @@ object CoverExtractor {
         }
     }
 
-    internal fun extractAuthors(epubFile: File): List<String> {
+    internal fun extractAuthors(epubFile: File): List<String>? {
         return try {
             ZipFile(epubFile).use { zip ->
                 val container = zip.getEntry("META-INF/container.xml")
-                if (container == null || container.size !in 1..65536) return emptyList()
-                val opf = locateOpf(zip)?.let(zip::getEntry) ?: return emptyList()
-                if (opf.size !in 1..(4L * 1024 * 1024)) return emptyList()
+                if (container == null || container.size !in 1..65536) return null
+                val opf = locateOpf(zip)?.let(zip::getEntry) ?: return null
+                if (opf.size !in 1..(4L * 1024 * 1024)) return null
 
                 val bytes = ByteArray(opf.size.toInt())
                 DataInputStream(zip.getInputStream(opf)).use { it.readFully(bytes) }
@@ -105,7 +105,7 @@ object CoverExtractor {
                 }
             }
         } catch (_: Exception) {
-            emptyList()
+            null
         }
     }
 

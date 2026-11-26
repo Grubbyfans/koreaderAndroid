@@ -14,12 +14,13 @@ import com.yuezhou.reader.core.online.model.ProviderException
 import com.yuezhou.reader.core.online.model.UploadResult
 import com.yuezhou.reader.core.online.provider.CloudBookProvider
 import com.yuezhou.reader.core.online.provider.ProviderCapability
-import com.yuezhou.reader.core.protocol.BookNames
 import com.yuezhou.reader.reader.CloudCredentialStore
 import com.yuezhou.reader.reader.CloudCredentials
 import com.yuezhou.reader.reader.CloudSync
+import com.yuezhou.reader.reader.LibraryStore
 import kotlinx.coroutines.CancellationException
 import java.io.File
+import java.io.IOException
 
 /**
  * 云存储型书源适配器基类。
@@ -44,9 +45,6 @@ abstract class CloudBookProviderBase(
         ProviderCapability.PROGRESS_SYNC,
     )
 
-    /** 保留原始云端条目，供下载时还原 CloudSync.downloadBook 所需的完整参数。 */
-    private val legacyIndex = LinkedHashMap<String, CloudSync.RemoteBook>()
-
     protected abstract fun isConfigured(credentials: CloudCredentials): Boolean
 
     override suspend fun getConnectionState(): ConnectionState {
@@ -65,8 +63,6 @@ abstract class CloudBookProviderBase(
         force: Boolean,
     ): BookPage {
         val library = cloudSync.listBooks(force = force, forced = backendKind)
-        legacyIndex.clear()
-        library.books.forEach { legacyIndex[it.bookId] = it }
         return BookPage(
             items = library.books.map { it.toOnlineBook() },
             nextCursor = null,
@@ -76,13 +72,27 @@ abstract class CloudBookProviderBase(
         )
     }
 
-    override suspend fun getBookDetail(remoteId: String): OnlineBook {
-        legacyIndex[remoteId]?.let { return it.toOnlineBook() }
+    override suspend fun getBookDetail(remoteId: String): OnlineBook =
+        findRemoteBook(remoteId, currentDownloadScope()).toOnlineBook()
+
+    suspend fun currentDownloadScope(): String = cloudSync.backend(forced = backendKind)?.backendId
+        ?: throw ProviderException(ProviderErrorCode.NOT_CONFIGURED, "尚未配置云后端")
+
+    suspend fun downloadRequest(book: CloudSync.RemoteBook): BookDownloadRequest {
+        val accountScope = currentDownloadScope()
+        return BookDownloadRequest(
+            providerId = id,
+            accountScope = accountScope,
+            remoteId = book.bookId,
+            fileName = LibraryStore(context).bookLocation(book.bookId)?.fileName ?: book.fileName,
+            expectedSize = book.size,
+        )
+    }
+
+    private suspend fun findRemoteBook(remoteId: String, accountScope: String): CloudSync.RemoteBook {
         val library = cloudSync.listBooks(force = false, forced = backendKind)
-        val found = library.books.firstOrNull { it.bookId == remoteId }
-            ?: throw ProviderException(ProviderErrorCode.NOT_FOUND, "云端未找到该书")
-        legacyIndex[remoteId] = found
-        return found.toOnlineBook()
+        check(currentDownloadScope() == accountScope) { "云后端已变更，请重新选择书籍" }
+        return library.books.firstOrNull { it.bookId == remoteId } ?: throw ProviderException(ProviderErrorCode.NOT_FOUND, "云端未找到该文件，请刷新书库")
     }
 
     override suspend fun download(
@@ -90,34 +100,22 @@ abstract class CloudBookProviderBase(
         onProgress: (received: Long, total: Long?) -> Unit,
         isBookOpen: (String) -> Boolean,
     ): DownloadResult {
-        val legacy = legacyIndex[request.remoteId] ?: run {
-            try {
-                getBookDetail(request.remoteId)
-            } catch (e: Exception) {
-                return e.toDownloadFailure()
-            }
-            legacyIndex[request.remoteId]
-                ?: return DownloadResult.Failed(ProviderErrorCode.NOT_FOUND, "云端未找到该文件，请刷新书库")
-        }
-
         return try {
-            val result = cloudSync.downloadBook(
-                book = legacy,
-                isOpen = isBookOpen,
-                onProgress = { received, total, _ -> onProgress(received, total) },
-                forced = backendKind,
-            )
-            result.fold(
-                onSuccess = { fileName ->
-                    DownloadResult.Success(
-                        fileName = fileName,
-                        localBookId = BookNames.localId(fileName).first ?: fileName,
-                    )
-                },
-                onFailure = { it.toDownloadFailure() },
-            )
+            val backend = cloudSync.backend(forced = backendKind)
+                ?: throw ProviderException(ProviderErrorCode.NOT_CONFIGURED, "尚未配置云后端")
+            if (request.providerId != id || request.accountScope != backend.backendId) {
+                throw ProviderException(ProviderErrorCode.INVALID_CONFIG, "云后端已变更，请回书源重新下载")
+            }
+            if (isBookOpen(request.remoteId)) {
+                throw ProviderException(ProviderErrorCode.IO, "请关闭正在阅读的书籍后再下载")
+            }
+            val target = request.remotePath?.let(::File)
+                ?: throw ProviderException(ProviderErrorCode.IO, "下载临时路径无效")
+            val book = findRemoteBook(request.remoteId, request.accountScope)
+            cloudSync.downloadBookTo(book, target, backend, onProgress)
+            DownloadResult.Success(request.fileName, "")
         } catch (e: CancellationException) {
-            DownloadResult.Cancelled
+            throw e
         } catch (e: Exception) {
             e.toDownloadFailure()
         }
@@ -151,6 +149,7 @@ abstract class CloudBookProviderBase(
         fileName = fileName,
         fileSize = size,
         coverPng = coverPng,
+        cloudCover = cloudCover,
         remotePath = "books/$fileName",
         local = local,
     )
@@ -172,6 +171,7 @@ abstract class CloudBookProviderBase(
             ErrorCode.IO, ErrorCode.UNCERTAIN -> ProviderErrorCode.IO
             else -> ProviderErrorCode.UNKNOWN
         }
+        is IOException -> ProviderErrorCode.IO
         else -> ProviderErrorCode.UNKNOWN
     }
 }

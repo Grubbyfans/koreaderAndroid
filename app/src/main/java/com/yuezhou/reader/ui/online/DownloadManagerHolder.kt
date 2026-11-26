@@ -15,7 +15,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 主进程唯一的在线下载运行时（阶段 B）。
@@ -34,7 +33,6 @@ object DownloadManagerHolder {
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val recoveryStarted = AtomicBoolean(false)
 
     @Volatile
     private var runtime: Runtime? = null
@@ -43,11 +41,11 @@ object DownloadManagerHolder {
         runtime?.let { return it }
         return synchronized(this) {
             runtime ?: build(context.applicationContext).also { created ->
+                val recovery = created.manager.startRecovery()
                 runtime = created
-                // 网页下载由主进程观察：先注册完成广播，再对账上次遗留的系统下载记录。
-                created.webDownloads.start()
-                if (recoveryStarted.compareAndSet(false, true)) {
-                    scope.launch { created.manager.recoverInterrupted() }
+                scope.launch {
+                    recovery.join()
+                    created.webDownloads.start()
                 }
             }
         }

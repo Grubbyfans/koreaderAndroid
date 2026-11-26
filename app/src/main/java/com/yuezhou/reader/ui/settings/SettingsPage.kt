@@ -249,7 +249,7 @@ internal fun SettingsPage(
                     Column(Modifier.weight(1f)) {
                         Text("自动同步", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "进入书籍自动拉取云端进度覆盖本地；退出或切出时自动上传覆盖云端",
+                            "打开书籍时，云端位置更靠后则自动续读，更靠前则询问。退出或切出时，本机进度会覆盖云端。",
                             style = MaterialTheme.typography.bodySmall,
                             color = YuezhouColors.TextSecondary,
                         )

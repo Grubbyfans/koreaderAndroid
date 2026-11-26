@@ -3,6 +3,9 @@ package com.yuezhou.reader.core.online.model
 /** 服务端返回的格式字段解析结果；只有 [CONFIRMED] 可确认标准格式并进入原生下载。 */
 enum class BookFormatState { CONFIRMED, UNSUPPORTED, MISSING, CONFLICT }
 
+/** The cloud catalog version and account associated with a cover. */
+data class CloudCoverReference(val path: String, val version: String, val backendId: String)
+
 /**
  * 在线书源统一书籍模型。
  *
@@ -32,6 +35,7 @@ data class OnlineBook(
     val remotePath: String? = null,
     /** 是否已在本地书库（按文件名判断）。 */
     val local: Boolean = false,
+    val cloudCover: CloudCoverReference? = null,
 ) {
     /** 列表与详情的格式展示文案；缺失/冲突/不支持都给出明确状态，不伪装成 EPUB。 */
     val formatLabel: String

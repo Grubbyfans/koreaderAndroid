@@ -20,8 +20,9 @@ function makeReader(fraction, pointVisible = true) {
     }
     runInNewContext(source.replace(/^import .*$/gm, ''), {
         window, document: { getElementById: () => view }, Overlayer: {}, SpeechHighlight: class {},
+        Range: { START_TO_START: 0 },
     })
-    return { reader: window.__reader, messages, visited }
+    return { reader: window.__reader, messages, visited, view }
 }
 
 test('verified jump reports the fraction at the actual landing position', async () => {
@@ -41,4 +42,38 @@ test('unverified jump restores the previous page and does not report its fractio
     await reader.verifyJump('request', 'target', 'previous')
     assert.deepEqual(visited, ['target', 'previous'])
     assert.deepEqual(messages, [['jumpVerified', { requestId: 'request', verified: false, fraction: null }]])
+})
+
+test('automatic jump leaves the current page alone after a late relocation', async () => {
+    const { reader, messages, visited, view } = makeReader(0.315)
+    view.lastLocation = { cfi: 'new-local-page' }
+    await reader.verifyJump('request', 'target', 'previous', 'previous')
+    assert.deepEqual(visited, [])
+    assert.deepEqual(messages, [['jumpVerified', {
+        requestId: 'request', verified: false, fraction: null, stale: true,
+    }]])
+})
+
+test('compares spine order and DOM positions without reading displayed percentages', async () => {
+    const { reader, messages, view } = makeReader(0.315)
+    view.book = { sections: [{}, {}] }
+    view.resolveCFI = cfi => {
+        const [index, offset] = cfi.split(':').map(Number)
+        return {
+            index,
+            anchor: () => ({ offset, compareBoundaryPoints: (_, local) => offset - local.offset }),
+        }
+    }
+    await reader.comparePositions('next-chapter', '1:0', '0:100')
+    await reader.comparePositions('earlier-in-chapter', '0:19', '0:20')
+    await reader.comparePositions('later-in-chapter', '0:21', '0:20')
+    await reader.comparePositions('same', '0:20', '0:20')
+    await reader.comparePositions('invalid-anchor', '4:0', '0:20')
+    assert.deepEqual(messages.map(([type, message]) => [type, message.requestId, message.value]), [
+        ['positionConverted', 'next-chapter', '1'],
+        ['positionConverted', 'earlier-in-chapter', '-1'],
+        ['positionConverted', 'later-in-chapter', '1'],
+        ['positionConverted', 'same', '0'],
+        ['positionConverted', 'invalid-anchor', null],
+    ])
 })

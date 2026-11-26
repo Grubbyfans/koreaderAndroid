@@ -112,6 +112,8 @@ fun OnlineLibraryScreen(
                         onSetup = onOpenSettings,
                         onRefresh = onRefresh,
                         onOpenDetail = onOpenDetail,
+                        coversEnabled = interactionsEnabled,
+                        loadCover = { book -> vm.loadCloudBookCover(book, providerId) },
                     )
                 }
             }
