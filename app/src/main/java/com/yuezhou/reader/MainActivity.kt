@@ -47,6 +47,7 @@ import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.List
@@ -212,6 +213,7 @@ private fun BookshelfScreen() {
     var restoredTab by rememberSaveable(stateSaver = TabSaver) { mutableStateOf(Tab.书架) }
     // 管理态（多选删除）：非空表示进入管理态，集合为已勾选的 bookId
     var selecting by remember { mutableStateOf<Set<String>?>(null) }
+    var localBookDetail by remember { mutableStateOf<LibraryStore.Entry?>(null) }
     // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
     var pendingDelete by remember { mutableStateOf<Set<String>?>(null) }
     var shelfMenuOpen by remember { mutableStateOf(false) }
@@ -514,7 +516,7 @@ private fun BookshelfScreen() {
     BackHandler(enabled = showOnlineDownloads) { showOnlineDownloads = false }
 
     // 宿主级浮层（全屏子页/下载管理/本地管理态）期间禁止横滑，避免与内部交互冲突。
-    val hostSwipeBlocked = fullscreenSubPage || showOnlineDownloads || selecting != null
+    val hostSwipeBlocked = fullscreenSubPage || showOnlineDownloads || selecting != null || localBookDetail != null
     DisposableEffect(hostSwipeBlocked) {
         if (hostSwipeBlocked) swipeBlocker.hold("host:overlay")
         onDispose { if (hostSwipeBlocked) swipeBlocker.release("host:overlay") }
@@ -873,7 +875,7 @@ private fun BookshelfScreen() {
                             selecting = selecting,
                             navigationLocked = pagerBusy,
                             onImport = { if (!scanning && !importing) importOptionsOpen = true },
-                            onEnterSelect = { selecting = setOf(it) },
+                            onOpenDetail = { localBookDetail = it },
                             onToggleSelect = { id ->
                                 val cur = selecting ?: emptySet()
                                 selecting = if (id in cur) cur - id else cur + id
@@ -966,6 +968,18 @@ private fun BookshelfScreen() {
             onOpenLegacyDownloads = {
                 showOnlineDownloads = false
                 downloadTasksOpen = true
+            },
+        )
+    }
+
+    localBookDetail?.let { book ->
+        LocalBookDetailDialog(
+            book = book,
+            store = store,
+            onDismiss = { localBookDetail = null },
+            onEnterSelect = {
+                localBookDetail = null
+                selecting = setOf(book.bookId)
             },
         )
     }
@@ -1709,6 +1723,45 @@ private fun formatSize(bytes: Long): String {
 }
 
 @Composable
+private fun LocalBookDetailDialog(
+    book: LibraryStore.Entry,
+    store: LibraryStore,
+    onDismiss: () -> Unit,
+    onEnterSelect: () -> Unit,
+) {
+    val authors by produceState(emptyList<String>(), book, store) {
+        value = store.shelfAuthors(listOf(book))[book.bookId].orEmpty()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("书籍详情") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { Text(book.title, style = MaterialTheme.typography.titleMedium) }
+                if (authors.isNotEmpty()) {
+                    item { Text("作者：${authors.joinToString("、")}") }
+                }
+                item { Text("文件大小：${formatSize(book.size)}") }
+                item {
+                    val progress = book.percent?.coerceIn(0.0, 1.0)?.let { "${(it * 100).toInt()}%" }
+                    Text("阅读进度：${progress ?: "未开始"}")
+                }
+                item {
+                    Column {
+                        Text("文件位置")
+                        SelectionContainer {
+                            Text(book.localPath, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        dismissButton = { TextButton(onClick = onEnterSelect) { Text("管理书籍") } },
+    )
+}
+
+@Composable
 private fun BookshelfContent(
     books: List<LibraryStore.Entry>,
     loading: Boolean,
@@ -1722,7 +1775,7 @@ private fun BookshelfContent(
     selecting: Set<String>?,
     navigationLocked: Boolean,
     onImport: () -> Unit,
-    onEnterSelect: (String) -> Unit,
+    onOpenDetail: (LibraryStore.Entry) -> Unit,
     onToggleSelect: (String) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1783,7 +1836,9 @@ private fun BookshelfContent(
                         selecting = selecting != null,
                         checked = selecting?.contains(book.bookId) == true,
                         onClick = { openBook(book) },
-                        onLongClick = { onEnterSelect(book.bookId) },
+                        onLongClick = if (selecting == null && !navigationLocked) {
+                            { onOpenDetail(book) }
+                        } else null,
                     )
                 }
             }
@@ -1806,7 +1861,9 @@ private fun BookshelfContent(
                         selecting = selecting != null,
                         checked = selecting?.contains(book.bookId) == true,
                         onClick = { openBook(book) },
-                        onLongClick = { onEnterSelect(book.bookId) },
+                        onLongClick = if (selecting == null && !navigationLocked) {
+                            { onOpenDetail(book) }
+                        } else null,
                     )
                 }
             }
@@ -1821,7 +1878,7 @@ private fun BookCard(
     selecting: Boolean,
     checked: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
 ) {
     Column(
         modifier = Modifier
@@ -1924,7 +1981,7 @@ private fun BookListRow(
     selecting: Boolean,
     checked: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
