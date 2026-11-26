@@ -94,14 +94,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -796,23 +788,15 @@ private fun BookshelfScreen() {
                     }
                 }
             }
-            val showCloudTabs = currentTab == Tab.云端 && cloudPageIndices.isNotEmpty()
-
-            AnimatedVisibility(
-                visible = showCloudTabs,
-                enter = if (motionEnabled) fadeIn() + slideInVertically { it / 2 } else EnterTransition.None,
-                exit = if (motionEnabled) shrinkVertically() + fadeOut() + slideOutVertically { it / 2 } else ExitTransition.None,
-                label = "cloudTabs",
-            ) {
-                CloudSourceTabs(
-                    providers = onlineVm.registry.enabled().filter { it.id in cloudPageIndices },
-                    pageIndices = cloudPageIndices,
-                    pagerState = pagerState,
-                    onSelect = { providerId ->
-                        if (!pagerBusy) navigator.navigateTo("cloud.$providerId")
-                    },
-                )
-            }
+            CloudSourceTabs(
+                providers = onlineVm.registry.enabled().filter { it.id in cloudPageIndices },
+                pageIndices = cloudPageIndices,
+                pagerState = pagerState,
+                motionEnabled = motionEnabled,
+                onSelect = { providerId ->
+                    if (!pagerBusy) navigator.navigateTo("cloud.$providerId")
+                },
+            )
 
             // 同一个 Pager 承载一级和二级内容，每次手势只预览起点的相邻页。
             HorizontalPager(

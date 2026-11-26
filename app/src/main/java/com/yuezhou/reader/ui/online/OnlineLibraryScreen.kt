@@ -27,6 +27,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,6 +42,7 @@ import com.yuezhou.reader.core.online.provider.CatalogBookProvider
 import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * 在线书库统一入口：作为底部一级「云端」页，顶部书源 Tab 切换。
@@ -175,15 +179,36 @@ fun CloudSourceTabs(
     pageIndices: Map<String, Int>,
     pagerState: PagerState,
     onSelect: (String) -> Unit,
+    motionEnabled: Boolean = true,
 ) {
     val pagePosition by remember(pagerState) {
         derivedStateOf { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+    }
+    // 相邻云端页的权重之和恒为 1，跨栏目时随 Pager 连续展开或收起。
+    val visibility by remember(pagerState, pageIndices) {
+        derivedStateOf {
+            val position = pagerState.currentPage + pagerState.currentPageOffsetFraction
+            pageIndices.values.sumOf { index ->
+                (1f - abs(position - index)).coerceIn(0f, 1f).toDouble()
+            }.toFloat().coerceIn(0f, 1f)
+        }
     }
     // 书源较多时等宽分段会挤压名称，改为可横向滚动且保留最小宽度。
     val scrollable = providers.size > 3
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clipToBounds()
+            .layout { measurable, constraints ->
+                val child = measurable.measure(constraints.copy(minHeight = 0))
+                layout(child.width, (child.height * visibility).roundToInt()) {
+                    child.placeRelative(0, 0)
+                }
+            }
+            .graphicsLayer {
+                alpha = if (motionEnabled) visibility else 1f
+                translationY = if (motionEnabled) size.height * (1f - visibility) / 2f else 0f
+            }
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(YuezhouColors.Surface)
