@@ -1,0 +1,186 @@
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/DrawBatchAssembler.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-175
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/gesture/CurlPan.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-243
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PenumbraBuilder.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-353
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/model/CurlModel.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-140
+app/src/main/assets/licenses/legado-md3/GPL-3.0.txt
+  s_d1fdee5aefe6ab::t_2f1e48378dabdc 1-674
+tests/fixtures/page-preview/generate.py
+  s_d1fdee5aefe6ab::t_0a550be3f00fa2 1
+  s_d1fdee5aefe6ab::t_0c4907bde14c5e 18-23
+  s_d1fdee5aefe6ab::t_09cb4cf3e126f2 2-4,7-17
+  s_d1fdee5aefe6ab::t_9be17424db14a6 5-6
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/LICENSE.txt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-21
+app/src/main/java/com/yuezhou/reader/animation/PageTurnOverlay.kt
+  s_d1fdee5aefe6ab::t_a77e2d1b60d8e4 30,50,83,88
+  s_d1fdee5aefe6ab::t_f718aa673765d7 1-28,33-34,36-43,51-79,81-82,103-104,110-113,115-122
+  s_d1fdee5aefe6ab::t_2eacfbbe29017d 29,44,105-109,114
+  s_d1fdee5aefe6ab::t_650b2589f47ed6 35,45-49
+  s_d1fdee5aefe6ab::t_636e9a8d882d8d 31-32,80,84-87,89-102
+app/src/main/java/com/yuezhou/reader/animation/ReaderAnimationController.kt
+  s_d1fdee5aefe6ab::t_55dedab656a973 43-46,101-107,113-114,116,122,124,127-130,155-157,159-208,210-217,222
+  s_150ab101451b26::t_fa6d1d152022e5 139
+  s_d1fdee5aefe6ab::t_10707bd120f274 32-39,53,62-69,209,229-230
+  s_d1fdee5aefe6ab::t_a723d05624a8c1 1-31,40,47-52,54-55,59-61,72-92,94-100,109-112,115,117-121,123,125-126,131-133,135-138,140-143,145,149-154,218-220,223-224,226-228,231-234
+  s_150ab101451b26::t_9b7866166e0032 146-148
+  s_150ab101451b26::t_f2bd5c31d52a67 41-42,56-58,70-71,93,108,134,144,158,221,225
+reader/src/test/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/CurlMeshCompatibilityTest.kt
+  s_d1fdee5aefe6ab::t_495359b522c032 1-159
+tests/speech-highlight.test.mjs
+  s_d1fdee5aefe6ab::t_3ab7975da7fc45 45-56
+reader/src/main/java/com/yuezhou/reader/reader/animation/PageSnapshot.kt
+  s_d1fdee5aefe6ab::t_d568b8abd35a64 1-13,15-23,25-35
+  s_d1fdee5aefe6ab::t_0c5e2a9ebe2e12 14,24
+reader/src/main/java/com/yuezhou/reader/reader/animation/WebPageSnapshots.kt
+  s_d1fdee5aefe6ab::t_25f2449f5f0f3b 73
+  s_150ab101451b26::t_fa6d1d152022e5 31,34-45,57,60,66-67,92-93
+  s_150ab101451b26::t_a272870ed6631a 28-30
+  s_150ab101451b26::t_f293ccb997adc8 32-33
+  s_150ab101451b26::t_84ccb1c32e83aa 46-48,54-56
+  s_150ab101451b26::t_4c3cc92689765c 58-59
+  s_150ab101451b26::t_da915d406a9774 61-65
+  s_150ab101451b26::t_dfc315c0608955 94-96
+  s_b4fe1b5cd43361::t_c9a0595da627bc 1-27,49-53,68-72,74-91
+docs/08-阅读翻页动画/静读翻页动画移植技术实施方案.md
+  s_d1fdee5aefe6ab::t_8c114cf1eb5e77 3
+  s_d1fdee5aefe6ab::t_813c8deabc44dc 1-2,4-253
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/gesture/CurlNavigation.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-95
+reader/src/main/java/com/yuezhou/reader/reader/animation/PageTurnTransaction.kt
+  s_d1fdee5aefe6ab::t_551fba369966c9 1-48
+app/src/main/java/io/legado/app/feature/reader/platform/ioscurl/IosCurlRenderer.kt
+  s_d1fdee5aefe6ab::t_2f1e48378dabdc 1-598
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_d1fdee5aefe6ab::t_ed8270d15d39c9 871
+  s_d1fdee5aefe6ab::t_55dedab656a973 872
+  s_d1fdee5aefe6ab::t_10707bd120f274 636-637
+  s_d1fdee5aefe6ab::t_f89b0f7d1dd2f5 790-792,1458
+  s_d1fdee5aefe6ab::t_6c300675b21dfd 196,672,793-805,849,856-858,864-870,875,877-879,1464-1465
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PageSurfaceBuilder.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-285
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/math/BinaryMath.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-3,5-124
+  s_d1fdee5aefe6ab::t_8e5f32a635588d 4
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurveSampling.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-222
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/ShadowBuilder.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-273
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshConstants.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-31
+reader/src/main/java/com/yuezhou/reader/reader/animation/PreviewPageProvider.kt
+  s_150ab101451b26::t_fa6d1d152022e5 82-84
+  s_d1fdee5aefe6ab::t_500133b71245dc 1-79,85-104,107-133
+  s_150ab101451b26::t_9b7866166e0032 80-81
+  s_150ab101451b26::t_d7a6df63524487 105-106
+app/src/main/java/io/legado/app/feature/reader/core/transition/ReaderTurnDirection.kt
+  s_d1fdee5aefe6ab::t_2f1e48378dabdc 1-3
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/control/CurlControl.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-533
+tests/progress-jump.test.mjs
+  s_d1fdee5aefe6ab::t_3345c2db285f51 25,89-100
+  s_d1fdee5aefe6ab::t_084f7667d5b785 80-88,101
+docs/08-阅读翻页动画/阶段0.1翻页动画可行性验证报告.md
+  s_d1fdee5aefe6ab::t_3e72f6981bd929 1-97
+docs/README.md
+  s_d1fdee5aefe6ab::t_a7b8a57c768332 95,97-101
+  s_150ab101451b26::t_aeb1e7926e78d2 3,104
+  s_d1fdee5aefe6ab::t_813c8deabc44dc 5,96
+  s_d1fdee5aefe6ab::t_3e72f6981bd929 102-103
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/VertexBuffer.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-202
+app/src/main/assets/reader/speech-highlight.js
+  s_d1fdee5aefe6ab::t_b52dd8d53b2e94 16,41-43,45-46
+  s_d1fdee5aefe6ab::t_3ab7975da7fc45 24-25,44
+  s_d1fdee5aefe6ab::t_ed8270d15d39c9 3
+  s_d1fdee5aefe6ab::t_c34967ac88d3d8 14-15
+tests/fixtures/page-preview/README.md
+  s_d1fdee5aefe6ab::t_9be17424db14a6 1,3,5
+  s_d1fdee5aefe6ab::t_0a550be3f00fa2 2,4
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurlCurve.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-70
+docs/01-工程与构建/third-party-notices.md
+  s_d1fdee5aefe6ab::t_8c114cf1eb5e77 60-65,68-69
+  s_d1fdee5aefe6ab::t_9be17424db14a6 66-67
+  s_d1fdee5aefe6ab::t_57a569c0e56605 70
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/CurlMesh.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-130
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/LinearTransform.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-90
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/CurlProjectionBuilder.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-305
+app/src/main/java/io/legado/app/feature/reader/core/transition/ReaderPageTurnSpeed.kt
+  s_d1fdee5aefe6ab::t_2f1e48378dabdc 1-49
+reader/src/test/java/io/legado/app/feature/reader/core/transition/ioscurl/ShadowProfileTest.kt
+  s_d1fdee5aefe6ab::t_495359b522c032 1-28
+app/src/main/assets/reader/bridge.js
+  s_d1fdee5aefe6ab::t_b52dd8d53b2e94 12,36-42,70,81,107-108,125,137
+  s_d1fdee5aefe6ab::t_7c225542a6f55d 9,43-44
+  s_d1fdee5aefe6ab::t_084f7667d5b785 287-293
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/layout/CurlLayout.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-165
+app/src/main/java/io/legado/app/feature/reader/platform/ioscurl/IosCurlCanvasRenderer.kt
+  s_d1fdee5aefe6ab::t_2f1e48378dabdc 1-140
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/control/CurlTiming.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-104
+app/src/main/assets/reader/page-snapshot.js
+  s_d1fdee5aefe6ab::t_7c225542a6f55d 1-30
+app/src/main/java/io/legado/app/feature/reader/components/ioscurl/IosCurlTurn.kt
+  s_d1fdee5aefe6ab::t_2f1e48378dabdc 1-192
+reader/src/test/java/com/yuezhou/reader/reader/animation/PageTurnTransactionTest.kt
+  s_d1fdee5aefe6ab::t_551fba369966c9 1-40
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  s_d1fdee5aefe6ab::t_115a216bbb0678 36,349-359,363-365
+  s_d1fdee5aefe6ab::t_b52dd8d53b2e94 362
+  s_d1fdee5aefe6ab::t_55dedab656a973 90-91,197-202,286
+  s_d1fdee5aefe6ab::t_ed8270d15d39c9 88-89,285,331,367-368,398,433,502
+  s_d1fdee5aefe6ab::t_2eacfbbe29017d 341
+  s_d1fdee5aefe6ab::t_6163540dc35f83 37-38,281-282,348,360-361,366,554-555
+docs/08-阅读翻页动画/静读翻页动画移植开发总结报告.md
+  s_150ab101451b26::t_aeb1e7926e78d2 1-42
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshBuildContext.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-170
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/MeshGenerator.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-39
+reader/src/main/java/io/legado/app/feature/reader/core/transition/ioscurl/mesh/generation/PackedHalfColor.kt
+  s_d1fdee5aefe6ab::t_24d41d7595ed52 1-102
+app/src/main/assets/licenses/legado-md3/ioscurl-MIT.txt
+  s_d1fdee5aefe6ab::t_9bb6d485e25125 1-21
+app/src/main/assets/licenses/legado-md3/source-manifest.json
+  s_d1fdee5aefe6ab::t_4047333eb86ba2 1-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "654cc968bd75ed12004cfae4f598689f1835b449",
+  "prompts": {},
+  "sessions": {
+    "s_150ab101451b26": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a216e4-7bcc-7213-aaa1-be40f023131d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    },
+    "s_b4fe1b5cd43361": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a216f1-3f24-7e91-96cb-8c2a016d2950",
+        "model": "unknown"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    },
+    "s_d1fdee5aefe6ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21687-f442-7182-936f-27117587e8a5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
