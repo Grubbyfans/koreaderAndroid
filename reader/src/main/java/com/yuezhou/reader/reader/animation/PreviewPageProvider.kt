@@ -80,6 +80,8 @@ class PreviewPageProvider(
         val ready = opened ?: return
         val origin = key(cfi)
         if (current == origin && (isPreparing || preparedOrigin == origin)) return
+        val timing = PageTurnTiming(if (ahead) "prefetch" else "prepare")
+        timing.mark("start")
         val stamp = ++generation
         preparation?.cancel()
         current = origin.takeIf { pool.get(it) != null }
@@ -107,6 +109,7 @@ class PreviewPageProvider(
                         if (stamp != generation) { image.recycle(); return@withTimeout }
                         pool.put(origin, image)
                     }
+                    timing.mark("origin_ready")
                     states[origin] = state
                     current = origin
                     onPrepared()
@@ -122,7 +125,9 @@ class PreviewPageProvider(
                             helper.adjacent(direction)
                         }
                         if (target.cfi == cfi) continue
+                        timing.mark("neighbor_navigation_done")
                         val image = helper.capture()
+                        timing.mark("neighbor_capture_done")
                         if (stamp != generation) { image.recycle(); return@withTimeout }
                         val targetKey = key(target.cfi)
                         pool.put(targetKey, image)
@@ -145,6 +150,7 @@ class PreviewPageProvider(
                 if (stamp == generation) {
                     states.keys.retainAll { pool.contains(it) }
                     neighbors.keys.retainAll { pool.contains(it) }
+                    timing.mark(if (completed) "done" else "cancelled_or_failed")
                     if (completed) preparedOrigin = origin
                     isPreparing = false
                     onPrepared()

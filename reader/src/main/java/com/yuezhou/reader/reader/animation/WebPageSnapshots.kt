@@ -34,10 +34,15 @@ class WebPageSnapshots(private val view: ReaderWebView) : AutoCloseable {
     }
 
     suspend fun capture(): Bitmap = withContext(Dispatchers.Main.immediate) {
+        val timing = PageTurnTiming("capture")
+        timing.mark("start")
         awaitVisualState()
+        timing.mark("visual_ready")
         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         try {
+            timing.mark("bitmap_allocated")
             view.draw(Canvas(bitmap))
+            timing.mark("draw_done")
             bitmap
         } catch (error: Throwable) {
             bitmap.recycle()

@@ -35,6 +35,7 @@ internal class PageTurnOverlay(context: Context) : View(context) {
     private var material = CurlMaterial()
     var fadeProgress = 0f
         set(value) { field = value.coerceIn(0f, 1f); invalidate() }
+    var onFirstMotionDraw: (() -> Unit)? = null
     var onRenderFailure: ((Throwable) -> Unit)? = null
 
     init { visibility = GONE; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
@@ -68,6 +69,7 @@ internal class PageTurnOverlay(context: Context) : View(context) {
         val first = current ?: return
         val second = target ?: return
         if (first.isRecycled || second.isRecycled) return
+        if (config != null || fadeProgress > 0f) onFirstMotionDraw?.invoke()
         bounds.set(0, 0, width, height)
         paint.alpha = 255
         canvas.drawBitmap(first, null, bounds, paint)
@@ -117,6 +119,7 @@ internal class PageTurnOverlay(context: Context) : View(context) {
     }
 
     fun clear() {
+        onFirstMotionDraw = null
         generation++
         visibility = GONE
         renderer = null; config = null; values = null

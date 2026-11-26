@@ -137,6 +137,11 @@ class ReaderWebView(context: Context) : WebView(context) {
                 return true
             }
 
+            override fun onDoubleTapEvent(event: MotionEvent): Boolean {
+                com.yuezhou.reader.reader.animation.PageTurnTiming("gesture").mark("double_tap_${event.actionMasked}")
+                return super.onDoubleTapEvent(event)
+            }
+
             override fun onSingleTapUp(event: MotionEvent): Boolean {
                 if (width <= 0) return false
                 val position = event.x / width

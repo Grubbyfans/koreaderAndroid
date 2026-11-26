@@ -11,6 +11,7 @@ import com.yuezhou.reader.reader.animation.PageTurnFrameTime
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import com.yuezhou.reader.reader.ReaderWebView
+import com.yuezhou.reader.reader.animation.PageTurnTiming
 import com.yuezhou.reader.reader.animation.PageTurnTransaction
 import com.yuezhou.reader.reader.animation.PreviewPageProvider
 import com.yuezhou.reader.reader.animation.WebPageSnapshots
@@ -46,6 +47,8 @@ internal class ReaderAnimationController(
     private var motion: Job? = null
     private var finishVisual: CompletableDeferred<Unit>? = null
     private var publishingCommit = false
+    private var touchTiming: PageTurnTiming? = null
+    private var pendingTiming: PageTurnTiming? = null
     private var lastTapTime = 0L
     private var continuousTurn = false
     private var renderAvailable = true
@@ -108,6 +111,10 @@ internal class ReaderAnimationController(
             // The bridge disables slide for native modes, so a renderer failure falls back instantly.
             return false
         }
+        val timing = touchTiming ?: PageTurnTiming("tap")
+        timing.mark("tap_${transaction.phase}")
+        pendingTiming = timing
+        touchTiming = null
         val now = android.os.SystemClock.uptimeMillis()
         continuousTurn = lastTapTime != 0L && now - lastTapTime < 300L
         lastTapTime = now
@@ -128,6 +135,7 @@ internal class ReaderAnimationController(
             if (!pages.isPreparing) pendingTurn = null
             return
         }
+        pendingTiming?.mark("snapshots_ready")
         val first = pages.bitmap(pair.origin) ?: return
         val second = pages.bitmap(pair.target) ?: return
         val token = transaction.begin(pair.origin, pair.target, direction) ?: return
@@ -143,6 +151,10 @@ internal class ReaderAnimationController(
         transaction.settle(token)
         val finishRequested = CompletableDeferred<Unit>()
         finishVisual = finishRequested
+        val timing = if (manual) touchTiming ?: PageTurnTiming("drag") else pendingTiming ?: PageTurnTiming("turn")
+        pendingTiming = null
+        timing.mark("animation_start")
+        if (!manual) overlay.onFirstMotionDraw = { timing.mark("first_motion_draw"); overlay.onFirstMotionDraw = null }
         val continuous = !manual && continuousTurn
         if (commit) pages.prepareAhead(token.target.cfi)
         motion = scope.launch {
@@ -173,6 +185,7 @@ internal class ReaderAnimationController(
                         }
                     }
                 }, showFinalFrame = {
+                    timing.mark("animation_end")
                     overlay.showPage(commit)
                     curl.reset()
                 }, continuous = continuous)
@@ -185,19 +198,23 @@ internal class ReaderAnimationController(
                 }
                 if (!transaction.commit(token)) return@launch
                 // Navigation occurs once, after the visual completion; preview operations never persist progress.
+                timing.mark("commit_start")
                 primary.commitAnimatedTurn(direction)
                 val inspection = WebPageSnapshots(primary)
                 try {
                     kotlinx.coroutines.withTimeout(5000) {
                         inspection.committedState()
+                        timing.mark("commit_js_done")
                         while (inspection.state().cfi == cfi) kotlinx.coroutines.delay(10)
                         inspection.awaitVisualState()
+                        timing.mark("commit_visual_ready")
                     }
                 } finally { inspection.close() }
                 if (transaction.finish(token)) {
                     overlay.clear(); curl.reset()
                     publishingCommit = true
                     try { primary.finishAnimatedCommit() } finally { publishingCommit = false }
+                    timing.mark("turn_done")
                     drainPendingTurn()
                 }
             } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
@@ -226,6 +243,7 @@ internal class ReaderAnimationController(
         val slop = android.view.ViewConfiguration.get(parent.context).scaledTouchSlop.toFloat()
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
+                touchTiming = PageTurnTiming("touch").also { it.mark("down_${transaction.phase}") }
                 downX = event.x; downY = event.y; skipGesture = false
                 deferredDragDirection = null
                 swallowGesture = false
@@ -266,6 +284,9 @@ internal class ReaderAnimationController(
                     val cancelEvent = android.view.MotionEvent.obtain(event)
                     cancelEvent.action = android.view.MotionEvent.ACTION_CANCEL
                     primary.onTouchEvent(cancelEvent); cancelEvent.recycle()
+                    val timing = touchTiming ?: PageTurnTiming("drag")
+                    timing.mark("drag_start")
+                    overlay.onFirstMotionDraw = { timing.mark("first_drag_draw"); overlay.onFirstMotionDraw = null }
                     overlay.prepare(first, second, background)
                     curl.event(io.legado.app.feature.reader.core.transition.ioscurl.gesture.CurlTouchKind.Move, event.x, event.y, event.eventTime)
                     if (mode == "ios_curl") {
