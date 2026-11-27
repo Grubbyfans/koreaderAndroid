@@ -27,7 +27,7 @@ data class ReaderPreferences(
     val theme: String = "light",
     /** 翻页模式：false=左右翻页，true=上下滚动。 */
     val vertical: Boolean = false,
-    /** 翻页动画方式：none=无动画（瞬时），slide=平滑滑动。 */
+    /** 翻页动画方式：none=无动画（瞬时），slide=平滑滑动，fade=渐变，ios_curl=iOS 仿真，ripple=水波纹。 */
     val pageAnimation: String = "slide",
     /** 朗读语速（TextToSpeech 范围约 0.5..2.0，1.0 为正常）。 */
     val speechRate: Float = 1.0f,
@@ -47,6 +47,10 @@ data class ReaderPreferences(
     val autoSync: Boolean = false,
     /** 阅读亮度（0.0..1.0）；-1f 表示未设置，跟随系统。 */
     val brightness: Float = -1f,
+    /** 水波纹翻页动画时长（ms），范围 100..600，步长 10。 */
+    val rippleDurationMs: Int = 280,
+    /** 水波纹过渡区域宽度（页宽百分比，10..80），步长 1。 */
+    val rippleRatio: Int = 35,
 )
 
 internal fun ReaderPreferences.effectiveSpeechEngine(kokoroAvailable: Boolean, networkTtsAvailable: Boolean): SpeechEngineType {
@@ -77,6 +81,8 @@ object ReaderSettings {
     private val KEY_KOKORO_SPEAKER = intPreferencesKey("kokoro_speaker")
     private val KEY_AUTO_SYNC = booleanPreferencesKey("auto_sync")
     private val KEY_BRIGHTNESS = floatPreferencesKey("brightness")
+    private val KEY_RIPPLE_DURATION = intPreferencesKey("ripple_duration_ms")
+    private val KEY_RIPPLE_RATIO = intPreferencesKey("ripple_ratio")
 
     /** 读取阅读设置（Flow，随变更更新）。 */
     fun flow(context: Context): Flow<ReaderPreferences> =
@@ -98,6 +104,8 @@ object ReaderSettings {
                 kokoroSpeaker = prefs[KEY_KOKORO_SPEAKER] ?: 3,
                 autoSync = prefs[KEY_AUTO_SYNC] ?: false,
                 brightness = prefs[KEY_BRIGHTNESS] ?: -1f,
+                rippleDurationMs = prefs[KEY_RIPPLE_DURATION] ?: 280,
+                rippleRatio = prefs[KEY_RIPPLE_RATIO] ?: 35,
             )
         }
 
@@ -140,5 +148,7 @@ object ReaderSettings {
         changed(KEY_KOKORO_SPEAKER, before.kokoroSpeaker, prefs.kokoroSpeaker)
         changed(KEY_AUTO_SYNC, before.autoSync, prefs.autoSync)
         changed(KEY_BRIGHTNESS, before.brightness, prefs.brightness)
+        changed(KEY_RIPPLE_DURATION, before.rippleDurationMs, prefs.rippleDurationMs)
+        changed(KEY_RIPPLE_RATIO, before.rippleRatio, prefs.rippleRatio)
     }
 }

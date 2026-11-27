@@ -4,6 +4,7 @@ import android.graphics.Color
 import android.widget.FrameLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.MonotonicFrameClock
 import androidx.compose.runtime.withFrameNanos
@@ -33,14 +34,14 @@ internal class ReaderAnimationController(
     private val reportError: (Throwable) -> Unit,
 ) : AutoCloseable {
     private val overlay = PageTurnOverlay(parent.context)
-    private val pages = PreviewPageProvider(parent, primary, scope, configurePreview, reportError, ::drainPendingTurn)
+    private val pages = PreviewPageProvider(parent, primary, scope, configurePreview, ::onPreviewFailure, ::drainPendingTurn)
     private val transaction = PageTurnTransaction()
     private val curl = IosCurlTurn()
     private var bookSource: Pair<String, android.net.Uri?>? = null
     private var suspended = false
     private val sizeListener = android.view.View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
         if (oldRight > oldLeft && (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop)) {
-            cancel(); pages.invalidateLayout()
+            cancel(); pages.invalidateLayout(); ripplePrepareFailed = false
             parent.post { if (!suspended) location?.let(pages::prepare) }
         }
     }
@@ -52,6 +53,9 @@ internal class ReaderAnimationController(
     private var lastTapTime = 0L
     private var continuousTurn = false
     private var renderAvailable = true
+    private var ripplePrepareFailed = false
+    private var rippleDurationMs = RippleTurnSpec.DEFAULT_DURATION_MS
+    private var rippleRatio = RippleTurnSpec.DEFAULT_RATIO
     private var pendingFallbackDirection: Int? = null
     private var dragToken: PageTurnTransaction.Token? = null
     private var downX = 0f
@@ -84,16 +88,34 @@ internal class ReaderAnimationController(
         bookSource?.let { open(it.first, it.second); location?.let(pages::prepare) }
     }
 
-    fun open(fileName: String, uri: android.net.Uri?) { bookSource = fileName to uri; renderAvailable = true; cancel(); if (!suspended) pages.open(fileName, uri) }
+    fun open(fileName: String, uri: android.net.Uri?) {
+        bookSource = fileName to uri; renderAvailable = true; ripplePrepareFailed = false
+        cancel(); if (!suspended) pages.open(fileName, uri)
+    }
 
     fun settings(animation: String, layoutChanged: Boolean) {
         if (mode != animation || layoutChanged) {
             cancel()
             mode = animation
+            ripplePrepareFailed = false
             pages.invalidateLayout()
             location?.let(pages::prepare)
         }
     }
+
+    /** 更新水波纹动画参数，下一次翻页生效，无需重排或重开书籍。 */
+    fun setRippleParams(durationMs: Int, ratioPercent: Int) {
+        rippleDurationMs = durationMs
+        rippleRatio = ratioPercent / 100f
+    }
+
+    private fun onPreviewFailure(error: Throwable) {
+        // 仅在 ripple 下记录本轮预览失败，供无目标页时做一次无动画降级。
+        if (mode == "ripple") ripplePrepareFailed = true
+        reportError(error)
+    }
+
+    private fun isNativeTurn(turnMode: String) = turnMode == "fade" || turnMode == "ios_curl" || turnMode == "ripple"
 
     fun relocated(cfi: String) {
         location = cfi
@@ -106,7 +128,7 @@ internal class ReaderAnimationController(
 
     /** Native modes own navigation even while snapshots are still being prepared. */
     fun tap(direction: Int): Boolean {
-        if (mode != "fade" && mode != "ios_curl") return false
+        if (!isNativeTurn(mode)) return false
         if (!renderAvailable) {
             // The bridge disables slide for native modes, so a renderer failure falls back instantly.
             return false
@@ -132,7 +154,13 @@ internal class ReaderAnimationController(
         val pair = pages.ready(cfi, direction)
         if (pair == null) {
             // A completed preparation with no neighbor is a book boundary or preparation failure.
-            if (!pages.isPreparing) pendingTurn = null
+            if (!pages.isPreparing) {
+                pendingTurn = null
+                // ripple 明确准备失败时，只把最近一次请求按现有无动画路径完成一次。
+                if (mode == "ripple" && ripplePrepareFailed) {
+                    if (direction > 0) primary.nextPage() else primary.prevPage()
+                }
+            }
             return
         }
         pendingTiming?.mark("snapshots_ready")
@@ -140,7 +168,7 @@ internal class ReaderAnimationController(
         val second = pages.bitmap(pair.target) ?: return
         val token = transaction.begin(pair.origin, pair.target, direction) ?: return
         pendingTurn = null
-        overlay.prepare(first, second, background)
+        overlay.prepare(first, second, background, mode, direction, rippleRatio)
         animate(token, cfi, direction, commit = true, manual = false)
     }
 
@@ -178,6 +206,16 @@ internal class ReaderAnimationController(
                             }
                             settle.join()
                             curl.config?.let { overlay.curl(it, curl.values) }
+                        } else if (mode == "ripple") {
+                            val from = if (manual) overlay.rippleProgress else 0f
+                            val to = if (commit) 1f else 0f
+                            // 手动松手按剩余进度折算时长，避免短距离收尾仍播放完整基准时长。
+                            val duration = if (manual)
+                                (rippleDurationMs * kotlin.math.abs(to - from)).toInt().coerceAtLeast(1)
+                            else rippleDurationMs
+                            Animatable(from).animateTo(to, tween(duration, easing = LinearEasing)) {
+                                overlay.rippleProgress = value
+                            }
                         } else {
                             Animatable(if (manual) overlay.fadeProgress else 0f).animateTo(if (commit) 1f else 0f, tween(360, easing = FastOutSlowInEasing)) {
                                 overlay.fadeProgress = value
@@ -231,7 +269,7 @@ internal class ReaderAnimationController(
     }
 
     fun touch(event: android.view.MotionEvent): Boolean {
-        if (!renderAvailable || (mode != "fade" && mode != "ios_curl")) return false
+        if (!renderAvailable || !isNativeTurn(mode)) return false
         // Once a DOWN is consumed, keep the rest of that sequence out of the WebView,
         // even if the animation finishes or preview preparation restarts in between.
         if (event.actionMasked != android.view.MotionEvent.ACTION_DOWN && swallowGesture) {
@@ -287,7 +325,7 @@ internal class ReaderAnimationController(
                     val timing = touchTiming ?: PageTurnTiming("drag")
                     timing.mark("drag_start")
                     overlay.onFirstMotionDraw = { timing.mark("first_drag_draw"); overlay.onFirstMotionDraw = null }
-                    overlay.prepare(first, second, background)
+                    overlay.prepare(first, second, background, mode, direction, rippleRatio)
                     curl.event(io.legado.app.feature.reader.core.transition.ioscurl.gesture.CurlTouchKind.Move, event.x, event.y, event.eventTime)
                     if (mode == "ios_curl") {
                         curl.begin(if (direction > 0) ReaderTurnDirection.NEXT else ReaderTurnDirection.PREVIOUS,
@@ -304,7 +342,10 @@ internal class ReaderAnimationController(
                 if (mode == "ios_curl") {
                     curl.event(io.legado.app.feature.reader.core.transition.ioscurl.gesture.CurlTouchKind.Move, event.x, event.y, event.eventTime)
                     curl.drag()
-                } else overlay.fadeProgress = (dx * -token.direction / primary.width).coerceIn(0f, 1f)
+                } else {
+                    val progress = (dx * -token.direction / primary.width).coerceIn(0f, 1f)
+                    if (mode == "ripple") overlay.rippleProgress = progress else overlay.fadeProgress = progress
+                }
                 return true
             }
             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
@@ -318,9 +359,9 @@ internal class ReaderAnimationController(
                 val cancelled = event.actionMasked == android.view.MotionEvent.ACTION_CANCEL
                 curl.event(if (cancelled) io.legado.app.feature.reader.core.transition.ioscurl.gesture.CurlTouchKind.Cancel else io.legado.app.feature.reader.core.transition.ioscurl.gesture.CurlTouchKind.Up, event.x, event.y, event.eventTime)
                 val release = curl.release(if (token.direction > 0) ReaderTurnDirection.NEXT else ReaderTurnDirection.PREVIOUS, cancelled)
-                animate(token, cfi, token.direction,
-                    if (mode == "ios_curl") release.first else !cancelled && overlay.fadeProgress >= .1f,
-                    manual = true, velocity = release.second)
+                val committed = if (mode == "ios_curl") release.first else !cancelled &&
+                    (if (mode == "ripple") overlay.rippleProgress else overlay.fadeProgress) >= .1f
+                animate(token, cfi, token.direction, committed, manual = true, velocity = release.second)
                 return true
             }
         }

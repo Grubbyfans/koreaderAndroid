@@ -53,3 +53,38 @@ test('native navigation keeps the lock through chapter work and releases it afte
     complete(false)
     await next
 })
+
+const bridgeSource = await readFile(new URL('../app/src/main/assets/reader/bridge.js', import.meta.url), 'utf8')
+const applyAnimationSource = bridgeSource.slice(
+    bridgeSource.indexOf('function applyPageAnimation()'),
+    bridgeSource.indexOf('async function applyFlow'),
+)
+
+function applyAnimation(mode, existing = {}) {
+    const attributes = new Map(Object.entries(existing))
+    const renderer = {
+        setAttribute: (name, value) => attributes.set(name, value),
+        removeAttribute: name => attributes.delete(name),
+    }
+    runInNewContext(`${applyAnimationSource}\napplyPageAnimation()`, {
+        view: { renderer },
+        currentSettings: { pageAnimation: mode },
+    })
+    return attributes
+}
+
+for (const mode of ['fade', 'ios_curl', 'ripple']) {
+    test(`bridge hands ${mode} gestures to the native turn overlay`, () => {
+        const attributes = applyAnimation(mode)
+        assert.equal(attributes.get('native-page-turn'), '')
+        assert.equal(attributes.has('animated'), false)
+    })
+}
+
+test('bridge clears the native attribute when switching back to slide or none', () => {
+    for (const mode of ['slide', 'none']) {
+        const attributes = applyAnimation(mode, { 'native-page-turn': '' })
+        assert.equal(attributes.has('native-page-turn'), false)
+    }
+    assert.equal(applyAnimation('slide').get('animated'), 'slide')
+})

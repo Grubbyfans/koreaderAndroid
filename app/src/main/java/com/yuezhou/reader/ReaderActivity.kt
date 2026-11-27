@@ -812,7 +812,7 @@ private fun ReaderScreen(
         readerPrefs.pageMargin, readerPrefs.theme) {
         val controller = animationController ?: return@LaunchedEffect
         val source = openedSource ?: return@LaunchedEffect
-        if (!readerPrefs.vertical && readerPrefs.pageAnimation in setOf("fade", "ios_curl")) {
+        if (!readerPrefs.vertical && readerPrefs.pageAnimation in setOf("fade", "ios_curl", "ripple")) {
             controller.settings(readerPrefs.pageAnimation, layoutChanged = true)
             controller.background = themeBackground(readerPrefs.theme).let { color ->
                 android.graphics.Color.argb((color.alpha * 255).toInt(), (color.red * 255).toInt(),
@@ -821,6 +821,11 @@ private fun ReaderScreen(
             controller.open(source.first, source.second)
             currentCfi?.let(controller::relocated)
         } else controller.disable()
+    }
+
+    // 水波纹动画参数单独监听，仅更新动画时长/带宽，不重排、不重开书籍。
+    LaunchedEffect(animationController, readerPrefs.rippleDurationMs, readerPrefs.rippleRatio) {
+        animationController?.setRippleParams(readerPrefs.rippleDurationMs, readerPrefs.rippleRatio)
     }
 
     ModalNavigationDrawer(
@@ -1506,10 +1511,11 @@ private fun SettingsControls(
                 Text("动画", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.width(12.dp))
                 listOf(
-                    "none" to "无",
+                    "none" to "无动画",
                     "slide" to "滑动",
                     "fade" to "渐变",
                     "ios_curl" to "iOS 仿真",
+                    "ripple" to "水波纹",
                 ).forEach { (value, label) ->
                     TextButton(onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) }) {
                         Text(
@@ -1519,6 +1525,56 @@ private fun SettingsControls(
                             fontWeight = if (prefs.pageAnimation == value) FontWeight.Bold else FontWeight.Normal,
                         )
                     }
+                }
+            }
+            // 水波纹动画参数：仅选中水波纹时显示，实时预览、松手提交，下一次翻页生效。
+            if (prefs.pageAnimation == "ripple") {
+                var rippleDurationPreview by remember { mutableStateOf<Int?>(null) }
+                var rippleRatioPreview by remember { mutableStateOf<Int?>(null) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("时长", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "${rippleDurationPreview ?: prefs.rippleDurationMs}ms",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.width(52.dp),
+                        textAlign = TextAlign.Center,
+                    )
+                    Slider(
+                        value = (rippleDurationPreview ?: prefs.rippleDurationMs).toFloat(),
+                        onValueChange = { rippleDurationPreview = it.toInt() },
+                        onValueChangeFinished = {
+                            rippleDurationPreview?.let { onPrefsChange(prefs.copy(rippleDurationMs = it)) }
+                            rippleDurationPreview = null
+                        },
+                        valueRange = 100f..600f,
+                        steps = 50,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("过渡区", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "${rippleRatioPreview ?: prefs.rippleRatio}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.width(52.dp),
+                        textAlign = TextAlign.Center,
+                    )
+                    Slider(
+                        value = (rippleRatioPreview ?: prefs.rippleRatio).toFloat(),
+                        onValueChange = { rippleRatioPreview = it.toInt() },
+                        onValueChangeFinished = {
+                            rippleRatioPreview?.let { onPrefsChange(prefs.copy(rippleRatio = it)) }
+                            rippleRatioPreview = null
+                        },
+                        valueRange = 10f..80f,
+                        steps = 70,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                TextButton(onClick = { onPrefsChange(prefs.copy(rippleDurationMs = 280, rippleRatio = 35)) }) {
+                    Text("恢复默认参数", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }

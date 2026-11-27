@@ -28,7 +28,7 @@ let currentSettings = {
     pageMargin: 20,      // px（左右/上下边距）
     theme: 'light',      // light | sepia | dark
     vertical: false,     // false=左右翻页, true=上下滚动
-    pageAnimation: 'slide', // none=无动画 | slide=平滑滑动
+    pageAnimation: 'slide', // none=无动画 | slide=平滑滑动 | fade | ios_curl | ripple
 }
 
 // 供 Kotlin 调用的全局接口
@@ -323,14 +323,14 @@ function setFlow(vertical) {
 }
 
 // 根据翻页动画设置开启/关闭动画：给 foliate-paginator 加 animated 属性。
-// 只有 slide 使用底层滑动；fade/ios_curl 的触摸与动画由 Android 接管。
+// 只有 slide 使用底层滑动；fade/ios_curl/ripple 的触摸与动画由 Android 接管。
 function applyPageAnimation() {
     const renderer = view.renderer
     if (!renderer) return
     const mode = currentSettings.pageAnimation || 'slide'
     if (mode === 'slide') renderer.setAttribute('animated', 'slide')
     else renderer.removeAttribute('animated')
-    if (mode === 'fade' || mode === 'ios_curl') renderer.setAttribute('native-page-turn', '')
+    if (mode === 'fade' || mode === 'ios_curl' || mode === 'ripple') renderer.setAttribute('native-page-turn', '')
     else renderer.removeAttribute('native-page-turn')
 }
 

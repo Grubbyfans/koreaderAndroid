@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -179,6 +181,8 @@ internal fun SettingsPage(
     var fontSizePreview by remember { mutableStateOf<Int?>(null) }
     var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
     var marginPreview by remember { mutableStateOf<Int?>(null) }
+    var rippleDurationPreview by remember { mutableStateOf<Int?>(null) }
+    var rippleRatioPreview by remember { mutableStateOf<Int?>(null) }
 
     val credentialStore = remember(context) { CloudCredentialStore(context) }
 
@@ -586,10 +590,16 @@ internal fun SettingsPage(
                 // 翻页动画方式
                 Text("翻页动画", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     listOf(
                         "none" to "无动画",
-                        "slide" to "平滑滑动",
+                        "slide" to "滑动",
+                        "fade" to "渐变",
+                        "ios_curl" to "iOS 仿真",
+                        "ripple" to "水波纹",
                     ).forEach { (value, label) ->
                         val selected = prefs.pageAnimation == value
                         Text(
@@ -605,6 +615,49 @@ internal fun SettingsPage(
                     }
                 }
                 Spacer(Modifier.height(4.dp))
+
+                // 水波纹动画参数：仅选中水波纹时显示，松手提交，下一次翻页生效。
+                if (prefs.pageAnimation == "ripple") {
+                    Text("水波纹时长：${rippleDurationPreview ?: prefs.rippleDurationMs}ms", style = MaterialTheme.typography.bodyMedium)
+                    Slider(
+                        value = (rippleDurationPreview ?: prefs.rippleDurationMs).toFloat(),
+                        onValueChange = { rippleDurationPreview = it.toInt() },
+                        onValueChangeFinished = {
+                            val v = rippleDurationPreview
+                            if (v != null) {
+                                scope.launch { ReaderSettings.save(context, prefs, prefs.copy(rippleDurationMs = v)) }
+                                rippleDurationPreview = null
+                            }
+                        },
+                        valueRange = 100f..600f,
+                        steps = 50,
+                    )
+                    Text("过渡区域：${rippleRatioPreview ?: prefs.rippleRatio}%", style = MaterialTheme.typography.bodyMedium)
+                    Slider(
+                        value = (rippleRatioPreview ?: prefs.rippleRatio).toFloat(),
+                        onValueChange = { rippleRatioPreview = it.toInt() },
+                        onValueChangeFinished = {
+                            val v = rippleRatioPreview
+                            if (v != null) {
+                                scope.launch { ReaderSettings.save(context, prefs, prefs.copy(rippleRatio = v)) }
+                                rippleRatioPreview = null
+                            }
+                        },
+                        valueRange = 10f..80f,
+                        steps = 70,
+                    )
+                    Text(
+                        "恢复默认参数",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = YuezhouColors.BrandDark,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(YuezhouColors.BrandContainer)
+                            .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(rippleDurationMs = 280, rippleRatio = 35)) } }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
 
                 ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
                     scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontWeight = w)) }

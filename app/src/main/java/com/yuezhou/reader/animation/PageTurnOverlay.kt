@@ -33,14 +33,18 @@ internal class PageTurnOverlay(context: Context) : View(context) {
     private var config: CurlConfig? = null
     private var values: CurlValues? = null
     private var material = CurlMaterial()
+    private val ripple = RippleTurnRenderer()
+    private var rippleActive = false
     var fadeProgress = 0f
+        set(value) { field = value.coerceIn(0f, 1f); invalidate() }
+    var rippleProgress = 0f
         set(value) { field = value.coerceIn(0f, 1f); invalidate() }
     var onFirstMotionDraw: (() -> Unit)? = null
     var onRenderFailure: ((Throwable) -> Unit)? = null
 
     init { visibility = GONE; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
-    fun prepare(first: Bitmap, second: Bitmap, pageBackground: Int) {
+    fun prepare(first: Bitmap, second: Bitmap, pageBackground: Int, mode: String = "fade", direction: Int = 1, rippleRatio: Float = RippleTurnSpec.DEFAULT_RATIO) {
         require(first.width == second.width && first.height == second.height)
         generation++
         current = first; target = second
@@ -50,7 +54,9 @@ internal class PageTurnOverlay(context: Context) : View(context) {
         )
         nativeFailed = false
         renderer = null
-        config = null; values = null; fadeProgress = 0f
+        config = null; values = null; fadeProgress = 0f; rippleProgress = 0f
+        rippleActive = mode == "ripple"
+        if (rippleActive) ripple.prepare(second, direction, rippleRatio) else ripple.clear()
         visibility = VISIBLE
     }
 
@@ -58,6 +64,7 @@ internal class PageTurnOverlay(context: Context) : View(context) {
     fun showPage(committed: Boolean) {
         config = null; values = null
         fadeProgress = if (committed) 1f else 0f
+        rippleProgress = if (committed) 1f else 0f
     }
 
     fun curl(configuration: CurlConfig, pose: CurlValues) {
@@ -69,19 +76,31 @@ internal class PageTurnOverlay(context: Context) : View(context) {
         val first = current ?: return
         val second = target ?: return
         if (first.isRecycled || second.isRecycled) return
-        if (config != null || fadeProgress > 0f) onFirstMotionDraw?.invoke()
+        if (config != null || fadeProgress > 0f || (rippleActive && rippleProgress > 0f)) onFirstMotionDraw?.invoke()
         bounds.set(0, 0, width, height)
-        paint.alpha = 255
-        canvas.drawBitmap(first, null, bounds, paint)
         val c = config
         val pose = values
         if (c == null || pose == null) {
+            if (rippleActive) {
+                try {
+                    ripple.draw(canvas, first, bounds, rippleProgress)
+                } catch (error: RuntimeException) {
+                    notifyFailure(error)
+                } catch (error: OutOfMemoryError) {
+                    notifyFailure(error)
+                }
+                return
+            }
             // Legado FADE: the complete incoming page is above the opaque current page.
+            paint.alpha = 255; paint.shader = null
+            canvas.drawBitmap(first, null, bounds, paint)
             paint.alpha = (255 * fadeProgress).toInt()
             canvas.drawBitmap(second, null, bounds, paint)
             paint.alpha = 255
             return
         }
+        paint.alpha = 255; paint.shader = null
+        canvas.drawBitmap(first, null, bounds, paint)
         try {
             val layout = CurlLayout.build(c)
             val texture = if (layout.passes.single().source.nativeValue < 2) 0 else 1
@@ -109,13 +128,16 @@ internal class PageTurnOverlay(context: Context) : View(context) {
                 canvas.drawBitmap(requireNotNull(output), null, bounds, paint)
             } finally { canvas.restoreToCount(saved) }
         } catch (error: RuntimeException) {
-            // Avoid invoking navigation or removing views during a draw traversal.
-            val failedGeneration = generation
-            post { if (generation == failedGeneration) onRenderFailure?.invoke(error) }
+            notifyFailure(error)
         } catch (error: OutOfMemoryError) {
-            val failedGeneration = generation
-            post { if (generation == failedGeneration) onRenderFailure?.invoke(error) }
+            notifyFailure(error)
         }
+    }
+
+    /** Avoid invoking navigation or removing views during a draw traversal. */
+    private fun notifyFailure(error: Throwable) {
+        val failedGeneration = generation
+        post { if (generation == failedGeneration) onRenderFailure?.invoke(error) }
     }
 
     fun clear() {
@@ -123,6 +145,7 @@ internal class PageTurnOverlay(context: Context) : View(context) {
         generation++
         visibility = GONE
         renderer = null; config = null; values = null
+        ripple.clear(); rippleActive = false; rippleProgress = 0f
         gl?.close(); gl = null
         // Recorded Canvas commands may still reference the last output bitmap.
         output = null
