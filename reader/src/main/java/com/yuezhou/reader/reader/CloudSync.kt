@@ -519,7 +519,7 @@ class CloudSync(private val context: Context) {
 
             coverRequests.withPermit {
                 val bytes = try {
-                    val raw = backend.downloadBytes(reference.path, 128 * 1024).toString(Charsets.UTF_8)
+                    val raw = backend.downloadBytes(reference.path, com.yuezhou.reader.core.protocol.CoverFile.MAX_JSON_BYTES).toString(Charsets.UTF_8)
                     com.yuezhou.reader.core.protocol.CoverFile.decode(raw).pngBytes
                 } catch (e: CancellationException) {
                     throw e

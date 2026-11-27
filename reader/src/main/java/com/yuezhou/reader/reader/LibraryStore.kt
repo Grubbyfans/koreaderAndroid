@@ -261,7 +261,7 @@ class LibraryStore(private val context: Context) {
      * 仅负责元数据（封面 + 列表）与进度目录的维护。
      *
      * @param fileName 目标文件名（含 .epub，已 sanitize，正文须已存在于 files/epub/）。
-     * @param coverPng 提取出的封面 PNG（可为 null 表示无封面）。
+     * @param coverPng 提取出的封面 WebP/JPEG（可为 null 表示无封面）。
      */
     internal fun registerBookLocked(
         fileName: String,

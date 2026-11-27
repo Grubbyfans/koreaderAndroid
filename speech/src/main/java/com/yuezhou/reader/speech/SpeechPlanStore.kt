@@ -114,8 +114,7 @@ object SpeechPlanStore {
 
     /** 停止朗读并退出前台。 */
     fun stop(context: Context) {
-        clear()
-        SpeechProgressTracker.clear()
-        context.stopService(Intent(context, SpeechService::class.java))
+        // 由服务先作废回调、停止引擎，再清理进度，防止旧回调在清空后重新发布高亮。
+        context.startService(Intent(context, SpeechService::class.java).setAction(SpeechCommands.ACTION_STOP))
     }
 }

@@ -2,10 +2,8 @@ package com.yuezhou.reader.reader
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Canvas
-import android.graphics.Paint
+import android.os.Build
+import com.yuezhou.reader.core.protocol.CoverFile
 import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
 import java.io.ByteArrayOutputStream
@@ -14,27 +12,20 @@ import java.io.File
 import java.util.zip.ZipFile
 
 /**
- * 从 EPUB 中提取封面，输出符合方案 §4.4 的 PNG 缩略图（≤240×320、≤32 KiB）。
- *
- * 算法对齐 BaiduPanSync 的 book_cover.lua：
- * 1. 读取 META-INF/container.xml 定位 OPF；
- * 2. 定位封面图片（manifest id=cover / 常见命名回退）；
- * 3. 按宽度 {240, 180, 120, 80} 逐级缩放，保持 4:3 比例上限；
- * 4. 转 8-bit 灰度（灰度 PNG 体积远小于彩色，这是压进 32 KiB 的关键）；
- * 5. 每级写出 PNG，≤32 KiB 且尺寸合法即返回，否则继续降级。
- *
- * 全程不抛异常：提取失败返回 null，由上层决定是否跳过封面（显示书名占位）。
+ * 从 EPUB 提取彩色封面，输出 WebP（JPEG 兜底），≤240×320、≤200 KiB。
+ * 逐级降低编码质量和尺寸以满足协议限制，不进行灰度转换。
+ * 提取失败返回 null，由上层显示书名占位。
  */
 object CoverExtractor {
 
-    private const val MAX_OUTPUT_BYTES = 32 * 1024
+    private const val MAX_OUTPUT_BYTES = CoverFile.MAX_IMAGE_BYTES
     private const val MAX_WIDTH = 240
     private const val MAX_HEIGHT = 320
 
     /** 逐级尝试的宽度边界（对齐基线 {240,180,120,80}）。 */
     private val WIDTH_BOUNDS = intArrayOf(240, 180, 120, 80)
 
-    /** 从 EPUB 文件提取封面 PNG（灰度，≤32 KiB）；失败返回 null。 */
+    /** 从 EPUB 文件提取彩色 WebP/JPEG（≤200 KiB）；失败返回 null。 */
     fun extract(epubFile: File): ByteArray? {
         return try {
             ZipFile(epubFile).use { zip ->
@@ -158,11 +149,7 @@ object CoverExtractor {
         return if (clean.startsWith("/")) clean.removePrefix("/") else baseDir + clean
     }
 
-    /**
-     * 解码原图，逐级缩放，输出 ≤32 KiB 的 PNG，或 null。
-     * 优先彩色（用户期望），每级尺寸先试彩色 PNG，超 32 KiB 则回退灰度；
-     * 仍超则继续降尺寸（{240,180,120,80}，保持 4:3 比例）。
-     */
+    /** 保留色彩，依次调整编码质量与尺寸，输出协议允许的缩略图。 */
     private fun decodeAndScale(bytes: ByteArray): ByteArray? {
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
@@ -192,21 +179,16 @@ object CoverExtractor {
                     Bitmap.createScaledBitmap(original, tw, th, true)
                 }
 
-                // 1) 先试彩色
-                val colorPng = scaled.toPng()
-                if (colorPng != null && colorPng.size <= MAX_OUTPUT_BYTES && tw <= MAX_WIDTH && th <= MAX_HEIGHT) {
+                try {
+                    for (quality in intArrayOf(90, 80, 65)) {
+                        val encoded = encodeCover(scaled, quality)
+                        if (encoded != null && encoded.size <= MAX_OUTPUT_BYTES && tw <= MAX_WIDTH && th <= MAX_HEIGHT) {
+                            return encoded
+                        }
+                    }
+                } finally {
                     if (scaled !== original) scaled.recycle()
-                    return colorPng
                 }
-                // 2) 彩色超限则回退灰度（灰度 PNG 体积显著更小）
-                val gray = toGray(scaled)
-                if (scaled !== original) scaled.recycle()
-                val grayPng = gray.toPng()
-                gray.recycle()
-                if (grayPng != null && grayPng.size <= MAX_OUTPUT_BYTES && tw <= MAX_WIDTH && th <= MAX_HEIGHT) {
-                    return grayPng
-                }
-                // 继续降级到更小尺寸
             }
             return null
         } finally {
@@ -214,25 +196,19 @@ object CoverExtractor {
         }
     }
 
-    /** 转 8-bit 灰度 Bitmap（灰度 PNG 体积远小于彩色，作为超限兜底）。 */
-    private fun toGray(src: Bitmap): Bitmap {
-        val gray = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(gray)
-        val paint = Paint()
-        val cm = ColorMatrix().apply { setSaturation(0f) }
-        paint.colorFilter = ColorMatrixColorFilter(cm)
-        canvas.drawBitmap(src, 0f, 0f, paint)
-        return gray
-    }
-
-    /** 转 PNG 字节；失败返回 null。 */
-    private fun Bitmap.toPng(): ByteArray? {
-        return try {
-            val stream = ByteArrayOutputStream()
-            compress(Bitmap.CompressFormat.PNG, 100, stream)
-            stream.toByteArray()
-        } catch (e: Exception) {
-            null
+    /** Android 26 起支持 WebP；优先有损 WebP，编码失败时使用 JPEG。 */
+    @Suppress("DEPRECATION")
+    private fun encodeCover(bitmap: Bitmap, quality: Int): ByteArray? {
+        val webp = if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY
+        else Bitmap.CompressFormat.WEBP
+        for (format in arrayOf(webp, Bitmap.CompressFormat.JPEG)) {
+            try {
+                val stream = ByteArrayOutputStream()
+                if (bitmap.compress(format, quality, stream)) return stream.toByteArray()
+            } catch (_: Exception) {
+                // 尝试下一个编码器。
+            }
         }
+        return null
     }
 }

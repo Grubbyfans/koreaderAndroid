@@ -847,7 +847,7 @@ private fun BookshelfScreen() {
                             selecting = selecting,
                             navigationLocked = pagerBusy,
                             onImport = { if (!scanning && !importing) importOptionsOpen = true },
-                            onOpenDetail = { localBookDetail = it },
+                            onEnterSelect = { selecting = setOf(it.bookId) },
                             onToggleSelect = { id ->
                                 val cur = selecting ?: emptySet()
                                 selecting = if (id in cur) cur - id else cur + id
@@ -1619,7 +1619,7 @@ private fun BookshelfContent(
     selecting: Set<String>?,
     navigationLocked: Boolean,
     onImport: () -> Unit,
-    onOpenDetail: (LibraryStore.Entry) -> Unit,
+    onEnterSelect: (LibraryStore.Entry) -> Unit,
     onToggleSelect: (String) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1681,7 +1681,7 @@ private fun BookshelfContent(
                         checked = selecting?.contains(book.bookId) == true,
                         onClick = { openBook(book) },
                         onLongClick = if (selecting == null && !navigationLocked) {
-                            { onOpenDetail(book) }
+                            { onEnterSelect(book) }
                         } else null,
                     )
                 }
@@ -1706,7 +1706,7 @@ private fun BookshelfContent(
                         checked = selecting?.contains(book.bookId) == true,
                         onClick = { openBook(book) },
                         onLongClick = if (selecting == null && !navigationLocked) {
-                            { onOpenDetail(book) }
+                            { onEnterSelect(book) }
                         } else null,
                     )
                 }

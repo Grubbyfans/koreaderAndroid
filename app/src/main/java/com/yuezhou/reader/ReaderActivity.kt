@@ -554,7 +554,7 @@ private fun ReaderScreen(
 
     // 朗读进度收集：服务写入 SpeechProgressTracker，这里只反映 UI（朗读中状态 + 高亮回写）。
     // 位置落库已移到服务侧（SpeechProgressSink），Activity 销毁后仍持续保存。
-    LaunchedEffect(Unit) {
+    LaunchedEffect(bookId, webView) {
         SpeechProgressTracker.current.collect { snap ->
             speaking = snap != null
             // 朗读停止时同步清空「朗读请求中」标记
@@ -998,6 +998,7 @@ private fun ReaderScreen(
                             speechPreparationJob?.cancel()
                             speakRequested = false
                             // 朗读中 → 停止
+                            webView?.clearSpeechHighlight()
                             SpeechPlanStore.stop(context)
                             status = "已停止朗读"
                         } else {

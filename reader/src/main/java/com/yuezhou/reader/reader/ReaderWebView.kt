@@ -39,6 +39,7 @@ class ReaderWebView(context: Context) : WebView(context) {
     @Volatile private var externalSource: Uri? = null
     @Volatile private var released = false
     private val callbacks = Handler(Looper.getMainLooper())
+    private var speechHighlightGeneration = 0L
     private val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     /** 资产加载器：负责把 assets/reader 目录映射为受控 HTTPS URL。 */
@@ -385,17 +386,25 @@ class ReaderWebView(context: Context) : WebView(context) {
     }
 
     /** 朗读高亮：定位到「起止文本节点 CFI + 节点内字符偏移」形成的范围并高亮整句。 */
-    fun highlight(startCfi: String, startOffset: Int, endCfi: String?, endOffset: Int) = whenReaderReady {
-        evaluateJavascript(
-            "window.__reader.highlightRange(" +
-                "${jsonQuote(startCfi)}, $startOffset, ${jsonQuote(endCfi ?: "")}, $endOffset)" +
-                ".then(r => {});",
-            null,
-        )
+    fun highlight(startCfi: String, startOffset: Int, endCfi: String?, endOffset: Int) {
+        val generation = ++speechHighlightGeneration
+        whenReaderReady {
+            if (generation != speechHighlightGeneration) return@whenReaderReady
+            evaluateJavascript(
+                "window.__reader.highlightRange(" +
+                    "${jsonQuote(startCfi)}, $startOffset, ${jsonQuote(endCfi ?: "")}, $endOffset)" +
+                    ".then(r => {});",
+                null,
+            )
+        }
     }
 
-    fun clearSpeechHighlight() = whenReaderReady {
-        evaluateJavascript("window.__reader.clearSpeechHighlight();", null)
+    fun clearSpeechHighlight() {
+        val generation = ++speechHighlightGeneration
+        whenReaderReady {
+            if (generation != speechHighlightGeneration) return@whenReaderReady
+            evaluateJavascript("window.__reader.clearSpeechHighlight();", null)
+        }
     }
 
     /** 跳转到目录项（href 指向章节）。 */

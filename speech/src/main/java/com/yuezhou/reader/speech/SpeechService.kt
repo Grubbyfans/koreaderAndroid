@@ -21,6 +21,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import android.view.KeyEvent
 import androidx.core.app.ServiceCompat
 import com.yuezhou.reader.core.speech.SessionToken
 import com.yuezhou.reader.core.speech.KokoroMemoryException
@@ -110,6 +111,7 @@ class SpeechService : Service() {
     private var mediaSession: MediaSession? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var audioFocusGranted = false
+    private var resumeOnAudioFocusGain = false
 
     /** 每次开始朗读递增的会话 ID；旧回调据此作废。 */
     private var sessionId = 0L
@@ -158,6 +160,7 @@ class SpeechService : Service() {
     // ---- 控制动作 ----
 
     private fun handlePlay() {
+        resumeOnAudioFocusGain = false
         val nextRequest = SpeechPlanStore.peek() ?: run {
             handleStop()
             return
@@ -583,7 +586,9 @@ class SpeechService : Service() {
     }
 
     private fun handleKokoroStop(error: String?) {
+        sessionId++
         playGeneration++
+        playJob?.cancel()
         stopWatchdog()
         clearChapterTransition()
         kokoroEventJob?.cancel()
@@ -686,6 +691,7 @@ class SpeechService : Service() {
     }
 
     private fun handlePause() {
+        resumeOnAudioFocusGain = false
         if (activeEngine == SpeechEngineType.KOKORO) {
             handleKokoroPause()
             return
@@ -703,6 +709,7 @@ class SpeechService : Service() {
     }
 
     private fun handleResume() {
+        resumeOnAudioFocusGain = false
         if (activeEngine == SpeechEngineType.KOKORO) {
             handleKokoroResume()
             return
@@ -1032,6 +1039,7 @@ class SpeechService : Service() {
     }
 
     private fun releaseAudioFocus() {
+        resumeOnAudioFocusGain = false
         audioFocusGranted = false
         unregisterBecomingNoisy()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1047,9 +1055,20 @@ class SpeechService : Service() {
         Log.d(TAG, "音频焦点变化 change=$change (${focusChangeName(change)}) state=${stateMachine.state}")
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS -> handlePause()
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> handlePause()
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                val shouldResume = resumeOnAudioFocusGain ||
+                    stateMachine.state == SpeechStateMachine.State.PLAYING
+                handlePause()
+                resumeOnAudioFocusGain = shouldResume
+            }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> { /* 朗读暂不降音量，保持继续 */ }
-            AudioManager.AUDIOFOCUS_GAIN -> if (stateMachine.state == SpeechStateMachine.State.PAUSED) handleResume()
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                val shouldResume = resumeOnAudioFocusGain
+                resumeOnAudioFocusGain = false
+                if (shouldResume && (chapterPaused || stateMachine.state == SpeechStateMachine.State.PAUSED)) {
+                    handleResume()
+                }
+            }
         }
     }
 
@@ -1135,6 +1154,34 @@ class SpeechService : Service() {
     // ---- MediaSession ----
 
     private val sessionCallback = object : MediaSession.Callback() {
+        override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+            @Suppress("DEPRECATION")
+            val event = mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                ?: return super.onMediaButtonEvent(mediaButtonIntent)
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_HEADSETHOOK, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
+                KeyEvent.KEYCODE_MEDIA_STOP, KeyEvent.KEYCODE_MEDIA_NEXT,
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                    // 一次按键只处理首次按下，避免松开或长按重复触发后立刻续读。
+                    if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) return true
+                    when (event.keyCode) {
+                        KeyEvent.KEYCODE_HEADSETHOOK, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                            if (chapterPaused || stateMachine.state == SpeechStateMachine.State.PAUSED) onPlay()
+                            else handlePause()
+                        }
+                        KeyEvent.KEYCODE_MEDIA_PLAY -> onPlay()
+                        KeyEvent.KEYCODE_MEDIA_PAUSE -> onPause()
+                        KeyEvent.KEYCODE_MEDIA_STOP -> onStop()
+                        KeyEvent.KEYCODE_MEDIA_NEXT -> onSkipToNext()
+                        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> onSkipToPrevious()
+                    }
+                    return true
+                }
+                else -> return super.onMediaButtonEvent(mediaButtonIntent)
+            }
+        }
+
         override fun onPlay() {
             when {
                 chapterPaused || stateMachine.state == SpeechStateMachine.State.PAUSED -> handleResume()

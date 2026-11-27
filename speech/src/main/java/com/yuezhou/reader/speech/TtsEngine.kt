@@ -1,6 +1,7 @@
 package com.yuezhou.reader.speech
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
@@ -55,6 +56,12 @@ class TtsEngine(private val context: Context) {
             shutdown()
             throw IllegalStateException("TextToSpeech 引擎初始化失败")
         }
+        created.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        )
         if (created.setLanguage(language) == TextToSpeech.LANG_MISSING_DATA &&
             created.setLanguage(Locale.getDefault()) == TextToSpeech.LANG_MISSING_DATA
         ) {
