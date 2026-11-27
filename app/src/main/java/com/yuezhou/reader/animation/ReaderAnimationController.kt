@@ -184,7 +184,8 @@ internal class ReaderAnimationController(
         timing.mark("animation_start")
         if (!manual) overlay.onFirstMotionDraw = { timing.mark("first_motion_draw"); overlay.onFirstMotionDraw = null }
         val continuous = !manual && continuousTurn
-        if (commit) pages.prepareAhead(token.target.cfi)
+        val deferPrefetch = mode == "fade" || mode == "ripple"
+        if (commit && !deferPrefetch) pages.prepareAhead(token.target.cfi)
         motion = scope.launch {
             try {
                 awaitPageTurnVisual(finishRequested, render = { speed ->
@@ -235,6 +236,8 @@ internal class ReaderAnimationController(
                     return@launch
                 }
                 if (!transaction.commit(token)) return@launch
+                // Software WebView capture runs on main; keep it outside the moving visual.
+                if (deferPrefetch) pages.prepareAhead(token.target.cfi)
                 // Navigation occurs once, after the visual completion; preview operations never persist progress.
                 timing.mark("commit_start")
                 primary.commitAnimatedTurn(direction)

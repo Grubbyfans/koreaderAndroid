@@ -12,16 +12,19 @@ import android.graphics.Rect
 import android.graphics.Shader
 
 /**
- * 水波纹翻页绘制：旧页原位绘制，目标页经 BitmapShader 与柔性渐变遮罩的 DST_IN 混合后覆盖。
+ * 水波纹翻页绘制：旧页原位绘制，目标页经 BitmapShader 与柔性渐变遮罩的 SRC_IN 混合后覆盖。
  * 借用快照 Bitmap，不拥有或回收；进度与方向只影响遮罩位置，不移动页面纹理。
  */
 internal class RippleTurnRenderer {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val shaderMatrix = Matrix()
+    private val maskMatrix = Matrix()
     private val colors = IntArray(RippleTurnSpec.STOP_COUNT)
     private val positions = FloatArray(RippleTurnSpec.STOP_COUNT)
     private var bitmap: Bitmap? = null
     private var targetShader: BitmapShader? = null
+    private var mask: LinearGradient? = null
+    private var composite: ComposeShader? = null
     private var direction = 1
     private var ratio = RippleTurnSpec.DEFAULT_RATIO
 
@@ -39,6 +42,8 @@ internal class RippleTurnRenderer {
         this.ratio = ratio
         bitmap = page
         targetShader = BitmapShader(page, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        mask = LinearGradient(0f, 0f, 1f, 0f, colors, positions, Shader.TileMode.CLAMP)
+        composite = ComposeShader(requireNotNull(mask), requireNotNull(targetShader), PorterDuff.Mode.SRC_IN)
     }
 
     fun draw(canvas: Canvas, current: Bitmap, bounds: Rect, progress: Float) {
@@ -66,13 +71,16 @@ internal class RippleTurnRenderer {
         }
         // 渐变坐标就是视口坐标；mask 为 dst、目标页为 src 做 SRC_IN，取目标页颜色乘遮罩 alpha。
         // 用 SRC_IN 而非 DST_IN：DST 系模式在硬件加速下依赖目标像素、部分 GPU 不渲染。
-        val mask = if (direction > 0) {
+        if (direction > 0) {
             // 下一页自右向左：镜像遮罩坐标，新页从右缘进入。
-            LinearGradient(width - s, 0f, width - s - band, 0f, colors, positions, Shader.TileMode.CLAMP)
+            maskMatrix.setScale(-band, 1f)
+            maskMatrix.postTranslate(width - s, 0f)
         } else {
-            LinearGradient(s, 0f, s + band, 0f, colors, positions, Shader.TileMode.CLAMP)
+            maskMatrix.setScale(band, 1f)
+            maskMatrix.postTranslate(s, 0f)
         }
-        paint.shader = ComposeShader(mask, shader, PorterDuff.Mode.SRC_IN)
+        mask?.setLocalMatrix(maskMatrix)
+        paint.shader = composite
         canvas.drawRect(bounds, paint)
         paint.shader = null
     }
@@ -81,5 +89,7 @@ internal class RippleTurnRenderer {
         paint.shader = null
         bitmap = null
         targetShader = null
+        mask = null
+        composite = null
     }
 }
