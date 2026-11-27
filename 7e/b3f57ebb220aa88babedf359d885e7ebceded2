@@ -1,0 +1,53 @@
+app/src/main/java/com/yuezhou/reader/ui/settings/SettingsPage.kt
+  s_7f8cccb76ad60a::t_18598c8a293658 414-459
+  s_7f8cccb76ad60a::t_bd8818c45cadfa 52,100-101,108,207,407-413,460-474
+app/build.gradle.kts
+  s_7f8cccb76ad60a::t_ffcb76e1f530f6 14-15
+  s_7f8cccb76ad60a::t_b8a84fd75925a0 69
+nettts/src/main/java/io/legado/app/nettts/NetworkTtsPlaybackBackend.kt
+  s_7f8cccb76ad60a::t_32cf1dbcd3c519 92-254
+  s_7f8cccb76ad60a::t_0ab4602ca98ed9 1-91,255-292
+speech/src/main/java/com/yuezhou/reader/speech/SpeechService.kt
+  s_7f8cccb76ad60a::t_32cf1dbcd3c519 192,196,210-212,226,230,235-237,257-262,308,324-325,385-386,388,393-411,755,873,881,909,917,919,987,1502
+  s_7f8cccb76ad60a::t_b816b6912b894a 915
+  s_7f8cccb76ad60a::t_eb478bbaf65c95 294-295
+  s_7f8cccb76ad60a::t_18598c8a293658 241-245,267-273,1410
+  s_7f8cccb76ad60a::t_dddbd7f8a52e87 105-109,183-191,193-195,197,200-209,213-225,227-229,231-234,238-240,246-256,263-266,274-290,293,298-307,309-323,326-328,371,387,389-392,863-872,874-880,900-908,910-914,916,918
+nettts/src/main/java/io/legado/app/nettts/NetworkTtsPlayer.kt
+  s_7f8cccb76ad60a::t_32cf1dbcd3c519 30-196,204-319
+  s_7f8cccb76ad60a::t_b816b6912b894a 197-202
+  s_7f8cccb76ad60a::t_a85e2349d10362 1-29,203,320-370
+app/src/main/java/com/yuezhou/reader/ReaderSettings.kt
+  s_7f8cccb76ad60a::t_18598c8a293658 10,38-39,52-58,74,96,137
+speech/src/main/java/com/yuezhou/reader/speech/SpeechPlanStore.kt
+  s_7f8cccb76ad60a::t_18598c8a293658 117-127
+  s_7f8cccb76ad60a::t_367cb14a8d4673 28-29
+app/src/main/java/com/yuezhou/reader/networktts/NetworkTtsVoicePreference.kt
+  s_7f8cccb76ad60a::t_1a3a24103d96e1 1-57
+app/src/main/java/com/yuezhou/reader/ReaderApplication.kt
+  s_7f8cccb76ad60a::t_18598c8a293658 3,5,7,9,27-48
+  s_7f8cccb76ad60a::t_a337046045a69a 49
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_7f8cccb76ad60a::t_18598c8a293658 234,573,643,981,993-996,1009-1018,1029-1030,1038,1040-1043,1549-1551,1576-1591,1593,1595-1596,1598,1602-1614,1618-1625,1627
+  s_7f8cccb76ad60a::t_c985316c2ed399 92,235-243,1031-1037,1039
+  s_7f8cccb76ad60a::t_ffcb76e1f530f6 114,570-572,576,579
+  s_7f8cccb76ad60a::t_74cc7ec72bccf6 610-616
+speech/src/main/java/com/yuezhou/reader/speech/SpeechProgressTracker.kt
+  s_7f8cccb76ad60a::t_18598c8a293658 37-43,63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7eb3f57ebb220aa88babedf359d885e7ebceded2",
+  "prompts": {},
+  "sessions": {
+    "s_7f8cccb76ad60a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21bce-a466-7272-8a21-4900c1a6958a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
