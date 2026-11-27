@@ -3,10 +3,13 @@ package com.yuezhou.reader.ui.settings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -89,15 +93,30 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
     var loginTarget by remember { mutableStateOf<HttpTTS?>(null) }
     var deleteTarget by remember { mutableStateOf<HttpTTS?>(null) }
     var pendingExport by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var batchDeleteOpen by remember { mutableStateOf(false) }
 
     fun reload() {
         scope.launch {
-            rules = runCatching { repository.list() }.getOrDefault(emptyList())
+            val loaded = runCatching { repository.list() }.getOrDefault(emptyList())
+            rules = loaded
+            if (selectedIds.isNotEmpty()) {
+                selectedIds = selectedIds.intersect(loaded.map { it.id }.toSet())
+                if (selectedIds.isEmpty()) selectionMode = false
+            }
             loading = false
         }
     }
 
+    fun exitSelection() {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
+
     LaunchedEffect(Unit) { reload() }
+
+    BackHandler(enabled = selectionMode) { exitSelection() }
 
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -121,9 +140,11 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onBack) { Text("返回") }
+            TextButton(onClick = { if (selectionMode) exitSelection() else onBack() }) {
+                Text(if (selectionMode) "取消" else "返回")
+            }
             Text(
-                "网络 TTS 规则",
+                if (selectionMode) "已选 ${selectedIds.size} 项" else "网络 TTS 规则",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
@@ -140,21 +161,44 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = YuezhouColors.TextSecondary,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { importOpen = true }) { Text("导入") }
-                TextButton(onClick = { fileLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }) {
-                    Text("从文件导入")
-                }
-                TextButton(onClick = {
-                    scope.launch {
-                        val exported = runCatching { repository.exportAll() }.getOrNull()
-                        if (exported.isNullOrBlank()) {
-                            message = "暂无可导出的规则"
-                        } else {
-                            pendingExport = "全部规则" to exported
+            if (selectionMode) {
+                val allSelected = rules.isNotEmpty() && selectedIds.size == rules.size
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = {
+                        selectedIds = if (allSelected) emptySet() else rules.map { it.id }.toSet()
+                    }) { Text(if (allSelected) "取消全选" else "全选") }
+                    TextButton(enabled = selectedIds.isNotEmpty(), onClick = {
+                        val orderedIds = rules.filter { it.id in selectedIds }.map { it.id }
+                        scope.launch {
+                            val text = runCatching { repository.exportMany(orderedIds) }.getOrNull()
+                            if (text.isNullOrBlank()) {
+                                message = "导出失败"
+                            } else {
+                                pendingExport = "已选 ${orderedIds.size} 条规则" to text
+                            }
                         }
+                    }) { Text("导出选中") }
+                    TextButton(enabled = selectedIds.isNotEmpty(), onClick = { batchDeleteOpen = true }) {
+                        Text("删除选中")
                     }
-                }) { Text("导出到剪贴板") }
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { importOpen = true }) { Text("导入") }
+                    TextButton(onClick = { fileLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }) {
+                        Text("从文件导入")
+                    }
+                    TextButton(onClick = {
+                        scope.launch {
+                            val exported = runCatching { repository.exportAll() }.getOrNull()
+                            if (exported.isNullOrBlank()) {
+                                message = "暂无可导出的规则"
+                            } else {
+                                pendingExport = "全部规则" to exported
+                            }
+                        }
+                    }) { Text("导出到剪贴板") }
+                }
             }
             message?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
@@ -174,6 +218,21 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                 items(rules, key = { it.id }) { rule ->
                     RuleRow(
                         rule = rule,
+                        selectionMode = selectionMode,
+                        selected = rule.id in selectedIds,
+                        onClick = {
+                            if (selectionMode) {
+                                selectedIds = if (rule.id in selectedIds) {
+                                    selectedIds - rule.id
+                                } else {
+                                    selectedIds + rule.id
+                                }
+                            }
+                        },
+                        onLongClick = {
+                            selectionMode = true
+                            selectedIds = selectedIds + rule.id
+                        },
                         onAudition = { auditioning = rule },
                         onEdit = { editing = rule },
                         onLogin = if (rule.hasLogin()) ({ loginTarget = rule }) else null,
@@ -280,47 +339,91 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
             dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } },
         )
     }
+
+    if (batchDeleteOpen) {
+        AlertDialog(
+            onDismissRequest = { batchDeleteOpen = false },
+            title = { Text("删除规则") },
+            text = { Text("确定删除选中的 ${selectedIds.size} 条规则？该操作不影响已试听缓存。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val ids = selectedIds.toList()
+                    batchDeleteOpen = false
+                    scope.launch {
+                        runCatching { repository.deleteMany(ids) }
+                            .onSuccess {
+                                message = "已删除 ${ids.size} 条规则"
+                                exitSelection()
+                            }
+                            .onFailure { message = "删除失败：${it.message}" }
+                        reload()
+                    }
+                }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { batchDeleteOpen = false }) { Text("取消") } },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RuleRow(
     rule: HttpTTS,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onAudition: () -> Unit,
     onEdit: () -> Unit,
     onLogin: (() -> Unit)?,
     onDelete: () -> Unit,
     onExport: () -> Unit,
 ) {
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(YuezhouColors.Surface)
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                } else {
+                    YuezhouColors.Surface
+                }
+            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(12.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Text(rule.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-        Text(
-            rule.url,
-            style = MaterialTheme.typography.bodySmall,
-            color = YuezhouColors.TextSecondary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        val extras = buildList {
-            if (rule.pauseDuration > 0) add("停顿 ${rule.pauseDuration}ms")
-            if (!rule.contentType.isNullOrBlank()) add("类型 ${rule.contentType}")
-            if (!rule.loginUrl.isNullOrBlank() || !rule.loginUi.isNullOrBlank()) add("需登录")
-            if (!rule.concurrentRate.isNullOrBlank() && rule.concurrentRate != "0") add("并发 ${rule.concurrentRate}")
+        if (selectionMode) {
+            Checkbox(checked = selected, onCheckedChange = { onClick() })
         }
-        if (extras.isNotEmpty()) {
-            Text(extras.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = YuezhouColors.TextSecondary)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(onClick = onAudition) { Text("试听") }
-            TextButton(onClick = onEdit) { Text("编辑") }
-            onLogin?.let { TextButton(onClick = it) { Text("登录") } }
-            TextButton(onClick = onExport) { Text("导出") }
-            TextButton(onClick = onDelete) { Text("删除") }
+        Column(Modifier.weight(1f)) {
+            Text(rule.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(
+                rule.url,
+                style = MaterialTheme.typography.bodySmall,
+                color = YuezhouColors.TextSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val extras = buildList {
+                if (rule.pauseDuration > 0) add("停顿 ${rule.pauseDuration}ms")
+                if (!rule.contentType.isNullOrBlank()) add("类型 ${rule.contentType}")
+                if (!rule.loginUrl.isNullOrBlank() || !rule.loginUi.isNullOrBlank()) add("需登录")
+                if (!rule.concurrentRate.isNullOrBlank() && rule.concurrentRate != "0") add("并发 ${rule.concurrentRate}")
+            }
+            if (extras.isNotEmpty()) {
+                Text(extras.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = YuezhouColors.TextSecondary)
+            }
+            if (!selectionMode) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = onAudition) { Text("试听") }
+                    TextButton(onClick = onEdit) { Text("编辑") }
+                    onLogin?.let { TextButton(onClick = it) { Text("登录") } }
+                    TextButton(onClick = onExport) { Text("导出") }
+                    TextButton(onClick = onDelete) { Text("删除") }
+                }
+            }
         }
     }
 }

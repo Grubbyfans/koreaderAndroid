@@ -24,6 +24,9 @@ interface NetworkTtsRuleDao {
     @Query("DELETE FROM network_tts_rule WHERE id = :id")
     suspend fun delete(id: Long)
 
+    @Query("DELETE FROM network_tts_rule WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
+
     @Query("DELETE FROM network_tts_rule")
     suspend fun clear()
 }

@@ -40,6 +40,10 @@ class NetworkTtsRuleRepository(private val context: Context) {
         dao.delete(id)
     }
 
+    suspend fun deleteMany(ids: Collection<Long>) = withContext(Dispatchers.IO) {
+        if (ids.isNotEmpty()) dao.deleteByIds(ids.toList())
+    }
+
     /** 导入 JSON 文本（单条或数组）；重复 id 覆盖，同名不同 id 保留两份。 */
     suspend fun import(text: String): ImportOutcome = withContext(Dispatchers.IO) {
         val parsed = NetworkTtsRuleCodec.parse(text)
@@ -73,6 +77,13 @@ class NetworkTtsRuleRepository(private val context: Context) {
 
     suspend fun exportOne(id: Long): String? = withContext(Dispatchers.IO) {
         dao.byId(id)?.let { NetworkTtsRuleCodec.exportRuleText(it.toHttpTTS()) }
+    }
+
+    /** 按传入顺序导出多条规则，输出为 JSON 数组。 */
+    suspend fun exportMany(ids: List<Long>): String? = withContext(Dispatchers.IO) {
+        val byId = dao.all().associateBy { it.id }
+        val selected = ids.mapNotNull { byId[it] }.map { it.toHttpTTS() }
+        if (selected.isEmpty()) null else NetworkTtsRuleCodec.exportRules(selected)
     }
 
     private fun NetworkTtsRuleEntity.toHttpTTS() = HttpTTS(
