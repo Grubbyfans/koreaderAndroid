@@ -100,6 +100,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuezhou.reader.reader.EpubImporter
 import com.yuezhou.reader.reader.EpubFileGeneration
 import com.yuezhou.reader.reader.EpubSpeechChapterSource
@@ -127,6 +128,7 @@ import com.yuezhou.reader.ui.reader.ProgressSyncDialog
 import com.yuezhou.reader.ui.reader.ReaderOverlay
 import com.yuezhou.reader.ui.reader.ReaderPalette
 import com.yuezhou.reader.ui.reader.ReaderPanel
+import com.yuezhou.reader.ui.reader.ReaderViewModel
 import com.yuezhou.reader.ui.reader.RemoteProgressOffer
 import com.yuezhou.reader.ui.reader.TocDrawer
 import com.yuezhou.reader.ui.reader.formatSyncProgress
@@ -262,9 +264,12 @@ private fun ReaderScreen(
     // 目录抽屉
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
-    val store = remember { LibraryStore(context) }
-    val cloudSync = remember(context) { CloudSync(context) }
-    val automaticSync = remember(cloudSync) { ReaderAutomaticSync(cloudSync::fetchRemoteProgress) }
+    val vm: ReaderViewModel = viewModel()
+    LaunchedEffect(bookId) { vm.resetForBook() }
+    val store = vm.libraryStore
+    val cloudSync = vm.cloudSync
+    val automaticSync = vm.automaticSync
+    val syncLogStore = vm.syncLogStore
     // 阅读设置（DataStore）
     val loadedPrefs by ReaderSettings.flow(context).collectAsStateWithLifecycle(initialValue = null)
     val readerPrefs = loadedPrefs ?: ReaderPreferences()
@@ -276,46 +281,19 @@ private fun ReaderScreen(
     // 进度去抖保存：翻页频繁时合并写入
     var saveJob by remember { mutableStateOf<Job?>(null) }
     var leaving by remember { mutableStateOf(false) }
-    // 记录最近一次位置，供退出时立即保存
-    var lastPosition by remember { mutableStateOf<Pair<String, Double?>?>(null) }
-
-    // 进度同步面板：非空表示打开；数据为进度对照信息
-    var syncDialogOpen by remember { mutableStateOf(false) }
-    var syncInfo by remember { mutableStateOf<CloudSync.ProgressInfo?>(null) }
-    var syncLoading by remember { mutableStateOf(false) }
-    var syncBusy by remember { mutableStateOf(false) }
-    var undoPosition by remember(bookId) { mutableStateOf<Pair<String, Double?>?>(null) }
     var pendingJump by remember { mutableStateOf<Pair<String, CompletableDeferred<ReaderEvent.JumpVerified>>?>(null) }
 
     suspend fun saveReadingPosition(id: String, position: Pair<String, Double?>) {
-        if (!store.saveProgress(id, position.first, position.second)) status = "无法保存本机阅读进度"
+        if (!vm.saveProgress(id, position)) status = "无法保存本机阅读进度"
     }
 
     suspend fun flushProgress() {
         saveJob?.cancelAndJoin()
-        val pos = lastPosition ?: return
+        val pos = vm.lastPosition ?: return
         val id = bookId ?: return
         saveReadingPosition(id, pos)
     }
 
-    // 是否已执行过本次打开的自动拉取（避免重复）
-    var autoPulled by remember(bookId) { mutableStateOf(false) }
-    var positionVersion by remember(bookId) { mutableLongStateOf(0L) }
-    var remoteOffer by remember(bookId) { mutableStateOf<RemoteProgressOffer?>(null) }
-    var autoSyncBusy by remember { mutableStateOf(false) }
-    val syncLogStore = remember { SyncLogStore(context) }
-    var positionConversion by remember { mutableStateOf<Deferred<String?>?>(null) }
-
-    fun updatePosition(position: Pair<String, Double?>, wv: ReaderWebView?, xpointer: String? = null) {
-        positionConversion?.cancel()
-        if (lastPosition?.first != position.first) positionVersion++
-        lastPosition = position
-        positionConversion = if (xpointer != null) {
-            CompletableDeferred<String?>(xpointer)
-        } else {
-            wv?.let { scope.async { it.cfiToXPointer(position.first) } }
-        }
-    }
 
     suspend fun jumpAndSave(
         id: String,
@@ -331,7 +309,7 @@ private fun ReaderScreen(
         pendingJump = requestId to result
         try {
             if (expectedVersion == null) saveJob?.cancelAndJoin()
-            else if (positionVersion != expectedVersion) return false
+            else if (vm.positionVersion != expectedVersion) return false
             wv.verifyJump(requestId, target.first, previous.first, previous.first.takeIf { expectedVersion != null })
             val jump = withTimeoutOrNull(8_000) { result.await() }
             if (jump == null && !leaving && expectedVersion == null) wv.goToCfi(previous.first)
@@ -339,7 +317,7 @@ private fun ReaderScreen(
             if (jump?.stale == true) {
                 currentCfi?.takeIf { it != previous.first }?.let { cfi ->
                     val position = cfi to currentFraction?.toDouble()
-                    updatePosition(position, wv)
+                    vm.updatePosition(position) { wv.cfiToXPointer(position.first) }
                     saveJob?.cancelAndJoin()
                     saveReadingPosition(id, position)
                 }
@@ -347,7 +325,7 @@ private fun ReaderScreen(
             if (jump?.verified != true) return false
             val position = target.first to (jump.fraction ?: target.second)
             saveJob?.cancelAndJoin()
-            updatePosition(position, wv, targetXPointer)
+            vm.updatePosition(position, targetXPointer)
             saveReadingPosition(id, position)
             return true
         } finally {
@@ -356,20 +334,20 @@ private fun ReaderScreen(
     }
 
     fun autoPullRemoteProgress() {
-        if (!latestPrefs.autoSync || autoPulled) return
+        if (!latestPrefs.autoSync || vm.autoPulled) return
         val id = bookId ?: return
         val wv = webView ?: return
-        val initial = lastPosition ?: return
-        val initialVersion = positionVersion
-        autoPulled = true
+        val initial = vm.lastPosition ?: return
+        val initialVersion = vm.positionVersion
+        vm.autoPulled = true
         scope.launch {
             try {
                 when (val result = automaticSync.pull(
                     bookId = id,
                     localCfi = initial.first,
                     isActive = { !leaving && webView === wv && latestPrefs.autoSync },
-                    hasMoved = { positionVersion != initialVersion },
-                    acceptsAutomaticJump = { !syncDialogOpen && !syncBusy && !speaking && !speakRequested },
+                    hasMoved = { vm.positionVersion != initialVersion },
+                    acceptsAutomaticJump = { !vm.syncDialogOpen && !vm.syncBusy && !speaking && !speakRequested },
                     resolve = wv::xPointerToCfi,
                     compare = wv::comparePositions,
                     apply = { cfi, remote ->
@@ -378,7 +356,7 @@ private fun ReaderScreen(
                 )) {
                     ReaderAutomaticSync.PullResult.NoChange -> Unit
                     ReaderAutomaticSync.PullResult.Applied -> {
-                        undoPosition = initial
+                        vm.undoPosition = initial
                         status = "已续读到云端进度，可在进度同步中撤销"
                         syncLogStore.append("pull", title, true, "已续读到云端进度")
                     }
@@ -388,7 +366,7 @@ private fun ReaderScreen(
                             ReaderAutomaticSync.Reason.REMOTE_BEHIND -> "云端位置比本机靠前"
                             ReaderAutomaticSync.Reason.CONFIRM_POSITION -> "需要确认云端位置"
                         }
-                        remoteOffer = RemoteProgressOffer(result.cfi, result.remote.xpointer, result.remote.percent, reason)
+                        vm.remoteOffer = RemoteProgressOffer(result.cfi, result.remote.xpointer, result.remote.percent, reason)
                         syncLogStore.append("pull", title, false, "${reason}，保留本机位置")
                     }
                 }
@@ -402,18 +380,18 @@ private fun ReaderScreen(
 
     /** 冻结同一次定位的位置和百分比，退出前短暂等待尚未完成的锚点转换。 */
     suspend fun positionForAutoUpload(): Pair<String, Double?>? {
-        val position = lastPosition ?: return null
-        val conversion = positionConversion ?: return null
+        val position = vm.lastPosition ?: return null
+        val conversion = vm.positionConversion ?: return null
         return automaticSync.uploadPosition(position, conversion) {
-            lastPosition === position && pendingJump == null
+            vm.lastPosition === position && pendingJump == null
         }
     }
 
     /** 自动上传本机进度覆盖云端（自动同步开启时，退出/切出时调用）。 */
     suspend fun autoPushProgress(position: Pair<String, Double?>?) {
         val id = bookId ?: return
-        if (autoSyncBusy) return
-        autoSyncBusy = true
+        if (vm.autoSyncBusy) return
+        vm.autoSyncBusy = true
         try {
             if (position == null) {
                 syncLogStore.append("push", title, false, "当前位置尚未确认或转换，已跳过上传")
@@ -426,7 +404,7 @@ private fun ReaderScreen(
         } catch (e: Exception) {
             syncLogStore.append("push", title, false, e.message ?: "上传失败")
         } finally {
-            autoSyncBusy = false
+            vm.autoSyncBusy = false
         }
     }
 
@@ -493,58 +471,58 @@ private fun ReaderScreen(
     }
 
     fun openSyncDialog() {
-        if (bookId == null || syncDialogOpen) return
-        syncLoading = true
-        syncInfo = null
-        syncDialogOpen = true
+        if (bookId == null || vm.syncDialogOpen) return
+        vm.syncLoading = true
+        vm.syncInfo = null
+        vm.syncDialogOpen = true
     }
 
-    LaunchedEffect(syncDialogOpen, bookId) {
+    LaunchedEffect(vm.syncDialogOpen, bookId) {
         val id = bookId ?: return@LaunchedEffect
-        if (!syncDialogOpen) return@LaunchedEffect
+        if (!vm.syncDialogOpen) return@LaunchedEffect
         try {
-            syncInfo = cloudSync.progressInfo(id)
+            vm.syncInfo = vm.loadProgressInfo(id)
         } finally {
-            syncLoading = false
+            vm.syncLoading = false
         }
     }
 
     fun applyRemoteProgress() {
         val id = bookId ?: return
-        val info = syncInfo ?: return
+        val info = vm.syncInfo ?: return
         val remote = info.remoteLocation ?: return
-        val previous = lastPosition ?: return
+        val previous = vm.lastPosition ?: return
         val wv = webView ?: return
-        syncBusy = true
+        vm.syncBusy = true
         SpeechPlanStore.stop(context)
         scope.launch {
             try {
                 val cfi = wv.xPointerToCfi(remote)
                 val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to info.remotePercent, remote)
-                if (applied) undoPosition = previous
+                if (applied) vm.undoPosition = previous
                 status = if (applied) "已应用云端进度，可在进度同步中撤销" else "无法确认云端落点，已保留本机进度"
-                syncDialogOpen = false
+                vm.syncDialogOpen = false
             } finally {
-                syncBusy = false
+                vm.syncBusy = false
             }
         }
     }
 
     fun undoRemoteProgress() {
         val id = bookId ?: return
-        val previous = lastPosition ?: return
-        val restore = undoPosition ?: return
+        val previous = vm.lastPosition ?: return
+        val restore = vm.undoPosition ?: return
         val wv = webView ?: return
-        syncBusy = true
+        vm.syncBusy = true
         SpeechPlanStore.stop(context)
         scope.launch {
             try {
                 val restored = jumpAndSave(id, wv, previous, restore)
-                if (restored) undoPosition = null
+                if (restored) vm.undoPosition = null
                 status = if (restored) "已恢复到同步前位置" else "无法确认撤销位置"
-                syncDialogOpen = false
+                vm.syncDialogOpen = false
             } finally {
-                syncBusy = false
+                vm.syncBusy = false
             }
         }
     }
@@ -552,7 +530,7 @@ private fun ReaderScreen(
     // 上传本机进度到云端：先把 CFI 转 XPointer 再上传
     fun uploadLocalProgress() {
         val id = bookId ?: return
-        val pos = lastPosition
+        val pos = vm.lastPosition
         if (pos == null) {
             status = "本机暂无进度可上传"
             return
@@ -563,18 +541,14 @@ private fun ReaderScreen(
             status = "阅读器尚未就绪，无法上传进度"
             return
         }
-        syncBusy = true
+        vm.syncBusy = true
         scope.launch {
             try {
-                val xpointer = wv.cfiToXPointer(cfi)
-                status = if (xpointer == null) {
-                    "当前阅读位置无法转换，已取消上传"
-                } else {
-                    cloudSync.uploadLocalProgress(id, xpointer, pos.second) ?: "已上传本机进度"
-                }
-                syncDialogOpen = false
+                status = vm.uploadProgress(id, cfi, pos.second) { wv.cfiToXPointer(it) }
+                    ?: "已上传本机进度"
+                vm.syncDialogOpen = false
             } finally {
-                syncBusy = false
+                vm.syncBusy = false
             }
         }
     }
@@ -713,7 +687,7 @@ private fun ReaderScreen(
                 val cfi = event.cfi
                 val fraction = event.fraction?.toDouble()?.takeIf { it in 0.0..1.0 }
                 if (cfi != null && bookId != null && pendingJump == null && !leaving) {
-                    updatePosition(cfi to fraction, webView)
+                    vm.updatePosition(cfi to fraction) { target -> webView?.cfiToXPointer(target) }
                     // 去抖：300ms 内的连续翻页合并成一次写
                     saveJob?.cancel()
                     saveJob = scope.launch {
@@ -1075,29 +1049,29 @@ private fun ReaderScreen(
             }
         }
 
-        val offer = remoteOffer
-        if (offer != null && readerPrefs.autoSync && !syncDialogOpen) {
+        val offer = vm.remoteOffer
+        if (offer != null && readerPrefs.autoSync && !vm.syncDialogOpen) {
             AlertDialog(
-                onDismissRequest = { remoteOffer = null },
+                onDismissRequest = { vm.remoteOffer = null },
                 title = { Text("发现云端进度") },
                 text = {
                     Text("${offer.reason}。云端 ${formatSyncProgress(offer.xpointer, offer.percent)}，本机 " +
-                        formatSyncProgress(lastPosition?.first, lastPosition?.second))
+                        formatSyncProgress(vm.lastPosition?.first, vm.lastPosition?.second))
                 },
                 confirmButton = {
-                    TextButton(onClick = { remoteOffer = null }) { Text("保留本机位置") }
+                    TextButton(onClick = { vm.remoteOffer = null }) { Text("保留本机位置") }
                 },
                 dismissButton = {
                     if (offer.cfi != null) {
                         TextButton(onClick = {
-                            remoteOffer = null
+                            vm.remoteOffer = null
                             val id = bookId ?: return@TextButton
                             val wv = webView ?: return@TextButton
-                            val previous = lastPosition ?: return@TextButton
+                            val previous = vm.lastPosition ?: return@TextButton
                             SpeechPlanStore.stop(context)
                             scope.launch {
                                 val applied = jumpAndSave(id, wv, previous, offer.cfi to offer.percent, offer.xpointer)
-                                if (applied) undoPosition = previous
+                                if (applied) vm.undoPosition = previous
                                 status = if (applied) "已应用云端进度，可在进度同步中撤销"
                                 else "无法确认云端落点，已保留本机进度"
                             }
@@ -1108,16 +1082,16 @@ private fun ReaderScreen(
         }
 
         // 进度同步面板（方案 §5.6：本机/云端对照 + 上传/应用两步交互）
-        if (syncDialogOpen) {
+        if (vm.syncDialogOpen) {
             ProgressSyncDialog(
-                info = syncInfo,
-                localPosition = lastPosition,
-                loading = syncLoading,
-                busy = syncBusy || pendingJump != null,
+                info = vm.syncInfo,
+                localPosition = vm.lastPosition,
+                loading = vm.syncLoading,
+                busy = vm.syncBusy || pendingJump != null,
                 onUpload = { uploadLocalProgress() },
                 onApply = { applyRemoteProgress() },
-                onUndo = if (undoPosition != null) ::undoRemoteProgress else null,
-                onDismiss = { syncDialogOpen = false },
+                onUndo = if (vm.undoPosition != null) ::undoRemoteProgress else null,
+                onDismiss = { vm.syncDialogOpen = false },
             )
         }
 
