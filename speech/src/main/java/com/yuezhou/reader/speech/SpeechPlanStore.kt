@@ -25,6 +25,8 @@ data class SpeechConfig(
     val kokoroModelId: String = "",
     val kokoroSpeakerId: Int = 3,
     val novelParsing: Boolean = false,
+    /** NETWORK_TTS：当前选定的规则 ID；为空时服务会回退 SYSTEM_TTS。 */
+    val networkTtsRuleId: Long? = null,
 )
 
 /**
@@ -110,6 +112,17 @@ object SpeechPlanStore {
     internal fun replacePlan(expected: Request, plan: SpeechPlan, start: Int): Request? {
         if (current !== expected) return null
         return expected.copy(plan = plan, startSegment = start).also { current = it }
+    }
+
+    /** 保留当前播放位置与缓冲音频。 */
+    fun pause(context: Context) {
+        if (current == null) return
+        context.startService(Intent(context, SpeechService::class.java).setAction(SpeechCommands.ACTION_PAUSE))
+    }
+
+    fun resume(context: Context) {
+        if (current == null) return
+        context.startService(Intent(context, SpeechService::class.java).setAction(SpeechCommands.ACTION_RESUME))
     }
 
     /** 停止朗读并退出前台。 */

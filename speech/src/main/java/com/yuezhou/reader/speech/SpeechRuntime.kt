@@ -4,6 +4,7 @@ import android.net.Uri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.yuezhou.reader.core.speech.SpeechProgressSink
+import com.yuezhou.reader.core.speech.SpeechPlaybackBackend
 import com.yuezhou.reader.core.speech.SpeechSynthesizer
 
 /**
@@ -11,6 +12,8 @@ import com.yuezhou.reader.core.speech.SpeechSynthesizer
  *
  * app 在 `Application.onCreate()` 注入进度写入端口；独立实验构建可注入 Kokoro 提供者。
  * 服务只依赖这里的端口，不反向依赖 app / reader 模块。
+ *
+ * 阶段 C 新增：网络 TTS 规则选择（ruleId）与后端工厂。
  */
 object SpeechRuntime {
 
@@ -21,6 +24,22 @@ object SpeechRuntime {
     @Volatile
     var kokoro: KokoroEngineProvider? = null
         private set
+
+    /** Kokoro 播放器装配标记；为 false 时 Kokoro 分支会自动回退。 */
+    @Volatile
+    var kokoroCoordinatorReady: Boolean = false
+
+    /** 当前选定的网络 TTS 规则 ID；null 表示未选规则。 */
+    @Volatile
+    var networkTtsRuleId: Long? = null
+
+    /** 网络 TTS 后端工厂（由 app 层在 Application.onCreate 注入）。 */
+    @Volatile
+    var networkTtsBackendFactory: ((android.content.Context, ruleId: Long) -> SpeechPlaybackBackend)? = null
+
+    /** 网络 TTS 是否可用：工厂已装配。 */
+    val networkTtsAvailable: Boolean
+        get() = networkTtsBackendFactory != null
 
     fun installProgressSink(sink: SpeechProgressSink?) {
         progressSink = sink

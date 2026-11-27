@@ -25,8 +25,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncLogEntity::class,
         OnlineDownloadTaskEntity::class,
         OnlineBookMappingEntity::class,
+        NetworkTtsRuleEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun syncLogDao(): SyncLogDao
     abstract fun onlineDownloadTaskDao(): OnlineDownloadTaskDao
     abstract fun onlineBookMappingDao(): OnlineBookMappingDao
+    abstract fun networkTtsRuleDao(): NetworkTtsRuleDao
 
     companion object {
         private val isolatePublications = object : Migration(1, 2) {
@@ -136,6 +138,30 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 网络 TTS 规则表：只新增一张表，旧表与既有数据零改动。 */
+        private val addNetworkTtsRule = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS network_tts_rule (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        contentType TEXT,
+                        pauseDuration INTEGER NOT NULL,
+                        concurrentRate TEXT,
+                        loginUrl TEXT,
+                        loginUi TEXT,
+                        header TEXT,
+                        jsLib TEXT,
+                        enabledCookieJar INTEGER NOT NULL,
+                        loginCheckJs TEXT,
+                        lastUpdateTime INTEGER NOT NULL,
+                        rawJson TEXT
+                    )
+                """.trimIndent())
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -145,7 +171,14 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yuezhou_reader.db",
-                ).addMigrations(isolatePublications, addSpeechPosition, addSyncLog, addSpeechAnchor, addOnlineDownloadTables)
+                ).addMigrations(
+                    isolatePublications,
+                    addSpeechPosition,
+                    addSyncLog,
+                    addSpeechAnchor,
+                    addOnlineDownloadTables,
+                    addNetworkTtsRule,
+                )
                     .build().also { instance = it }
             }
     }

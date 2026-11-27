@@ -49,6 +49,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,13 +97,15 @@ internal enum class SettingsRoute(val title: String, val description: String = "
     About("关于静读", "版本信息"),
     SyncLog("同步记录"),
     ZLibrary("Z-Library 设置"),
-    Servers("服务器管理");
+    Servers("服务器管理"),
+    NetworkTts("网络 TTS 规则管理", "导入 Legado 原版网络朗读规则并试听");
 
     val parent: SettingsRoute
         get() = when (this) {
             SyncLog -> Sync
             ZLibrary -> Sources
             Servers -> ZLibrary
+            NetworkTts -> Speech
             else -> Home
         }
 
@@ -201,6 +204,7 @@ internal fun SettingsPage(
     when (route) {
         SettingsRoute.SyncLog -> { SyncLogPage(onBack = { onNavigate(route.parent) }); return }
         SettingsRoute.Servers -> { ServerSettingsScreen(onBack = { onNavigate(route.parent) }); return }
+        SettingsRoute.NetworkTts -> { NetworkTtsRulesScreen(onBack = { onNavigate(route.parent) }); return }
         SettingsRoute.ZLibrary -> {
             ZLibrarySettingsScreen(onBack = { onNavigate(route.parent) },
                 onOpenServerSettings = { onNavigate(SettingsRoute.Servers) })
@@ -398,6 +402,74 @@ internal fun SettingsPage(
 
             SettingsCard("后台朗读") {
                 SpeechBackgroundSettings()
+            }
+
+            SettingsCard("网络 TTS") {
+                Text(
+                    "支持导入 Legado 原版网络朗读规则，选定后可作为连续朗读引擎。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YuezhouColors.TextSecondary,
+                )
+                val networkTtsAvailable = SpeechRuntime.networkTtsAvailable
+                val selectedRuleId = prefs.networkTtsRuleId.takeIf { it != 0L } ?: SpeechRuntime.networkTtsRuleId
+                val ruleList = remember { mutableStateOf<List<Pair<Long, String>>>(emptyList()) }
+                val ctx = LocalContext.current
+                LaunchedEffect(Unit) {
+                    runCatching {
+                        ruleList.value = com.yuezhou.reader.reader.networktts.NetworkTtsRuleRepository(ctx).list()
+                            .map { it.id to it.name }
+                    }
+                }
+                if (!networkTtsAvailable) {
+                    Text(
+                        "网络 TTS 未装配。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                } else if (ruleList.value.isEmpty()) {
+                    Text(
+                        "尚未导入任何规则，请先到规则管理里导入。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YuezhouColors.TextSecondary,
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("当前规则：", style = MaterialTheme.typography.bodySmall)
+                        var expanded by remember { mutableStateOf(false) }
+                        val selected = ruleList.value.firstOrNull { it.first == selectedRuleId }
+                        Box {
+                            TextButton(onClick = { expanded = !expanded }) {
+                                Text(selected?.second ?: "未选择")
+                            }
+                            androidx.compose.material3.DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                            ) {
+                                ruleList.value.forEach { (id, name) ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(name) },
+                                        onClick = {
+                                            SpeechRuntime.networkTtsRuleId = id
+                                            scope.launch {
+                                                ReaderSettings.save(context, prefs, prefs.copy(networkTtsRuleId = id))
+                                            }
+                                            expanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Row {
+                    TextButton(onClick = { onNavigate(SettingsRoute.NetworkTts) }) {
+                        Text("规则管理")
+                    }
+                }
             }
 
             if (modelManagerOpen && SpeechRuntime.kokoro != null) {

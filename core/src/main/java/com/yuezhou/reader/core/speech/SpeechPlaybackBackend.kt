@@ -40,7 +40,7 @@ interface SpeechPlaybackBackend {
 }
 
 /** 引擎类型。 */
-enum class SpeechEngineType { SYSTEM_TTS, KOKORO }
+enum class SpeechEngineType { SYSTEM_TTS, KOKORO, NETWORK_TTS }
 
 /**
  * 引擎准备配置。
@@ -57,6 +57,8 @@ data class SpeechEngineConfig(
     val rate: Float = 1.0f,
     val modelDir: String? = null,
     val speakerId: Int = 0,
+    /** NETWORK_TTS 使用：规则 ID；为空时 prepare 返回失败。 */
+    val networkTtsRuleId: Long? = null,
 )
 
 /** 准备结果。 */

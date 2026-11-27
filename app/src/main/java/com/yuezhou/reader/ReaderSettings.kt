@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -34,6 +35,8 @@ data class ReaderPreferences(
     val speechVoice: String = "",
     /** 保存的朗读引擎偏好；实验构建提供 Kokoro 时可恢复旧选择。 */
     val speechEngine: String = "system",
+    /** 网络 TTS 音色对应的已导入规则 ID；0 表示沿用默认规则。 */
+    val networkTtsRuleId: Long = 0L,
     /** Kokoro 模型 ID；空串表示用提供者的默认模型。 */
     val kokoroModel: String = "",
     /** Kokoro 中文音色 ID。 */
@@ -46,8 +49,13 @@ data class ReaderPreferences(
     val brightness: Float = -1f,
 )
 
-internal fun ReaderPreferences.effectiveSpeechEngine(kokoroAvailable: Boolean): SpeechEngineType =
-    if (speechEngine == "kokoro" && kokoroAvailable) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS
+internal fun ReaderPreferences.effectiveSpeechEngine(kokoroAvailable: Boolean, networkTtsAvailable: Boolean): SpeechEngineType {
+    return when {
+        speechEngine == "kokoro" && kokoroAvailable -> SpeechEngineType.KOKORO
+        speechEngine == "network_tts" && networkTtsAvailable -> SpeechEngineType.NETWORK_TTS
+        else -> SpeechEngineType.SYSTEM_TTS
+    }
+}
 
 private val Context.readerDataStore by preferencesDataStore(name = "reader_settings")
 
@@ -63,6 +71,7 @@ object ReaderSettings {
     private val KEY_PAGE_ANIMATION = stringPreferencesKey("page_animation")
     private val KEY_SPEECH_RATE = floatPreferencesKey("speech_rate")
     private val KEY_SPEECH_VOICE = stringPreferencesKey("speech_voice")
+    private val KEY_NETWORK_TTS_RULE = longPreferencesKey("network_tts_rule_id")
     private val KEY_SPEECH_ENGINE = stringPreferencesKey("speech_engine")
     private val KEY_KOKORO_MODEL = stringPreferencesKey("kokoro_model")
     private val KEY_KOKORO_SPEAKER = intPreferencesKey("kokoro_speaker")
@@ -84,6 +93,7 @@ object ReaderSettings {
                 speechRate = prefs[KEY_SPEECH_RATE] ?: 1.0f,
                 speechVoice = prefs[KEY_SPEECH_VOICE] ?: "",
                 speechEngine = prefs[KEY_SPEECH_ENGINE] ?: "system",
+                networkTtsRuleId = prefs[KEY_NETWORK_TTS_RULE] ?: 0L,
                 kokoroModel = prefs[KEY_KOKORO_MODEL] ?: "",
                 kokoroSpeaker = prefs[KEY_KOKORO_SPEAKER] ?: 3,
                 autoSync = prefs[KEY_AUTO_SYNC] ?: false,
@@ -124,6 +134,7 @@ object ReaderSettings {
         changed(KEY_PAGE_ANIMATION, before.pageAnimation, prefs.pageAnimation)
         changed(KEY_SPEECH_RATE, before.speechRate, prefs.speechRate)
         changed(KEY_SPEECH_VOICE, before.speechVoice, prefs.speechVoice)
+        changed(KEY_NETWORK_TTS_RULE, before.networkTtsRuleId, prefs.networkTtsRuleId)
         changed(KEY_SPEECH_ENGINE, before.speechEngine, prefs.speechEngine)
         changed(KEY_KOKORO_MODEL, before.kokoroModel, prefs.kokoroModel)
         changed(KEY_KOKORO_SPEAKER, before.kokoroSpeaker, prefs.kokoroSpeaker)

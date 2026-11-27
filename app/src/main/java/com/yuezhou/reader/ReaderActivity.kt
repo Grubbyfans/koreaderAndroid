@@ -89,6 +89,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.yuezhou.reader.reader.EpubImporter
@@ -110,6 +111,7 @@ import com.yuezhou.reader.speech.SpeechConfig
 import com.yuezhou.reader.speech.SpeechPlanStore
 import com.yuezhou.reader.speech.SpeechRuntime
 import com.yuezhou.reader.speech.SpeechProgressTracker
+import kotlinx.coroutines.flow.combine
 import com.yuezhou.reader.speech.SpeechVoices
 import com.yuezhou.reader.speech.TtsEngine
 import com.yuezhou.reader.speech.TtsVoice
@@ -229,6 +231,16 @@ private fun ReaderScreen(
     var brightnessSaveJob by remember { mutableStateOf<Job?>(null) }
     // 朗读状态：是否正在朗读
     var speaking by remember { mutableStateOf(false) }
+    val speechPaused by SpeechProgressTracker.paused.collectAsStateWithLifecycle()
+    // 记录暂停时的可见页；翻到新页后应重新取当前页正文，而非恢复旧播放器。
+    var pausedPageCfi by rememberSaveable(bookId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(speechPaused, bookId) {
+        if (speechPaused) {
+            if (pausedPageCfi == null) pausedPageCfi = currentCfi
+        } else {
+            pausedPageCfi = null
+        }
+    }
     // 朗读中，用于「朗读」按钮切换为「停止」
     var speakRequested by remember { mutableStateOf(false) }
     var speechPreparationJob by remember { mutableStateOf<Job?>(null) }
@@ -555,14 +567,16 @@ private fun ReaderScreen(
     // 朗读进度收集：服务写入 SpeechProgressTracker，这里只反映 UI（朗读中状态 + 高亮回写）。
     // 位置落库已移到服务侧（SpeechProgressSink），Activity 销毁后仍持续保存。
     LaunchedEffect(bookId, webView) {
-        SpeechProgressTracker.current.collect { snap ->
-            speaking = snap != null
+        combine(SpeechProgressTracker.current, SpeechProgressTracker.paused) { snap, paused ->
+            snap to paused
+        }.collect { (snap, paused) ->
+            speaking = snap != null && snap.bookId == bookId
             // 朗读停止时同步清空「朗读请求中」标记
             if (snap == null) speakRequested = false
-            if (snap == null || snap.bookId != bookId) webView?.clearSpeechHighlight()
+            if (paused || snap == null || snap.bookId != bookId) webView?.clearSpeechHighlight()
             // 已确认朗读点 → 回写高亮到 WebView（起止锚点形成整句高亮）
             val anchor = snap?.sourceAnchor
-            if (snap != null && snap.bookId == bookId && anchor != null && (anchor.nodeId.startsWith("epubcfi(") || anchor.nodeId.matches(Regex("\\d+:\\d+")))) {
+            if (!paused && snap != null && snap.bookId == bookId && anchor != null && (anchor.nodeId.startsWith("epubcfi(") || anchor.nodeId.matches(Regex("\\d+:\\d+")))) {
                 val end = snap.endAnchor
                 webView?.highlight(
                     anchor.nodeId,
@@ -593,7 +607,13 @@ private fun ReaderScreen(
         val id = bookId ?: return
         val (fileName, source) = openedSource ?: return
         val prefs = latestPrefs
-        val engine = prefs.effectiveSpeechEngine(SpeechRuntime.kokoroAvailable)
+        val engine = prefs.effectiveSpeechEngine(
+            SpeechRuntime.kokoroAvailable,
+            SpeechRuntime.networkTtsAvailable && SpeechRuntime.networkTtsRuleId != null,
+        )
+        android.util.Log.d("ReaderActivity", "startSpeech speechEngine=${prefs.speechEngine}, " +
+            "nttAvail=${SpeechRuntime.networkTtsAvailable}, nttRuleId=${SpeechRuntime.networkTtsRuleId}, " +
+            "kokoroAvail=${SpeechRuntime.kokoroAvailable} → engine=$engine")
         val novelParsing = engine == SpeechEngineType.KOKORO
         speechPreparationJob?.cancel()
         speechPreparationJob = scope.launch {
@@ -620,7 +640,7 @@ private fun ReaderScreen(
                     } }?.coerceAtLeast(0) ?: 0
                 }
                 SpeechPlanStore.putConfig(SpeechConfig(prefs.speechRate, prefs.speechVoice, engine,
-                    prefs.kokoroModel, prefs.kokoroSpeaker, novelParsing))
+                    prefs.kokoroModel, prefs.kokoroSpeaker, novelParsing, prefs.networkTtsRuleId.takeIf { it != 0L } ?: SpeechRuntime.networkTtsRuleId))
                 SpeechPlanStore.startAndPlay(context, plan, EpubSpeechChapterSource(context, fileName, source), from)
                 speakRequested = true
                 status = "已从当前页开始朗读"
@@ -958,7 +978,7 @@ private fun ReaderScreen(
                     prefs = readerPrefs,
                     voices = availableVoices,
                     kokoroModels = kokoroModels,
-                    speaking = speaking || speakRequested,
+                    speaking = (speaking || speakRequested) && !speechPaused,
                     onBack = { leaveReader() },
                     overlay = readerOverlay,
                     onOverlay = { readerOverlay = it },
@@ -970,7 +990,10 @@ private fun ReaderScreen(
                     onImport = onImport,
                     onFractionSeek = { frac -> webView?.goToFraction(frac) },
                     onPrefsChange = { p ->
-                        val speechConfigChanged = p.speechVoice != readerPrefs.speechVoice ||
+                        if (p.networkTtsRuleId != readerPrefs.networkTtsRuleId) {
+                            SpeechRuntime.networkTtsRuleId = p.networkTtsRuleId.takeIf { it != 0L }
+                        }
+                        val speechConfigChanged = p.networkTtsRuleId != readerPrefs.networkTtsRuleId || p.speechVoice != readerPrefs.speechVoice ||
                             p.speechEngine != readerPrefs.speechEngine ||
                             p.kokoroModel != readerPrefs.kokoroModel ||
                             p.kokoroSpeaker != readerPrefs.kokoroSpeaker
@@ -983,7 +1006,16 @@ private fun ReaderScreen(
                             }
                             // 引擎/音色变更且正在朗读：保存完成、等 DataStore flow 传播到 latestPrefs 后
                             // 再重启朗读，确保 startSpeech 读到新配置。
-                            if (speechConfigChanged && speaking) {
+                            val deferredNetworkVoice = speechPaused &&
+                                p.speechEngine == "network_tts" &&
+                                p.networkTtsRuleId != readerPrefs.networkTtsRuleId &&
+                                p.speechEngine == readerPrefs.speechEngine
+                            if (deferredNetworkVoice) {
+                                SpeechPlanStore.putConfig(SpeechPlanStore.peekConfig().copy(
+                                    networkTtsRuleId = p.networkTtsRuleId.takeIf { it != 0L },
+                                ))
+                            }
+                            if (speechConfigChanged && speaking && !deferredNetworkVoice) {
                                 delay(120)
                                 SpeechPlanStore.stop(context)
                                 status = "已切换朗读配置，重新朗读…"
@@ -994,7 +1026,21 @@ private fun ReaderScreen(
                     },
                     onSync = { openSyncDialog() },
                     onSpeak = {
-                        if (speaking || speakRequested) {
+                        if (readerPrefs.speechEngine == "network_tts" && speaking) {
+                            if (speechPaused) {
+                                if (currentCfi != null && currentCfi != pausedPageCfi) {
+                                    webView?.clearSpeechHighlight()
+                                    startWithBackgroundGuide()
+                                } else {
+                                    SpeechPlanStore.resume(context)
+                                    status = "已继续朗读"
+                                }
+                            } else {
+                                pausedPageCfi = currentCfi
+                                SpeechPlanStore.pause(context)
+                                status = "已暂停朗读"
+                            }
+                        } else if (speaking || speakRequested) {
                             speechPreparationJob?.cancel()
                             speakRequested = false
                             // 朗读中 → 停止
@@ -1500,7 +1546,9 @@ private fun SettingsControls(
             }
         }
         if (overlay == ReaderOverlay.Speech) {
-            TextButton(onClick = onSpeak) { Text(if (speaking) "停止朗读" else "开始朗读") }
+            TextButton(onClick = onSpeak) { Text(if (speaking) {
+                if (prefs.speechEngine == "network_tts") "暂停朗读" else "停止朗读"
+            } else "开始朗读") }
             // 朗读语速
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("语速", style = MaterialTheme.typography.bodyMedium)
@@ -1525,49 +1573,58 @@ private fun SettingsControls(
                     modifier = Modifier.weight(1f),
                 )
             }
-            val usingKokoro = prefs.effectiveSpeechEngine(kokoroModels.isNotEmpty()) == SpeechEngineType.KOKORO
-            if (kokoroModels.isNotEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("引擎", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.width(12.dp))
-                    TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "system")) }) {
+            val kokoroAvailable = SpeechRuntime.kokoroAvailable
+            val networkTtsAvailable = SpeechRuntime.networkTtsAvailable && SpeechRuntime.networkTtsRuleId != null
+            val activeEngine = prefs.effectiveSpeechEngine(kokoroAvailable, networkTtsAvailable)
+            val engines = listOfNotNull(
+                "system" to "系统 TTS",
+                if (kokoroAvailable) "kokoro" to "Kokoro" else null,
+                if (networkTtsAvailable) "network_tts" to "网络 TTS" else null,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("引擎", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.width(12.dp))
+                engines.forEach { (tag, label) ->
+                    val selected = when {
+                        tag == "system" -> activeEngine == SpeechEngineType.SYSTEM_TTS
+                        tag == "kokoro" -> activeEngine == SpeechEngineType.KOKORO
+                        else -> activeEngine == SpeechEngineType.NETWORK_TTS
+                    }
+                    TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = tag)) }) {
                         Text(
-                            "系统 TTS",
-                            color = if (!usingKokoro) MaterialTheme.colorScheme.primary
+                            label,
+                            color = if (selected) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (!usingKokoro) FontWeight.Bold else FontWeight.Normal,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         )
-                    }
-                    TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = "kokoro")) }) {
-                        Text(
-                            "Kokoro",
-                            color = if (usingKokoro) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (usingKokoro) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    }
-                }
-                if (usingKokoro) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("模型", style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.width(12.dp))
-                        kokoroModels.forEach { model ->
-                            TextButton(onClick = { onPrefsChange(prefs.copy(kokoroModel = model.id)) }) {
-                                Text(
-                                    model.label,
-                                    color = if (prefs.kokoroModel == model.id) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (prefs.kokoroModel == model.id) FontWeight.Bold else FontWeight.Normal,
-                                )
-                            }
-                        }
-                    }
-                    KokoroSpeakerPreference(prefs.kokoroSpeaker) { id ->
-                        onPrefsChange(prefs.copy(kokoroSpeaker = id))
                     }
                 }
             }
-            if (!usingKokoro) {
+            if (activeEngine == SpeechEngineType.KOKORO && kokoroModels.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("模型", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(12.dp))
+                    kokoroModels.forEach { model ->
+                        TextButton(onClick = { onPrefsChange(prefs.copy(kokoroModel = model.id)) }) {
+                            Text(
+                                model.label,
+                                color = if (prefs.kokoroModel == model.id) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = if (prefs.kokoroModel == model.id) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+                KokoroSpeakerPreference(prefs.kokoroSpeaker) { id ->
+                    onPrefsChange(prefs.copy(kokoroSpeaker = id))
+                }
+            }
+            if (activeEngine == SpeechEngineType.NETWORK_TTS) {
+                com.yuezhou.reader.networktts.NetworkTtsVoicePreference(
+                    prefs.networkTtsRuleId.takeIf { it != 0L } ?: SpeechRuntime.networkTtsRuleId,
+                ) { id -> onPrefsChange(prefs.copy(networkTtsRuleId = id)) }
+            }
+            if (activeEngine == SpeechEngineType.SYSTEM_TTS) {
                 SpeechVoicePreference(voices, prefs.speechVoice) { name ->
                     onPrefsChange(prefs.copy(speechVoice = name))
                 }

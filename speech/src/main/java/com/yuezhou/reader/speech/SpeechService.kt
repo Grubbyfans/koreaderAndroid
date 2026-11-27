@@ -102,6 +102,11 @@ class SpeechService : Service() {
     private var lastKokoroProgressAt = 0L
     private var lastKokoroPositionMs = -1L
 
+    /** 网络 TTS 播放后端实例。每次 handlePlay 重新创建。 */
+    private var networkTtsBackend: com.yuezhou.reader.core.speech.SpeechPlaybackBackend? = null
+    private var networkTtsEventJob: Job? = null
+    private var playingNetworkTtsRuleId: Long? = null
+
     /** 首声计时起点与是否已记录（诊断用）。 */
     private var firstSoundStartedAt = 0L
     private var firstSoundRecorded = false
@@ -175,20 +180,151 @@ class SpeechService : Service() {
             stopCurrentEngine()
             if (generation != playGeneration) return@launch
             val config = SpeechPlanStore.peekConfig()
-            val useKokoro = config.engine == SpeechEngineType.KOKORO && SpeechRuntime.kokoroAvailable
-            if (config.engine == SpeechEngineType.KOKORO && !useKokoro) {
+            Log.d(TAG, "handlePlay config.engine=${config.engine}, ruleId=${config.networkTtsRuleId}, " +
+                "netTtsAvail=${SpeechRuntime.networkTtsAvailable}, factory=${SpeechRuntime.networkTtsBackendFactory != null}")
+            val engine = when {
+                config.engine == SpeechEngineType.NETWORK_TTS &&
+                    SpeechRuntime.networkTtsAvailable &&
+                    config.networkTtsRuleId != null -> SpeechEngineType.NETWORK_TTS
+
+                config.engine == SpeechEngineType.KOKORO && SpeechRuntime.kokoroAvailable -> SpeechEngineType.KOKORO
+                else -> SpeechEngineType.SYSTEM_TTS
+            }
+            Log.d(TAG, "handlePlay → effective engine=$engine")
+            if (config.engine == SpeechEngineType.NETWORK_TTS && engine != SpeechEngineType.NETWORK_TTS) {
+                Log.w(TAG, "请求网络 TTS 但未装配/未选规则，回退系统 TTS")
+            }
+            if (config.engine == SpeechEngineType.KOKORO && engine != SpeechEngineType.KOKORO) {
                 Log.w(TAG, "请求 Kokoro 但引擎未装配，回退系统 TTS")
             }
-            activeEngine = if (useKokoro) SpeechEngineType.KOKORO else SpeechEngineType.SYSTEM_TTS
-            if (useKokoro) {
-                startKokoro(nextRequest.plan, nextRequest.startSegment, config, generation)
-            } else {
-                val engine = ensureEngine() ?: return@launch handleStop("TTS 引擎初始化失败")
-                applyConfig(engine)
-                playChapter(engine, nextRequest.plan, nextRequest.startSegment)
+            activeEngine = engine
+            acquireWakeLock()
+            when (engine) {
+                SpeechEngineType.KOKORO -> startKokoro(nextRequest.plan, nextRequest.startSegment, config, generation)
+                SpeechEngineType.NETWORK_TTS -> startNetworkTts(nextRequest.plan, nextRequest.startSegment, config, generation)
+                SpeechEngineType.SYSTEM_TTS -> {
+                    val systemEngine = ensureEngine() ?: return@launch handleStop("TTS 引擎初始化失败")
+                    applyConfig(systemEngine)
+                    playChapter(systemEngine, nextRequest.plan, nextRequest.startSegment)
+                }
             }
         }
     }
+
+    private suspend fun startNetworkTts(
+        plan: com.yuezhou.reader.core.speech.SpeechPlan,
+        startSegment: Int,
+        config: com.yuezhou.reader.speech.SpeechConfig,
+        generation: Long,
+    ) {
+        Log.d(TAG, "startNetworkTts startSegment=$startSegment, ruleId=${config.networkTtsRuleId}")
+        val factory = SpeechRuntime.networkTtsBackendFactory ?: run {
+            val msg = "网络 TTS 未装配（nettts 模块缺失或未注册工厂）"
+            Log.e(TAG, msg)
+            handleStop(msg)
+            return
+        }
+        val ruleId = config.networkTtsRuleId ?: SpeechRuntime.networkTtsRuleId ?: run {
+            handleStop("网络 TTS 规则未选定")
+            return
+        }
+        val backend = runCatching { factory(this@SpeechService, ruleId) }
+            .getOrNull() ?: run {
+            handleStop("网络 TTS 后端创建失败")
+            return
+        }
+        // 在 prepare 挂起前登记所有权，停止或销毁时也能释放初始化中的后端。
+        networkTtsBackend = backend
+        playingNetworkTtsRuleId = ruleId
+        stateMachine.load(plan)
+        stateMachine.play(startSegment)
+        updatePlaybackState(PlaybackState.STATE_BUFFERING)
+        plan.segments.getOrNull(startSegment)?.let { segment ->
+            SpeechProgressTracker.onProgress(plan.bookId, plan.chapterIndex, startSegment, 0,
+                segment.startAnchor, segment.endAnchor)
+        }
+        val token = com.yuezhou.reader.core.speech.SessionToken(sessionId, generation)
+        val prepareResult = backend.prepare(
+            com.yuezhou.reader.core.speech.SpeechEngineConfig(
+                engine = SpeechEngineType.NETWORK_TTS,
+                rate = config.rate,
+                networkTtsRuleId = ruleId,
+            )
+        )
+        if (!prepareResult.ok) {
+            handleStop(prepareResult.message ?: "网络 TTS 准备失败")
+            return
+        }
+        if (generation != playGeneration) return
+        networkTtsEventJob?.cancel()
+        networkTtsEventJob = scope.launch {
+            backend.events.collect { event ->
+                if (event.token != token || token.sessionId != sessionId || token.generation != playGeneration) return@collect
+                when (event) {
+                    is com.yuezhou.reader.core.speech.SpeechPlaybackEvent.SegmentStarted -> {
+                        if (event.index >= 0) {
+                            stateMachine.onSegmentStarted(event.index)
+                            plan.segments.getOrNull(event.index)?.let { segment ->
+                                SpeechProgressTracker.onProgress(plan.bookId, plan.chapterIndex, event.index, 0,
+                                    segment.startAnchor, segment.endAnchor)
+                            }
+                            if (stateMachine.state != SpeechStateMachine.State.PAUSED) {
+                                updatePlaybackState(PlaybackState.STATE_PLAYING)
+                            }
+                        }
+                    }
+                    is com.yuezhou.reader.core.speech.SpeechPlaybackEvent.SegmentCompleted -> {
+                        if (event.index >= 0) {
+                            stateMachine.onSegmentCompleted(event.index)
+                            writerAdvanceIfNeeded(plan, event.index)
+                        } else {
+                            // index=-1 表示整章播完
+                            handleChapterFinishedForNetworkTts(plan)
+                        }
+                    }
+                    is com.yuezhou.reader.core.speech.SpeechPlaybackEvent.Failed -> {
+                        Log.w(TAG, "网络 TTS 失败：${event.reason}")
+                        handleStop("网络 TTS 失败：${event.reason}")
+                    }
+                    is com.yuezhou.reader.core.speech.SpeechPlaybackEvent.Buffering -> Unit
+                }
+            }
+        }
+        backend.play(plan, startSegment, token)
+        // prepare 期间收到的暂停也必须作用到随后创建的播放器。
+        if (stateMachine.state == SpeechStateMachine.State.PAUSED) backend.pause()
+    }
+
+    private fun writerAdvanceIfNeeded(plan: com.yuezhou.reader.core.speech.SpeechPlan, completedIndex: Int) {
+        val segment = plan.segments.getOrNull(completedIndex) ?: return
+        progressWriter.onProgress(
+            bookId = plan.bookId,
+            fileGeneration = plan.fileGeneration,
+            chapterIndex = plan.chapterIndex,
+            segmentIndex = completedIndex,
+            charOffset = segment.text.length,
+            anchorNodeId = segment.endAnchor.nodeId,
+        )
+    }
+
+    private fun handleChapterFinishedForNetworkTts(plan: com.yuezhou.reader.core.speech.SpeechPlan) {
+        val active = request ?: return
+        val chapters = active.chapters
+        chapterJob = scope.launch {
+            val next = runCatching { chapters.next(plan) }.getOrNull()
+                ?: return@launch handleStop()
+            // 更新 store 并重新走 handlePlay（会重建 backend / generation / event collector）。
+            SpeechPlanStore.clear(active)
+            SpeechPlanStore.startAndPlay(
+                this@SpeechService,
+                next,
+                chapters,
+                0,
+            )
+        }
+    }
+
+    // loadNextChapterForNetworkTts 已合并进 handleChapterFinishedForNetworkTts
 
     private fun handleSetNovelParsing(enabled: Boolean) {
         if (activeEngine != SpeechEngineType.KOKORO) return
@@ -232,7 +368,7 @@ class SpeechService : Service() {
         }
     }
 
-    /** 停止当前引擎（保留系统 TTS 实例，释放 Kokoro native 引擎）。 */
+    /** 停止当前引擎（保留系统 TTS 实例，释放 Kokoro native 引擎，释放网络 TTS 后端）。 */
     private suspend fun stopCurrentEngine() {
         tts?.stop()
         kokoroEventJob?.cancel()
@@ -244,6 +380,33 @@ class SpeechService : Service() {
             withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { coordinator.release() }
                     .onFailure { Log.w(TAG, "Kokoro 资源释放失败", it) }
+            }
+        }
+        networkTtsEventJob?.cancel()
+        networkTtsEventJob = null
+        val net = networkTtsBackend
+        networkTtsBackend = null
+        if (net != null) {
+            withContext(NonCancellable) {
+                runCatching { net.stop() }
+                runCatching { net.release() }
+            }
+        }
+    }
+
+    private fun releaseNetworkTtsBackend() {
+        networkTtsEventJob?.cancel()
+        networkTtsEventJob = null
+        val backend = networkTtsBackend ?: return
+        networkTtsBackend = null
+        // 独立于服务 scope；onDestroy 取消 scope 后仍必须完成播放器释放。
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
+            try {
+                backend.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "网络 TTS 资源释放失败", e)
+            } finally {
+                cancel()
             }
         }
     }
@@ -589,6 +752,7 @@ class SpeechService : Service() {
         sessionId++
         playGeneration++
         playJob?.cancel()
+        releaseNetworkTtsBackend()
         stopWatchdog()
         clearChapterTransition()
         kokoroEventJob?.cancel()
@@ -696,6 +860,25 @@ class SpeechService : Service() {
             handleKokoroPause()
             return
         }
+        // 网络 TTS：调用 backend.pause() 暂停播放器 + 合成循环（Main.immediate 确保立即生效）
+        if (activeEngine == SpeechEngineType.NETWORK_TTS) {
+            val backend = networkTtsBackend
+            Log.d(TAG, "handlePause[NET_TTS] backend=${backend != null}")
+            if (backend != null) {
+                scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                    Log.d(TAG, "handlePause[NET_TTS] calling backend.pause()")
+                    runCatching { backend.pause() }
+                    Log.d(TAG, "handlePause[NET_TTS] backend.pause() returned")
+                }
+            }
+            if (chapterJob != null || waitingChapter != null) chapterPaused = true
+            stopWatchdog()
+            stateMachine.pause()
+            releaseWakeLock()
+            persistScope.launch { runCatching { progressWriter.flush() } }
+            updatePlaybackState(PlaybackState.STATE_PAUSED)
+            return
+        }
         Log.d(TAG, "handlePause() 进入, state=${stateMachine.state}, segment=${stateMachine.position.segmentIndex}, chapterJob=${chapterJob != null}, waitingChapter=${waitingChapter != null}")
         if (chapterJob != null || waitingChapter != null) chapterPaused = true
         sessionId++
@@ -712,6 +895,26 @@ class SpeechService : Service() {
         resumeOnAudioFocusGain = false
         if (activeEngine == SpeechEngineType.KOKORO) {
             handleKokoroResume()
+            return
+        }
+        // 网络 TTS：已有 backend 直接 resume，无需重新生成 plan。
+        if (activeEngine == SpeechEngineType.NETWORK_TTS) {
+            val selectedRule = SpeechPlanStore.peekConfig().networkTtsRuleId
+            if (selectedRule != playingNetworkTtsRuleId) {
+                // 暂停期间换音色时，沿用当前章节和句子重新合成。
+                val current = request ?: return
+                SpeechPlanStore.replacePlan(current, current.plan, stateMachine.position.segmentIndex) ?: return
+                handlePlay()
+                return
+            }
+            val backend = networkTtsBackend
+            if (backend != null) {
+                acquireWakeLock()
+                scope.launch { runCatching { backend.resume() } }
+                chapterPaused = false
+                stateMachine.resume().getOrNull()
+                updatePlaybackState(PlaybackState.STATE_PLAYING)
+            }
             return
         }
         Log.d(TAG, "handleResume() 进入, state=${stateMachine.state}, segment=${stateMachine.position.segmentIndex}")
@@ -781,6 +984,7 @@ class SpeechService : Service() {
         sessionId++
         playGeneration++
         playJob?.cancel()
+        releaseNetworkTtsBackend()
         stopWatchdog()
         clearChapterTransition()
         request?.let { SpeechPlanStore.clear(it) }
@@ -1203,6 +1407,7 @@ class SpeechService : Service() {
         segmentIndex: Int? = null,
         errorMessage: String? = null,
     ) {
+        SpeechProgressTracker.setPaused(state == PlaybackState.STATE_PAUSED)
         val builder = PlaybackState.Builder()
             .setActions(
                 PlaybackState.ACTION_PLAY or
@@ -1294,6 +1499,7 @@ class SpeechService : Service() {
         playGeneration++
         stopWatchdog()
         releaseWakeLock()
+        releaseNetworkTtsBackend()
         scope.cancel()
         request?.let { SpeechPlanStore.clear(it) }
         SpeechProgressTracker.clear()

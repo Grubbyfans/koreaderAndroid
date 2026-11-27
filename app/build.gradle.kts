@@ -11,8 +11,8 @@ android {
         applicationId = "com.yuezhou.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.1.14"
+        versionCode = 31
+        versionName = "0.1.30"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -66,6 +66,7 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":reader"))
     implementation(project(":speech"))
+    implementation(project(":nettts"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

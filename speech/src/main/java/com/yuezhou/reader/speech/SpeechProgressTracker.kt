@@ -34,6 +34,13 @@ object SpeechProgressTracker {
         val endAnchor: SourceAnchor? = null,
     )
 
+    private val _paused = MutableStateFlow(false)
+    val paused: StateFlow<Boolean> = _paused.asStateFlow()
+
+    internal fun setPaused(paused: Boolean) {
+        _paused.value = paused
+    }
+
     private val _current = MutableStateFlow<Snapshot?>(null)
 
     /** 当前已确认朗读位置；null 表示尚无进度或已停止。 */
@@ -53,6 +60,7 @@ object SpeechProgressTracker {
 
     /** 停止/切书/作废时清空进度。 */
     fun clear() {
+        _paused.value = false
         _current.value = null
     }
 }

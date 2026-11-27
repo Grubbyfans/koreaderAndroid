@@ -25,6 +25,7 @@ tasks.withType<Test> {
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":nettts"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.webkit)
