@@ -1,12 +1,15 @@
 package com.yuezhou.reader
 
-import kotlinx.coroutines.flow.first
 import android.app.Application
 import com.yuezhou.reader.networktts.NetworkTtsRuntimeBridge
 import com.yuezhou.reader.process.AppProcess
 import com.yuezhou.reader.reader.networktts.NetworkTtsRuleRepository
 import com.yuezhou.reader.speech.SpeechRuntime
-import io.legado.app.data.entities.HttpTTS
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * 应用级装配：在进程启动时为朗读服务注入与 Activity/WebView 无关的依赖（方案 §9.1）。
@@ -18,6 +21,9 @@ import io.legado.app.data.entities.HttpTTS
  * 因此网页进程启动时不存在其它提前初始化 WebView 的入口。
  */
 open class ReaderApplication : Application() {
+
+    /** 进程级后台作用域：用于启动期的非阻塞装配任务。 */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -39,12 +45,13 @@ open class ReaderApplication : Application() {
             )
         }
 
-        // 默认网络 TTS 规则选择：取第一条规则。runBlocking 在 onCreate 主线程启动时安全（进程启动早期无其他协程）。
-        runCatching {
-            SpeechRuntime.networkTtsRuleId = kotlinx.coroutines.runBlocking {
+        // 默认网络 TTS 规则选择：取已保存规则，否则第一条。异步执行，避免阻塞冷启动主线程。
+        appScope.launch {
+            runCatching {
                 val rules = repository.list()
                 val savedId = ReaderSettings.flow(this@ReaderApplication).first().networkTtsRuleId
-                rules.firstOrNull { it.id == savedId }?.id ?: rules.firstOrNull()?.id
+                SpeechRuntime.networkTtsRuleId =
+                    rules.firstOrNull { it.id == savedId }?.id ?: rules.firstOrNull()?.id
             }
         }
     }
