@@ -1336,7 +1336,8 @@ private fun ReaderPanel(
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 3.dp,
-                modifier = Modifier.fillMaxWidth().heightIn(max = panelMaxHeight),
+                // 固定为半屏高度：切换栏目时面板大小保持稳定，内容超出时内部滚动
+                modifier = Modifier.fillMaxWidth().height(panelMaxHeight),
             ) {
                 Column(
                     modifier = Modifier
