@@ -93,6 +93,8 @@ fun CloudConfigSection(
                                 if (store.save(updated)) {
                                     credentials = updated
                                     message = "同步目标已切换为 WebDAV"
+                                } else {
+                                    message = "切换失败，请重试"
                                 }
                             }
                         },
@@ -109,6 +111,8 @@ fun CloudConfigSection(
                                 if (store.save(updated)) {
                                     credentials = updated
                                     message = "同步目标已切换为百度网盘"
+                                } else {
+                                    message = "切换失败，请重试"
                                 }
                             }
                         },

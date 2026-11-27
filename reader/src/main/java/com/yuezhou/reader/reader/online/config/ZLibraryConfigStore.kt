@@ -1,6 +1,7 @@
 package com.yuezhou.reader.reader.online.config
 
 import android.content.Context
+import android.util.Log
 import com.yuezhou.reader.core.online.config.DiscoveryState
 import com.yuezhou.reader.core.online.config.ServerCandidate
 import com.yuezhou.reader.core.online.config.ServerImportPreview
@@ -33,6 +34,7 @@ class ZLibraryConfigStore(private val context: Context) {
         val text = try {
             file.takeIf { it.exists() }?.readText() ?: return ZLibraryConfig.DEFAULT
         } catch (e: Exception) {
+            Log.w("ZLibraryConfigStore", "Z-Library 配置读取失败，回退默认配置", e)
             return ZLibraryConfig.DEFAULT
         }
         val parsed = runCatching { json.decodeFromString<ZLibraryConfig>(text) }.getOrNull()
@@ -195,6 +197,7 @@ class ZLibraryConfigStore(private val context: Context) {
         stateFile.takeIf { it.exists() }?.readText()?.let { json.decodeFromString<DiscoveryState>(it) }
             ?: DiscoveryState()
     } catch (e: Exception) {
+        Log.w("ZLibraryConfigStore", "服务器探测状态读取失败，回退初始状态", e)
         DiscoveryState()
     }
 

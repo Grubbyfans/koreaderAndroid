@@ -1,5 +1,6 @@
 package com.yuezhou.reader.reader
 
+import android.util.Log
 import com.yuezhou.reader.core.speech.ChapterTextSource
 import com.yuezhou.reader.core.speech.SpeechTextPlanning
 import com.yuezhou.reader.core.speech.SpeechEngineType
@@ -41,6 +42,7 @@ class EpubChapterTextSource(
             extractChapter(zip, href, chapterIndex)
         }
     } catch (e: Exception) {
+        Log.w("EpubChapterTextSource", "章节正文抽取失败 chapterIndex=$chapterIndex", e)
         emptyList()
     }
 

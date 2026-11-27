@@ -1,6 +1,7 @@
 package com.yuezhou.reader.reader
 
 import android.content.Context
+import android.util.Log
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -28,6 +29,10 @@ import java.io.File
  * 本类只负责磁盘读写，不做网络请求；网络由 [CloudSync] 完成后再写回本缓存。
  */
 class CloudCache(private val context: Context) {
+
+    private companion object {
+        const val TAG = "CloudCache"
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -57,6 +62,7 @@ class CloudCache(private val context: Context) {
             val e = json.decodeFromString<ListCacheEntry>(f.readText())
             if (isSameDay(e.fetchedAt, System.currentTimeMillis())) e else null
         } catch (e: Exception) {
+            Log.w(TAG, "书库列表缓存读取失败，按无缓存处理", e)
             null
         }
     }
@@ -67,12 +73,17 @@ class CloudCache(private val context: Context) {
             listFile(namespace).writeText(json.encodeToString(ListCacheEntry(raw, fetchedAt)))
         } catch (e: Exception) {
             // 缓存写失败不影响主流程
+            Log.w(TAG, "书库列表缓存写入失败", e)
         }
     }
 
     /** 清除列表缓存（写操作或主动更新后调用）。 */
     fun clearList(namespace: String) {
-        try { listFile(namespace).delete() } catch (e: Exception) { /* 忽略 */ }
+        try {
+            listFile(namespace).delete()
+        } catch (e: Exception) {
+            Log.w(TAG, "书库列表缓存清除失败", e)
+        }
     }
 
     private fun listFile(namespace: String): File = File(dir(namespace), "library.cache.json")
@@ -119,6 +130,7 @@ class CloudCache(private val context: Context) {
                 CoverResult.Hit(bytes)
             }
         } catch (e: Exception) {
+            Log.w(TAG, "封面缓存读取失败 bookId=$bookId", e)
             CoverResult.Miss
         }
     }
@@ -135,7 +147,7 @@ class CloudCache(private val context: Context) {
                 File(dir(namespace), "$key.png").delete()
             }
         } catch (e: Exception) {
-            // 忽略
+            Log.w(TAG, "封面缓存写入失败 bookId=$bookId", e)
         }
     }
 

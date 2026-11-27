@@ -1,6 +1,7 @@
 package com.yuezhou.reader.reader
 
 import android.content.Context
+import android.util.Log
 import com.yuezhou.reader.reader.db.AppDatabase
 import com.yuezhou.reader.reader.db.SyncLogEntity
 
@@ -16,6 +17,7 @@ class SyncLogStore(context: Context) {
 
     companion object {
         const val MAX_ENTRIES = 20
+        private const val TAG = "SyncLogStore"
     }
 
     /** 追加一条同步记录，超出上限时淘汰最旧条目。 */
@@ -34,8 +36,9 @@ class SyncLogStore(context: Context) {
             if (total > MAX_ENTRIES) {
                 dao.deleteOldest(total - MAX_ENTRIES)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // 写失败不影响主流程
+            Log.w(TAG, "同步记录写入失败 direction=$direction", e)
         }
     }
 

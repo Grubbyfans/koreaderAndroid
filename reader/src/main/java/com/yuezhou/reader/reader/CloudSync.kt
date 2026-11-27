@@ -349,6 +349,7 @@ class CloudSync(private val context: Context) {
                 }
             } catch (e: Exception) {
                 // 补全失败保留回执，下次再试
+                Log.w("CloudSync", "待发布补全失败 bookId=${pub.bookId}", e)
             }
         }
         if (repaired > 0) invalidateListCache()
@@ -416,11 +417,7 @@ class CloudSync(private val context: Context) {
             val result = RemoteLibrary(books, backendLabelOf(backend), fromCache = false, fetchedAt = fetchedAt)
 
             // 写回持久化缓存（只存列表原文，封面单独缓存）
-            try {
-                cache.writeList(ns, LibraryCatalog.encode(index), fetchedAt)
-            } catch (e: Exception) {
-                // 缓存写失败不影响主流程
-            }
+            cache.writeList(ns, LibraryCatalog.encode(index), fetchedAt)
             collector.recordPhase("读列表", System.currentTimeMillis() - start)
             diagnostics.append("读云端书库", collector.snapshot())
             result
@@ -483,6 +480,7 @@ class CloudSync(private val context: Context) {
         val index = try {
             com.yuezhou.reader.core.protocol.LibraryCatalog.decode(raw)
         } catch (e: Exception) {
+            Log.w("CloudSync", "缓存的云端书库解析失败，按空列表处理", e)
             return emptyList()
         }
         val localIds = LibraryStore(context).availableBookIds()
@@ -523,7 +521,8 @@ class CloudSync(private val context: Context) {
                     com.yuezhou.reader.core.protocol.CoverFile.decode(raw).pngBytes
                 } catch (e: CancellationException) {
                     throw e
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    Log.w("CloudSync", "封面下载失败 bookId=$bookId", e)
                     null
                 }
                 if (bytes != null) {
@@ -556,7 +555,8 @@ class CloudSync(private val context: Context) {
             backend.stat("books/${book.fileName}")
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("CloudSync", "云端文件 stat 失败，回退到列表体积 bookId=${book.bookId}", e)
             null
         }
         val size = stat?.size?.takeIf { it > 0 } ?: book.size

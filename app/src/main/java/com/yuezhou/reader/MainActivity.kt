@@ -350,6 +350,7 @@ private fun BookshelfScreen() {
                         context.contentResolver.takePersistableUriPermission(uri, flags)
                     } catch (e: Exception) {
                         // 持久授权失败不阻断单次扫描
+                        android.util.Log.w("MainActivity", "目录持久授权失败，仅本次可用", e)
                     }
                     val existingIds = store.availableBookIds()
                     val result = LocalScanner.scan(context, uri, existingIds)

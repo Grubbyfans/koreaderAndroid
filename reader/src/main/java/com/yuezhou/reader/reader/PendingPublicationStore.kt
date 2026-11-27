@@ -1,6 +1,7 @@
 package com.yuezhou.reader.reader
 
 import android.content.Context
+import android.util.Log
 import com.yuezhou.reader.reader.db.AppDatabase
 import com.yuezhou.reader.reader.db.PendingPublicationEntity
 import kotlinx.serialization.Serializable
@@ -27,6 +28,10 @@ data class PendingPublication(
 
 class PendingPublicationStore(context: Context) {
 
+    private companion object {
+        const val TAG = "PendingPublicationStore"
+    }
+
     private val dao = AppDatabase.get(context).pendingPublicationDao()
 
     /** 读取全部待发布回执；空则返回空列表。 */
@@ -38,6 +43,7 @@ class PendingPublicationStore(context: Context) {
             dao.upsert(PendingPublicationEntity.fromDomain(pub))
         } catch (e: Exception) {
             // 回执写失败不阻断主流程（最坏情况是下次上传时重传正文）
+            Log.w(TAG, "待发布回执写入失败 bookId=${pub.bookId}", e)
         }
     }
 
@@ -46,7 +52,7 @@ class PendingPublicationStore(context: Context) {
         try {
             dao.delete(backendId, bookId)
         } catch (e: Exception) {
-            // 忽略
+            Log.w(TAG, "待发布回执移除失败 bookId=$bookId", e)
         }
     }
 
@@ -54,6 +60,8 @@ class PendingPublicationStore(context: Context) {
     suspend fun clear() {
         try {
             dao.clear()
-        } catch (e: Exception) { /* 忽略 */ }
+        } catch (e: Exception) {
+            Log.w(TAG, "待发布回执清空失败", e)
+        }
     }
 }

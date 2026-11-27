@@ -1,6 +1,7 @@
 package com.yuezhou.reader.reader
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -47,6 +48,10 @@ data class CloudCredentials(
  */
 class CloudCredentialStore(private val context: Context) {
 
+    private companion object {
+        const val TAG = "CloudCredentialStore"
+    }
+
     private val file: File get() = File(context.filesDir, "cloud_credentials")
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -58,6 +63,7 @@ class CloudCredentialStore(private val context: Context) {
             val plaintext = CredentialCrypto.decrypt(file.readText())
             json.decodeFromString<CloudCredentials>(plaintext)
         } catch (e: Exception) {
+            Log.w(TAG, "凭据读取/解密失败，按空凭据处理", e)
             CloudCredentials()
         }
     }
@@ -68,6 +74,7 @@ class CloudCredentialStore(private val context: Context) {
             file.writeText(CredentialCrypto.encrypt(json.encodeToString(credentials)))
             true
         } catch (e: Exception) {
+            Log.w(TAG, "凭据写入失败", e)
             false
         }
     }
@@ -77,7 +84,7 @@ class CloudCredentialStore(private val context: Context) {
         try {
             file.delete()
         } catch (e: Exception) {
-            // 忽略
+            Log.w(TAG, "凭据文件删除失败", e)
         }
     }
 }

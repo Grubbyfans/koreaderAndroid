@@ -217,7 +217,8 @@ class LibraryStore(private val context: Context) {
 
     fun readCover(file: File): ByteArray? = try {
         CoverFile.decode(file.readText()).pngBytes
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.w("LibraryStore", "封面读取失败 file=${file.name}", e)
         null
     }
 
@@ -444,6 +445,7 @@ class LibraryStore(private val context: Context) {
             val ts = parseTimestamp(p.updatedAt)
             Triple(p.percent, p.xpointer, ts)
         } catch (e: Exception) {
+            Log.w("LibraryStore", "阅读进度解析失败 bookId=$bookId", e)
             null
         }
     }
@@ -471,6 +473,7 @@ class LibraryStore(private val context: Context) {
                 map
             }
         } catch (e: Exception) {
+            Log.w("LibraryStore", "书名映射读取失败，按空映射处理", e)
             emptyMap()
         }
     }

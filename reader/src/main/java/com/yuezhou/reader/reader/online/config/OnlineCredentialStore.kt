@@ -1,6 +1,7 @@
 package com.yuezhou.reader.reader.online.config
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -33,6 +34,10 @@ class OnlineCredentialStore(
     private val context: Context,
     private val providerId: String = "zlibrary",
 ) {
+    private companion object {
+        const val TAG = "OnlineCredentialStore"
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val dir: File
         get() = File(context.filesDir, "providers/credentials").also { it.mkdirs() }
@@ -59,6 +64,7 @@ class OnlineCredentialStore(
             )
             json.decodeFromString<OnlineCredentials>(plaintext)
         } catch (e: Exception) {
+            Log.w(TAG, "在线凭证读取/解密失败 provider=$providerId", e)
             null
         }
     }
@@ -75,6 +81,7 @@ class OnlineCredentialStore(
             currentFile.writeText(credentials.account)
             true
         } catch (e: Exception) {
+            Log.w(TAG, "在线凭证保存失败 provider=$providerId", e)
             false
         }
     }
@@ -84,13 +91,14 @@ class OnlineCredentialStore(
             fileFor(account).delete()
             if (currentAccount() == account) currentFile.delete()
         } catch (e: Exception) {
-            // 忽略
+            Log.w(TAG, "在线凭证清除失败 provider=$providerId", e)
         }
     }
 
     fun currentAccount(): String? = try {
         currentFile.takeIf { it.exists() }?.readText()?.takeIf { it.isNotBlank() }
     } catch (e: Exception) {
+        Log.w(TAG, "读取当前账号失败 provider=$providerId", e)
         null
     }
 }
