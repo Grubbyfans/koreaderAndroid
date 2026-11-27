@@ -1,6 +1,7 @@
 package com.yuezhou.reader
 
 import android.content.Context
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
@@ -40,6 +41,7 @@ internal data class AppAppearance(
     val mode: AppThemeMode = AppThemeMode.Light,
     val reduceMotion: Boolean = false,
     val themeId: String = DefaultThemeId,
+    val surfaceStyle: AppSurfaceStyle = AppSurfaceStyle.Paper,
 )
 
 internal val LocalAppAppearance = staticCompositionLocalOf { AppAppearance() }
@@ -48,6 +50,7 @@ internal val LocalAppMotionEnabled = staticCompositionLocalOf { true }
 private val Context.appearanceDataStore by preferencesDataStore("app_appearance")
 
 internal object AppearanceSettings {
+    private val surfaceStyle = stringPreferencesKey("app_surface_style")
     private val themeId = stringPreferencesKey("app_theme_id")
     private val theme = stringPreferencesKey("app_theme_mode")
     private val reduceMotion = booleanPreferencesKey("reduce_motion")
@@ -61,6 +64,7 @@ internal object AppearanceSettings {
                 mode = AppThemeMode.entries.firstOrNull { it.name == prefs[theme] } ?: AppThemeMode.Light,
                 reduceMotion = prefs[reduceMotion] ?: false,
                 themeId = prefs[themeId]?.takeIf { it.isNotBlank() } ?: DefaultThemeId,
+                surfaceStyle = AppSurfaceStyle.resolve(prefs[surfaceStyle]),
             )
         }
 
@@ -72,6 +76,10 @@ internal object AppearanceSettings {
     suspend fun setThemeId(context: Context, value: String) {
         require(value.isNotBlank())
         context.appearanceDataStore.edit { it[themeId] = value }
+    }
+
+    suspend fun setSurfaceStyle(context: Context, value: AppSurfaceStyle) {
+        context.appearanceDataStore.edit { it[surfaceStyle] = value.id }
     }
 
     suspend fun setReduceMotion(context: Context, value: Boolean) {
@@ -109,7 +117,7 @@ internal fun AppearanceOptions() {
                 )
             }
         }
-        Text("明暗模式", style = MaterialTheme.typography.bodyMedium)
+        Text("外观", style = MaterialTheme.typography.bodyMedium)
         Row(
             Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -122,6 +130,24 @@ internal fun AppearanceOptions() {
                 )
             }
         }
+        Text("界面底色", style = MaterialTheme.typography.bodyMedium)
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppSurfaceStyle.entries.forEach { style ->
+                FilterChip(
+                    selected = current.surfaceStyle == style,
+                    onClick = { scope.launch { AppearanceSettings.setSurfaceStyle(context, style) } },
+                    label = { Text(style.label) },
+                    leadingIcon = {
+                        androidx.compose.foundation.layout.Box(Modifier.size(16.dp)
+                            .background(selectedTheme.colors(dark).withSurfaceStyle(style, dark).background,
+                                androidx.compose.foundation.shape.CircleShape)
+                            .border(1.dp, MaterialTheme.colorScheme.outline, androidx.compose.foundation.shape.CircleShape))
+                    },
+                )
+            }
+        }
+        Text("底色可与应用主题组合，深色外观使用对应的暗色底色", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
         com.yuezhou.reader.ui.components.SettingSwitchRow(
             "减少界面动画", current.reduceMotion, "系统关闭动效时优先使用系统设置",
         ) { value -> scope.launch { AppearanceSettings.setReduceMotion(context, value) } }

@@ -244,6 +244,9 @@ fun YuezhouTheme(followsAppAppearance: Boolean = true, content: @Composable () -
         LocalAppAppearance provides appearance,
         LocalAppMotionEnabled provides (systemAnimations.value && !appearance.reduceMotion),
     ) {
-        YuezhouThemeStyle(definition, dark, YuezhouShapes, typography, content = content)
+        val colors = definition.colors(dark).let { base ->
+            if (followsAppAppearance) base.withSurfaceStyle(appearance.surfaceStyle, dark) else base
+        }
+        YuezhouThemeStyle(definition, dark, YuezhouShapes, typography, colorScheme = colors, content = content)
     }
 }

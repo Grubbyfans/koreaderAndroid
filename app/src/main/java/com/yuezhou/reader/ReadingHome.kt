@@ -78,38 +78,40 @@ internal fun ReadingHome(books: List<LibraryStore.Entry>, store: LibraryStore, r
             } catch (e: Exception) { error = "保存失败：${e.message}" }
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = YuezhouDimens.PageInset, vertical = YuezhouDimens.GapMedium),
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = YuezhouDimens.PageInset).padding(top = YuezhouDimens.GapSmall, bottom = YuezhouDimens.GapMedium),
         verticalArrangement = Arrangement.spacedBy(YuezhouDimens.SectionGap)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("最近阅读", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-            TextButton(onClick = { history = true }) { Text("阅读历史") }
-        }
-        SectionCard {
-            Row(horizontalArrangement = Arrangement.spacedBy(YuezhouDimens.PageInset)) {
-                Box(Modifier.width(96.dp).height(144.dp).clip(MaterialTheme.shapes.extraSmall), contentAlignment = Alignment.Center) {
-                    if (cover != null) Image(cover, book.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    else BookCoverPlaceholder(book.title, book.bookId)
+        Column(verticalArrangement = Arrangement.spacedBy(YuezhouDimens.Gap)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("最近阅读", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                TextButton(onClick = { history = true }) { Text("阅读历史") }
+            }
+            SectionCard {
+                Row(horizontalArrangement = Arrangement.spacedBy(YuezhouDimens.PageInset)) {
+                    Box(Modifier.width(96.dp).height(144.dp).clip(MaterialTheme.shapes.extraSmall), contentAlignment = Alignment.Center) {
+                        if (cover != null) Image(cover, book.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        else BookCoverPlaceholder(book.title, book.bookId)
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YuezhouDimens.GapMedium)) {
+                        Text(book.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        if (author.isNotBlank()) Text(author, style = MaterialTheme.typography.bodyMedium, color = YuezhouColors.TextSecondary)
+                        Text("已阅读 ${(100 * (book.percent ?: 0.0)).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                        BookReadingProgress(book.percent ?: 0.0, Modifier.fillMaxWidth())
+                    }
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YuezhouDimens.GapMedium)) {
-                    Text(book.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    if (author.isNotBlank()) Text(author, style = MaterialTheme.typography.bodyMedium, color = YuezhouColors.TextSecondary)
-                    Text("已阅读 ${(100 * (book.percent ?: 0.0)).toInt()}%", style = MaterialTheme.typography.bodySmall)
-                    BookReadingProgress(book.percent ?: 0.0, Modifier.fillMaxWidth())
+                Button(onClick = {
+                    context.startActivity(Intent(context, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId))
+                }, modifier = Modifier.fillMaxWidth()) { Text("继续阅读") }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                (1..5).forEach { star ->
+                    TextButton(onClick = { update { dao.rate(book.bookId, if (profile?.rating == star) 0 else star) } },
+                        modifier = Modifier.size(48.dp), contentPadding = PaddingValues(0.dp)) {
+                        Text(if ((profile?.rating ?: 0) >= star) "★" else "☆", style = MaterialTheme.typography.titleLarge, color = YuezhouColors.TextSecondary)
+                    }
                 }
             }
-            Button(onClick = {
-                context.startActivity(Intent(context, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_BOOK_ID, book.bookId))
-            }, modifier = Modifier.fillMaxWidth()) { Text("继续阅读") }
+            HorizontalDivider()
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            (1..5).forEach { star ->
-                TextButton(onClick = { update { dao.rate(book.bookId, if (profile?.rating == star) 0 else star) } },
-                    modifier = Modifier.size(48.dp), contentPadding = PaddingValues(0.dp)) {
-                    Text(if ((profile?.rating ?: 0) >= star) "★" else "☆", style = MaterialTheme.typography.titleLarge, color = YuezhouColors.TextSecondary)
-                }
-            }
-        }
-        HorizontalDivider()
         Text("阅读统计", style = MaterialTheme.typography.titleMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             ReadingMetric("$days 天", "阅读天数", Modifier.weight(1f))

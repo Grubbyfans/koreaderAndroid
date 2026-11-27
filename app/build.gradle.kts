@@ -11,8 +11,8 @@ android {
         applicationId = "com.yuezhou.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 83
-        versionName = "0.1.82"
+        versionCode = 86
+        versionName = "0.1.85"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
