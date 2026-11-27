@@ -1705,7 +1705,7 @@ private data class TocRow(
 )
 
 @Composable
-private fun TocDrawer(
+internal fun TocDrawer(
     items: List<TocItem>,
     isOpen: Boolean,
     currentId: Int?,
@@ -1734,12 +1734,23 @@ private fun TocDrawer(
         rows.filter { row -> row.ancestors.all { it in expanded } }
     }
     val listState = rememberLazyListState()
+    var pendingScrollKey by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(isOpen, active?.key, rows) {
+        pendingScrollKey = null
         if (isOpen && active != null) {
-            val revealed = expanded + active.ancestors
-            expanded = revealed
-            val index = rows.filter { row -> row.ancestors.all { it in revealed } }.indexOf(active)
-            if (index >= 0) listState.requestScrollToItem(index)
+            expanded = expanded + active.ancestors
+            pendingScrollKey = active.key
+        }
+    }
+    // 等待展开后的行进入 LazyColumn，再定位；旧列表上的滚动请求可能被截断或被 key 锚定覆盖。
+    LaunchedEffect(isOpen, pendingScrollKey, visible) {
+        val target = pendingScrollKey
+        if (isOpen && target != null) {
+            val index = visible.indexOfFirst { it.key == target }
+            if (index >= 0) {
+                listState.scrollToItem(index)
+                pendingScrollKey = null
+            }
         }
     }
 
