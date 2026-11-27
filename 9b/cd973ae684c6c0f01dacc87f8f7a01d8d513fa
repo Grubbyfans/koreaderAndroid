@@ -1,0 +1,39 @@
+nettts/src/main/java/io/legado/app/nettts/NetworkTtsSynthesizer.kt
+  s_f7d12e27c63362::t_8b676b611c116f 69,242-250,252-254,256-257,259,274-282,322,422
+  s_f7d12e27c63362::t_c7796dcfd61436 66-68
+  s_f7d12e27c63362::t_ba337140ca5152 70-72
+  s_f7d12e27c63362::t_c4533d1fe0d725 239-241
+  s_f7d12e27c63362::t_54ecfeaec594df 319-321
+  s_f7d12e27c63362::t_df4bb511e107e8 323
+  s_f7d12e27c63362::t_63e49b590e1c41 419-421
+  s_f7d12e27c63362::t_e07524efeb870a 423-425
+  s_f7d12e27c63362::t_4334ab32ee268b 7-8,11,14-15,17,19,21-22,41-50,58-65,73-134,136-155,157,161-165,170-172,176-183,186-187,192,202,204-205,212-217,224-238,299-307,310-318,325,328-330,336-339,383-385,397,403-418,434-442,444-450,455,457-459
+app/build.gradle.kts
+  s_f7d12e27c63362::t_8b676b611c116f 14-15
+app/src/main/java/com/yuezhou/reader/networktts/NetworkTtsAudition.kt
+  s_824e7fe5e266ec::t_2731448bfc70a6 51,68-72,79-80,85-96,133-137,143-146,169-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9bcd973ae684c6c0f01dacc87f8f7a01d8d513fa",
+  "prompts": {},
+  "sessions": {
+    "s_824e7fe5e266ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "57ecee44-59bf-4498-9d60-020e41069054",
+        "model": "unknown"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    },
+    "s_f7d12e27c63362": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21be1-a750-7103-a898-a4637eccb199",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
