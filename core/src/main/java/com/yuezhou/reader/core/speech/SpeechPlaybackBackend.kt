@@ -37,6 +37,12 @@ interface SpeechPlaybackBackend {
 
     /** 播放事件流；实现方保证同一代次内 Started/Completed 不交错。 */
     val events: Flow<SpeechPlaybackEvent>
+
+    /** 最近一次播放/合成活动的时间（elapsedRealtime 毫秒）；不支持时返回 0。 */
+    fun lastActivityElapsedMs(): Long = 0L
+
+    /** 检查并尝试恢复停滞的预取/播放链路；返回是否执行了恢复动作。 */
+    suspend fun recoverIfStalled(): Boolean = false
 }
 
 /** 引擎类型。 */
@@ -102,11 +108,17 @@ sealed interface SpeechPlaybackEvent {
         val index: Int,
     ) : SpeechPlaybackEvent
 
-    /** 播放失败；保留位置并停止队列，不静默切换引擎。 */
+    /**
+     * 播放失败；保留位置并停止队列，不静默切换引擎。
+     *
+     * [recoverable] 为 true 表示链路的会话与缓冲仍有效（如网络中断），
+     * 上层应保留会话并暂停，等待用户恢复，而不是直接结束朗读。
+     */
     data class Failed(
         override val token: SessionToken,
         val reason: String,
         val memoryPressure: Boolean = false,
+        val recoverable: Boolean = false,
     ) : SpeechPlaybackEvent
 }
 

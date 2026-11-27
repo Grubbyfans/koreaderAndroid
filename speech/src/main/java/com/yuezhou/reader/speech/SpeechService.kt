@@ -145,7 +145,16 @@ class SpeechService : Service() {
             SpeechCommands.ACTION_PLAY -> {
                 // 进入前台须在 startForegroundService 后 5 秒内完成，先同步拉前台再异步初始化引擎。
                 startForegroundInternal()
-                handlePlay()
+                // 通知栏「播放」按钮也走 ACTION_PLAY：同一计划的暂停会话应继续播放，
+                // 而不是回到本次朗读的起始句。新计划（startAndPlay）是新 Request 实例，仍走 handlePlay。
+                val incoming = SpeechPlanStore.peek()
+                if (incoming != null && incoming === request &&
+                    stateMachine.state == SpeechStateMachine.State.PAUSED
+                ) {
+                    handleResume()
+                } else {
+                    handlePlay()
+                }
             }
             SpeechCommands.ACTION_PAUSE -> handlePause()
             SpeechCommands.ACTION_RESUME -> handleResume()
@@ -283,8 +292,12 @@ class SpeechService : Service() {
                         }
                     }
                     is com.yuezhou.reader.core.speech.SpeechPlaybackEvent.Failed -> {
-                        Log.w(TAG, "网络 TTS 失败：${event.reason}")
-                        handleStop("网络 TTS 失败：${event.reason}")
+                        Log.w(TAG, "网络 TTS 失败：${event.reason} recoverable=${event.recoverable}")
+                        if (event.recoverable) {
+                            handleNetworkTtsInterrupted(event.reason)
+                        } else {
+                            handleStop("网络 TTS 失败：${event.reason}")
+                        }
                     }
                     is com.yuezhou.reader.core.speech.SpeechPlaybackEvent.Buffering -> {
                         SpeechDiagnosticsState.update { it.copy(bufferingCount = it.bufferingCount + 1) }
@@ -297,7 +310,25 @@ class SpeechService : Service() {
         }
         backend.play(plan, startSegment, token)
         // prepare 期间收到的暂停也必须作用到随后创建的播放器。
-        if (stateMachine.state == SpeechStateMachine.State.PAUSED) backend.pause()
+        if (stateMachine.state == SpeechStateMachine.State.PAUSED) {
+            backend.pause()
+        } else {
+            startWatchdog()
+        }
+    }
+
+    /**
+     * 网络 TTS 可恢复中断（弱网/息屏断网）：保留后端、会话与已缓冲音频，只暂停并释放唤醒锁。
+     * 用户恢复时走 handleResume → backend.resume()，从断点段继续，不丢位置。
+     */
+    private fun handleNetworkTtsInterrupted(reason: String) {
+        stopWatchdog()
+        chapterPaused = false
+        stateMachine.pause()
+        releaseWakeLock()
+        SpeechDiagnosticsState.update { it.copy(lastError = "网络 TTS 已暂停：$reason") }
+        persistScope.launch { runCatching { progressWriter.flush() } }
+        updatePlaybackState(PlaybackState.STATE_PAUSED, errorMessage = reason)
     }
 
     private fun writerAdvanceIfNeeded(plan: com.yuezhou.reader.core.speech.SpeechPlan, completedIndex: Int) {
@@ -796,8 +827,11 @@ class SpeechService : Service() {
         watchdogJob = scope.launch {
             while (isActive) {
                 delay(WATCHDOG_INTERVAL_MS)
+                if (mySession != sessionId) return@launch
+                if (stateMachine.state != SpeechStateMachine.State.PLAYING) continue
+                // 唤醒锁带 2h 超时；长会话朗读期间定期续期，避免中途失效后 CPU 被冻结。
+                acquireWakeLock()
                 if (activeEngine == SpeechEngineType.KOKORO) {
-                    if (stateMachine.state != SpeechStateMachine.State.PLAYING) continue
                     val now = SystemClock.elapsedRealtime()
                     // 长句播放期间只有 Started/Completed 事件，单句音频可超过 60 s；
                     // 用播放头推进作为进展信号，避免把长句误判为停滞。
@@ -813,8 +847,19 @@ class SpeechService : Service() {
                     }
                     continue
                 }
-                if (mySession != sessionId) return@launch
-                if (stateMachine.state != SpeechStateMachine.State.PLAYING) continue
+                if (activeEngine == SpeechEngineType.NETWORK_TTS) {
+                    val backend = networkTtsBackend ?: continue
+                    val last = backend.lastActivityElapsedMs()
+                    if (last <= 0L) continue
+                    val silentMs = SystemClock.elapsedRealtime() - last
+                    if (silentMs > NETWORK_STALL_TIMEOUT_MS) {
+                        Log.w(TAG, "网络 TTS 看门狗：${silentMs}ms 无播放/合成进展，尝试恢复")
+                        SpeechDiagnosticsState.update { it.copy(lastError = "网络异常，正在恢复缓冲") }
+                        val recovered = runCatching { backend.recoverIfStalled() }.getOrDefault(false)
+                        if (!recovered) Log.w(TAG, "网络 TTS 看门狗：后端已暂停/停止，未执行恢复")
+                    }
+                    continue
+                }
                 val engine = tts ?: continue
                 val plan = stateMachine.plan ?: continue
                 // 本章还有未读段，但引擎已静默 → 疑似队列被引擎丢弃
@@ -919,6 +964,7 @@ class SpeechService : Service() {
                 chapterPaused = false
                 stateMachine.resume().getOrNull()
                 updatePlaybackState(PlaybackState.STATE_PLAYING)
+                startWatchdog()
             }
             return
         }
@@ -1553,5 +1599,11 @@ class SpeechService : Service() {
          * 需大于 256 字片段的合成与播放时间，避免长句被误判。
          */
         private const val KOKORO_STALL_TIMEOUT_MS = 120_000L
+
+        /**
+         * 网络 TTS 无播放/合成进展的恢复阈值。
+         * 需大于单次请求超时（120s）与重试退避，避免把慢请求误判为停滞。
+         */
+        private const val NETWORK_STALL_TIMEOUT_MS = 180_000L
     }
 }

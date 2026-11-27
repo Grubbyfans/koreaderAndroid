@@ -1,6 +1,7 @@
 package io.legado.app.nettts
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.media3.common.MediaItem
 import com.yuezhou.reader.core.speech.PrepareResult
 import com.yuezhou.reader.core.speech.SessionToken
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -34,8 +36,14 @@ class NetworkTtsPlaybackBackend(
 
     companion object {
         const val MAX_QUEUE_SIZE = 12
-        const val PREFETCH_LIMIT = 3
+
+        /** 已合成待播段数：息屏/弱网下靠缓冲撑过合成间隙，3 段太浅容易断音。 */
+        const val PREFETCH_LIMIT = 6
         const val CONCURRENCY = 1
+
+        /** 合成失败退避序列；全部耗尽且超出窗口才判定不可恢复。 */
+        private const val MAX_RETRY_WINDOW_MS = 5 * 60 * 1000L
+        private const val PUMP_INTERVAL_MS = 2_000L
     }
 
     override val type: SpeechEngineType = SpeechEngineType.NETWORK_TTS
@@ -58,10 +66,15 @@ class NetworkTtsPlaybackBackend(
     private var currentPlayerGeneration = 0L
 
     private var synthJob: Job? = null
+    private var pumpJob: Job? = null
     private var active = false
     private var stopped = false
     private var nextSynthIndex = 0
     private var speechRate = NetworkTtsSynthesizer.DEFAULT_SPEECH_RATE
+
+    /** 最近一次播放/合成活动时间；服务侧看门狗据此判断链路是否停滞。 */
+    @Volatile
+    private var lastActivityAt = SystemClock.elapsedRealtime()
 
     override suspend fun prepare(config: SpeechEngineConfig): PrepareResult {
         val ruleId = config.networkTtsRuleId ?: return PrepareResult(false, "未选定网络 TTS 规则")
@@ -83,6 +96,7 @@ class NetworkTtsPlaybackBackend(
             p.events.collect { event ->
                 val eventToken = playerTokens[event.generation] ?: return@collect
                 if (event.generation != currentPlayerGeneration || eventToken != token) return@collect
+                touchActivity()
                 when (event) {
                     is NetworkTtsPlayer.PlayerEvent.PlayerSegmentStarted -> {
                         emit(SpeechPlaybackEvent.SegmentStarted(eventToken, event.index))
@@ -131,12 +145,15 @@ class NetworkTtsPlaybackBackend(
             return
         }
         nextSynthIndex = fromIndex
+        touchActivity()
         startSynthLoop(plan, fromIndex, token, playerGeneration)
+        startPump()
         p.start()
     }
 
     override suspend fun pause() {
         stopped = true
+        stopPump()
         synthJob?.cancel()
         synthJob = null
         val removed = player?.pauseAndTruncate().orEmpty()
@@ -151,7 +168,9 @@ class NetworkTtsPlaybackBackend(
         if (!active || !stopped) return
         val currentPlan = plan ?: return
         stopped = false
+        touchActivity()
         startSynthLoop(currentPlan, nextSynthIndex, token, currentPlayerGeneration)
+        startPump()
         player?.resume()
     }
 
@@ -182,21 +201,19 @@ class NetworkTtsPlaybackBackend(
                 if (queuedIndices.isEmpty()) {
                     emit(SpeechPlaybackEvent.Buffering(sessionToken, next))
                 }
+                touchActivity()
                 val result = try {
-                    synthesizer().synthesize(
-                        rule = currentRule,
-                        text = text,
-                        speechRate = speechRate,
-                        chapterTitle = currentPlan.bookId,
-                        forceRefresh = false,
-                    )
+                    synthesizeWithRetry(currentRule, text, next, currentPlan, sessionToken, playerGeneration)
+                        ?: return@launch
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
                     if (isCurrent(sessionToken, playerGeneration)) {
                         stopped = true
+                        stopPump()
                         player?.pause()
-                        emit(SpeechPlaybackEvent.Failed(sessionToken, describe(e)))
+                        // 保留会话与已缓冲音频：网络恢复后用户可直接继续，位置不丢。
+                        emit(SpeechPlaybackEvent.Failed(sessionToken, describe(e), recoverable = true))
                     }
                     return@launch
                 }
@@ -213,6 +230,7 @@ class NetworkTtsPlaybackBackend(
                     resultLeases[next] = result
                     handedOff = true
                     queuedIndices.add(next)
+                    touchActivity()
                     if (currentRule.pauseDuration > 0) {
                         currentPlayer.addSilence(currentRule.pauseDuration, next)
                     }
@@ -225,9 +243,106 @@ class NetworkTtsPlaybackBackend(
         }
     }
 
+    /**
+     * 单段合成 + 退避重试。
+     *
+     * 息屏 / Doze / 弱网下请求会成片失败，立刻判失败会让整场朗读停止。
+     * 这里在重试窗口内持续重试并发送 Buffering，网络恢复后从当前段继续；
+     * 返回 null 表示会话已被取消或暂停。
+     */
+    private suspend fun synthesizeWithRetry(
+        currentRule: HttpTTS,
+        text: String,
+        segIndex: Int,
+        currentPlan: SpeechPlan,
+        sessionToken: SessionToken,
+        playerGeneration: Long,
+    ): NetworkTtsSynthesizer.Result? {
+        var attempt = 0
+        var waitedMs = 0L
+        while (isCurrent(sessionToken, playerGeneration)) {
+            touchActivity()
+            try {
+                return synthesizer().synthesize(
+                    rule = currentRule,
+                    text = text,
+                    speechRate = speechRate,
+                    chapterTitle = currentPlan.bookId,
+                    forceRefresh = false,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (!isCurrent(sessionToken, playerGeneration)) return null
+                val wait = retryDelayMs(attempt)
+                if (waitedMs + wait > MAX_RETRY_WINDOW_MS) throw e
+                attempt++
+                waitedMs += wait
+                NetworkTtsLog.put("第 $attempt 次合成失败，${wait}ms 后重试：${describe(e)}")
+                emit(SpeechPlaybackEvent.Buffering(sessionToken, segIndex))
+                kotlinx.coroutines.delay(wait)
+            }
+        }
+        return null
+    }
+
+    private fun retryDelayMs(attempt: Int): Long = when (attempt) {
+        0 -> 2_000L
+        1 -> 4_000L
+        2 -> 8_000L
+        3 -> 15_000L
+        else -> 30_000L
+    }
+
+    /** 预取泵：合成任务意外结束而仍有未合成段时自动重启，避免断流后永久静默。 */
+    private fun startPump() {
+        if (pumpJob?.isActive == true) return
+        pumpJob = scope.launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(PUMP_INTERVAL_MS)
+                if (!active || stopped) continue
+                val currentPlan = plan ?: continue
+                if (nextSynthIndex >= currentPlan.segments.size) continue
+                if (!isCurrent(token, currentPlayerGeneration)) continue
+                val job = synthJob
+                if (job == null || job.isCompleted) {
+                    NetworkTtsLog.put("网络 TTS 预取中断，自动重启（index=$nextSynthIndex）")
+                    startSynthLoop(currentPlan, nextSynthIndex, token, currentPlayerGeneration)
+                }
+            }
+        }
+    }
+
+    private fun stopPump() {
+        pumpJob?.cancel()
+        pumpJob = null
+    }
+
+    override fun lastActivityElapsedMs(): Long = lastActivityAt
+
+    override suspend fun recoverIfStalled(): Boolean {
+        if (!active || stopped) return false
+        val currentPlan = plan ?: return false
+        val running = synthJob?.isActive == true
+        if (running) {
+            synthJob?.cancel()
+            synthJob = null
+        }
+        touchActivity()
+        NetworkTtsLog.put("网络 TTS 停滞恢复：重启合成（index=$nextSynthIndex）")
+        startSynthLoop(currentPlan, nextSynthIndex, token, currentPlayerGeneration)
+        player?.resume()
+        return true
+    }
+
+    private fun touchActivity() {
+        lastActivityAt = SystemClock.elapsedRealtime()
+    }
+
     override suspend fun stop() {
         stopped = true
         active = false
+        stopPump()
         synthJob?.cancel()
         synthJob = null
         currentPlayerGeneration = 0L
@@ -241,6 +356,7 @@ class NetworkTtsPlaybackBackend(
         withContext(NonCancellable + Dispatchers.Main.immediate) {
             active = false
             stopped = true
+            stopPump()
             synthJob?.cancel()
             synthJob = null
             currentPlayerGeneration = 0L
