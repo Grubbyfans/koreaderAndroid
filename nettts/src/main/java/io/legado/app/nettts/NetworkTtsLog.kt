@@ -13,6 +13,7 @@ object NetworkTtsLog {
 
     private const val TAG = "NetworkTts"
 
+    @Volatile
     var sink: ((message: String, throwable: Throwable?) -> Unit)? = null
 
     fun put(message: String, throwable: Throwable? = null) {

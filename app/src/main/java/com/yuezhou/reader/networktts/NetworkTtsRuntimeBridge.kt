@@ -20,6 +20,7 @@ import java.security.MessageDigest
  */
 object NetworkTtsRuntimeBridge {
 
+    @Volatile
     private var installed = false
 
     /** 网络朗读缓存根目录（`filesDir/nettts`）。 */
