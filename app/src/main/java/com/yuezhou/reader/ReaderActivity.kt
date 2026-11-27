@@ -881,7 +881,7 @@ private fun ReaderScreen(
                     ReaderWebView(ctx).also { wv ->
                         wv.eventListener = eventListener
                         wv.onTap = {
-                            readerOverlay = if (readerOverlay == ReaderOverlay.Hidden) ReaderOverlay.Toolbar else ReaderOverlay.Hidden
+                            readerOverlay = if (readerOverlay == ReaderOverlay.Hidden) ReaderOverlay.Layout else ReaderOverlay.Hidden
                         }
                         wv.onPageTap = { dir ->
                             if (animationController?.tap(dir) != true) {
