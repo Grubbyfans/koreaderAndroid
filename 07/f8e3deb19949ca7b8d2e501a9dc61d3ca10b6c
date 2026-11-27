@@ -1,0 +1,30 @@
+app/build.gradle.kts
+  h_7f20b2a03eb3b6 14-15
+app/src/main/java/com/yuezhou/reader/networktts/NetworkTtsAudition.kt
+  h_7f20b2a03eb3b6 74-76
+app/src/main/java/com/yuezhou/reader/ui/settings/NetworkTtsRulesScreen.kt
+  h_7f20b2a03eb3b6 53,446,469-473
+nettts/src/main/java/io/legado/app/data/entities/BaseSource.kt
+  h_7f20b2a03eb3b6 82-86,100,226
+nettts/src/main/java/io/legado/app/model/SharedJsScope.kt
+  h_7f20b2a03eb3b6 11,31-37,49
+nettts/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
+  h_7f20b2a03eb3b6 143-154,345
+nettts/src/main/java/io/legado/app/nettts/NetworkTtsPlaybackBackend.kt
+  h_7f20b2a03eb3b6 93,105-107
+nettts/src/main/java/io/legado/app/nettts/NetworkTtsRuleCodec.kt
+  h_7f20b2a03eb3b6 42-48,89
+nettts/src/main/java/io/legado/app/nettts/NetworkTtsSynthesizer.kt
+  h_7f20b2a03eb3b6 14,90-91,96,103-107,109-111,113,117-122,124-141,145-151,238-241,252,267-279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "07f8e3deb19949ca7b8d2e501a9dc61d3ca10b6c",
+  "prompts": {},
+  "humans": {
+    "h_7f20b2a03eb3b6": {
+      "author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
