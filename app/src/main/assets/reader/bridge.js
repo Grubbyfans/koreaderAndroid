@@ -361,6 +361,11 @@ function themePalette(theme) {
         dark: { bg: '#1a1a1a', fg: '#c8c8c8' },
         green: { bg: '#cce8cf', fg: '#1f3a24' },
         'night-blue': { bg: '#0d1b2a', fg: '#a8c0d8' },
+        paper: { bg: '#f2f0e9', fg: '#292824' },
+        parchment: { bg: '#e8d7b7', fg: '#3a3226' },
+        gray: { bg: '#e5e5e3', fg: '#292a29' },
+        sage: { bg: '#d6e0ce', fg: '#293529' },
+        'blue-gray': { bg: '#dce4e8', fg: '#29343d' },
     }
     return themes[theme] || themes.light
 }

@@ -90,7 +90,11 @@ internal fun LocalLibraryFilters(
         onDispose { swipeBlocker.release("local:search") }
     }
     Column(
-        modifier = Modifier.padding(horizontal = YuezhouDimens.PageInset),
+        modifier = Modifier.padding(
+            start = YuezhouDimens.PageInset,
+            top = YuezhouDimens.PageInset,
+            end = YuezhouDimens.PageInset,
+        ),
         verticalArrangement = Arrangement.spacedBy(YuezhouDimens.GapSmall),
     ) {
         OutlinedTextField(

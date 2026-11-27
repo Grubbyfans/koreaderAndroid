@@ -29,6 +29,24 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ImportNetworkTtsActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.YuezhouReader">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="legado" />
+                <data android:scheme="yuezhoureader" />
+                <data android:host="import" />
+                <data android:path="/httpTTS" />
+                <data android:path="/tts" />
+            </intent-filter>
+        </activity>
+
         <!-- 外部 EPUB 打开：同一入口负责导入书架后阅读。 -->
         <activity
             android:name=".OpenEpubActivity"

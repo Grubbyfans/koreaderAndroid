@@ -134,17 +134,37 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 /** 阅读器色板：正文背景与阅读面板共用，theme 取值须与 bridge.js 保持一致。 */
 internal object ReaderPalette {
+    val themes = listOf("light" to "浅色", "sepia" to "米黄", "green" to "护眼",
+        "paper" to "纸白", "parchment" to "羊皮纸", "gray" to "浅灰",
+        "sage" to "豆沙绿", "blue-gray" to "雾蓝",
+        "dark" to "深色", "night-blue" to "夜蓝")
+
     private val Light = Color(0xFFFAF9F7)
     private val Sepia = Color(0xFFF5ECD7)
     private val Dark = Color(0xFF1A1A1A)
     private val Green = Color(0xFFCCE8CF)
     private val NightBlue = Color(0xFF0D1B2A)
 
+    @Composable
+    fun effectiveTheme(prefs: com.yuezhou.reader.ReaderPreferences): String = resolveTheme(prefs, androidx.compose.foundation.isSystemInDarkTheme())
+
+    fun resolveTheme(prefs: com.yuezhou.reader.ReaderPreferences, systemDark: Boolean): String = when (prefs.themeMode) {
+        "day" -> "light"
+        "night" -> "dark"
+        "system" -> if (systemDark) "dark" else "light"
+        else -> if (themes.any { it.first == prefs.theme }) prefs.theme else "light"
+    }
+
     fun background(theme: String): Color = when (theme) {
         "sepia" -> Sepia
         "dark" -> Dark
         "green" -> Green
         "night-blue" -> NightBlue
+        "paper" -> Color(0xFFF2F0E9)
+        "parchment" -> Color(0xFFE8D7B7)
+        "gray" -> Color(0xFFE5E5E3)
+        "sage" -> Color(0xFFD6E0CE)
+        "blue-gray" -> Color(0xFFDCE4E8)
         else -> Light
     }
 

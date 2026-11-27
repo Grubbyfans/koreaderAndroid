@@ -271,7 +271,7 @@ internal fun SettingsPage(
                 }
                 Spacer(Modifier.height(8.dp))
                 // 同步记录入口：点击进入独立页面
-                TextButton(onClick = { onNavigate(SettingsRoute.SyncLog) }) {
+                androidx.compose.material3.OutlinedButton(onClick = { onNavigate(SettingsRoute.SyncLog) }) {
                     Text("查看最近 20 次同步记录")
                 }
             }
@@ -280,7 +280,7 @@ internal fun SettingsPage(
                 // 诊断摘要（方案 §13.2：最近 20 次同步/刷新任务的可执行诊断）
                 var diagnostics by remember { mutableStateOf<List<Pair<Long, Pair<String, com.yuezhou.reader.core.cloud.DiagnosticSummary>>>>(emptyList()) }
                 var showDiagnostics by remember { mutableStateOf(false) }
-                TextButton(
+                androidx.compose.material3.OutlinedButton(
                     onClick = {
                         scope.launch {
                             diagnostics = cloudSync.diagnosticSummaries()
@@ -415,12 +415,26 @@ internal fun SettingsPage(
                     color = YuezhouColors.TextSecondary,
                 )
                 val networkTtsAvailable = SpeechRuntime.networkTtsAvailable
+                com.yuezhou.reader.networktts.NetworkTtsVoiceScopePreference(
+                    voiceScope = prefs.networkTtsVoiceScope,
+                    voiceGroup = prefs.networkTtsVoiceGroup,
+                ) { mode, group ->
+                    scope.launch {
+                        ReaderSettings.save(context, prefs, prefs.copy(
+                            networkTtsVoiceScope = mode, networkTtsVoiceGroup = group))
+                    }
+                }
                 val selectedRuleId = prefs.networkTtsRuleId.takeIf { it != 0L } ?: SpeechRuntime.networkTtsRuleId
                 val ruleList = remember { mutableStateOf<List<Pair<Long, String>>>(emptyList()) }
                 val ctx = LocalContext.current
                 LaunchedEffect(Unit) {
                     runCatching {
+                        val checks = com.yuezhou.reader.networktts.NetworkTtsRuleChecker(ctx).load()
                         ruleList.value = com.yuezhou.reader.reader.networktts.NetworkTtsRuleRepository(ctx).list()
+                            .filter { rule ->
+                                val check = checks[rule.id]
+                                check == null || check.success || !check.matches(rule)
+                            }
                             .map { it.id to it.name }
                     }
                 }
@@ -432,7 +446,7 @@ internal fun SettingsPage(
                     )
                 } else if (ruleList.value.isEmpty()) {
                     Text(
-                        "尚未导入任何规则，请先到规则管理里导入。",
+                        "暂无可选规则，已检测失败的音色已隐藏，请到规则管理里导入或重新检测。",
                         style = MaterialTheme.typography.bodySmall,
                         color = YuezhouColors.TextSecondary,
                     )
@@ -442,35 +456,29 @@ internal fun SettingsPage(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("当前规则：", style = MaterialTheme.typography.bodySmall)
                         var expanded by remember { mutableStateOf(false) }
                         val selected = ruleList.value.firstOrNull { it.first == selectedRuleId }
-                        Box {
-                            TextButton(onClick = { expanded = !expanded }) {
-                                Text(selected?.second ?: "未选择")
-                            }
-                            androidx.compose.material3.DropdownMenu(
-                                expanded = expanded,
-                                onDismissRequest = { expanded = false },
-                            ) {
-                                ruleList.value.forEach { (id, name) ->
-                                    androidx.compose.material3.DropdownMenuItem(
-                                        text = { Text(name) },
-                                        onClick = {
+                        Box(Modifier.fillMaxWidth()) {
+                            com.yuezhou.reader.ui.components.SettingsSelectionRow(
+                                "当前规则", selected?.second ?: "未选择", onClick = { expanded = !expanded })
+                            if (expanded) {
+                                com.yuezhou.reader.ui.components.SettingsChoiceDialog(
+                                        title = "选择当前规则",
+                                        options = ruleList.value,
+                                        selected = selectedRuleId,
+                                        onSelect = { id ->
                                             SpeechRuntime.networkTtsRuleId = id
                                             scope.launch {
                                                 ReaderSettings.save(context, prefs, prefs.copy(networkTtsRuleId = id))
                                             }
                                             expanded = false
-                                        },
-                                    )
-                                }
+                                        }, onDismiss = { expanded = false })
                             }
                         }
                     }
                 }
                 Row {
-                    TextButton(onClick = { onNavigate(SettingsRoute.NetworkTts) }) {
+                    androidx.compose.material3.OutlinedButton(onClick = { onNavigate(SettingsRoute.NetworkTts) }) {
                         Text("规则管理")
                     }
                 }
@@ -526,12 +534,12 @@ internal fun SettingsPage(
             SettingsCard("下载目录") {
                 Text(downloadLabel, style = MaterialTheme.typography.bodyMedium)
                 Text("新下载的书会直接从所选目录打开。", style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
-                Row {
-                    TextButton(onClick = { chooseDownloadDirectory.launch(downloadDirectory.uri) }) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedButton(onClick = { chooseDownloadDirectory.launch(downloadDirectory.uri) }) {
                         Text("选择目录")
                     }
                     if (downloadDirectory.uri != null) {
-                        TextButton(onClick = {
+                        androidx.compose.material3.OutlinedButton(onClick = {
                             downloadDirectory.reset()
                             downloadLabel = downloadDirectory.label()
                             downloadError = null
@@ -542,28 +550,13 @@ internal fun SettingsPage(
                 }
                 downloadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
-            TextButton(onClick = onOpenDownloads) { Text("下载管理") }
+            androidx.compose.material3.OutlinedButton(onClick = onOpenDownloads) { Text("下载管理") }
         }
 
         if (route == SettingsRoute.Reading) {
             SettingsCard("默认阅读排版") {
-                // 主题
-                Text("主题", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("light" to "浅色", "sepia" to "护眼", "dark" to "深色", "green" to "青绿", "night-blue" to "夜蓝").forEach { (value, label) ->
-                        val selected = prefs.theme == value
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                                .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(theme = value)) } }
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                        )
-                    }
+                com.yuezhou.reader.ui.reader.ReaderThemeControls(prefs) { updated ->
+                    scope.launch { ReaderSettings.save(context, prefs, updated) }
                 }
                 Spacer(Modifier.height(4.dp))
 
@@ -659,7 +652,7 @@ internal fun SettingsPage(
                     Spacer(Modifier.height(4.dp))
                 }
 
-                ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
+                ReaderFontPreference(prefs.fontId, prefs.fontWeight, outlinedSelection = true, onWeightChange = { w ->
                     scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontWeight = w)) }
                 })
 

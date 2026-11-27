@@ -236,7 +236,8 @@ private fun ReaderScreen(
     var pendingOpen by remember { mutableStateOf<Triple<String, String?, Uri?>?>(null) }
     var openedSource by remember { mutableStateOf<Pair<String, Uri?>?>(null) }
     // 沉浸式面板显隐
-    var readerOverlay by remember { mutableStateOf(ReaderOverlay.Hidden) }
+    var readerOverlay by remember(bookId) { mutableStateOf(ReaderOverlay.Hidden) }
+    var lastReaderOverlay by rememberSaveable(bookId) { mutableStateOf(ReaderOverlay.Layout) }
     val panelVisible = readerOverlay != ReaderOverlay.Hidden
     // 亮度：0..1，null 表示跟随系统；左侧滑动调节后为具体值
     var brightness by remember { mutableStateOf<Float?>(null) }
@@ -275,6 +276,8 @@ private fun ReaderScreen(
     // 阅读设置（DataStore）
     val loadedPrefs by ReaderSettings.flow(context).collectAsStateWithLifecycle(initialValue = null)
     val readerPrefs = loadedPrefs ?: ReaderPreferences()
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val effectiveTheme = ReaderPalette.resolveTheme(readerPrefs, systemDark)
     // 让被 WebView/生命周期回调长期持有的闭包始终读到最新的 prefs（避免 stale closure）
     val latestPrefs by rememberUpdatedState(readerPrefs)
     // 当前 TTS 引擎可用音色（服务就绪后发布）
@@ -779,7 +782,7 @@ private fun ReaderScreen(
     }
 
     // Open with the saved layout already applied so restoring the CFI uses the final pagination.
-    LaunchedEffect(webView, loadedPrefs, pendingOpen) {
+    LaunchedEffect(webView, loadedPrefs, pendingOpen, effectiveTheme) {
         val wv = webView ?: return@LaunchedEffect
         val prefs = loadedPrefs ?: return@LaunchedEffect
         wv.verticalMode = prefs.vertical
@@ -787,7 +790,7 @@ private fun ReaderScreen(
             fontSize = prefs.fontSize,
             lineHeight = prefs.lineHeight,
             pageMargin = prefs.pageMargin,
-            theme = prefs.theme,
+            theme = effectiveTheme,
             vertical = prefs.vertical,
             fontId = prefs.fontId,
             fontWeight = prefs.fontWeight,
@@ -815,12 +818,12 @@ private fun ReaderScreen(
 
     LaunchedEffect(animationController, openedSource, readerPrefs.pageAnimation, readerPrefs.vertical,
         readerPrefs.fontSize, readerPrefs.fontId, readerPrefs.fontWeight, readerPrefs.lineHeight,
-        readerPrefs.pageMargin, readerPrefs.theme) {
+        readerPrefs.pageMargin, effectiveTheme) {
         val controller = animationController ?: return@LaunchedEffect
         val source = openedSource ?: return@LaunchedEffect
         if (!readerPrefs.vertical && readerPrefs.pageAnimation in setOf("fade", "ios_curl", "ripple")) {
             controller.settings(readerPrefs.pageAnimation, layoutChanged = true)
-            controller.background = ReaderPalette.background(readerPrefs.theme).let { color ->
+            controller.background = ReaderPalette.background(effectiveTheme).let { color ->
                 android.graphics.Color.argb((color.alpha * 255).toInt(), (color.red * 255).toInt(),
                     (color.green * 255).toInt(), (color.blue * 255).toInt())
             }
@@ -872,7 +875,7 @@ private fun ReaderScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ReaderPalette.background(readerPrefs.theme)),
+                .background(ReaderPalette.background(effectiveTheme)),
         ) {
             // 正文 WebView（铺满，单击呼出面板）
             AndroidView(
@@ -881,7 +884,7 @@ private fun ReaderScreen(
                     ReaderWebView(ctx).also { wv ->
                         wv.eventListener = eventListener
                         wv.onTap = {
-                            readerOverlay = if (readerOverlay == ReaderOverlay.Hidden) ReaderOverlay.Layout else ReaderOverlay.Hidden
+                            readerOverlay = if (readerOverlay == ReaderOverlay.Hidden) lastReaderOverlay else ReaderOverlay.Hidden
                         }
                         wv.onPageTap = { dir ->
                             if (animationController?.tap(dir) != true) {
@@ -896,7 +899,7 @@ private fun ReaderScreen(
                         animationController = com.yuezhou.reader.animation.ReaderAnimationController(host, wv, scope,
                             configurePreview = { preview ->
                                 val p = latestPrefs
-                                preview.applySettings(p.fontSize, p.lineHeight, p.pageMargin, p.theme, false,
+                                preview.applySettings(p.fontSize, p.lineHeight, p.pageMargin, ReaderPalette.resolveTheme(p, systemDark), false,
                                     p.fontId, p.fontWeight, "none")
                             }, reportError = { android.util.Log.w("ReaderAnimation", "Animation unavailable", it) })
                         wv.onExternalNavigation = { animationController?.cancel() }
@@ -992,10 +995,13 @@ private fun ReaderScreen(
                     speaking = (speaking || speakRequested) && !speechPaused,
                     onBack = { leaveReader() },
                     overlay = readerOverlay,
-                    onOverlay = { readerOverlay = it },
+                    onOverlay = {
+                        if (it != ReaderOverlay.Hidden && it != ReaderOverlay.Toolbar) lastReaderOverlay = it
+                        readerOverlay = it
+                    },
                     onDismiss = { readerOverlay = ReaderOverlay.Hidden },
                     onOpenToc = {
-                        readerOverlay = ReaderOverlay.Toolbar
+                        readerOverlay = ReaderOverlay.Hidden
                         scope.launch { drawerState.open() }
                     },
                     onImport = onImport,

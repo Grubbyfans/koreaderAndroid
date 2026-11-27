@@ -22,6 +22,7 @@ class NetworkTtsRuleRepository(private val context: Context) {
         val imported: Int,
         val skipped: Int,
         val errors: List<String>,
+        val ruleIds: List<Long>,
     )
 
     suspend fun list(): List<HttpTTS> = withContext(Dispatchers.IO) {
@@ -48,6 +49,7 @@ class NetworkTtsRuleRepository(private val context: Context) {
     suspend fun import(text: String): ImportOutcome = withContext(Dispatchers.IO) {
         val parsed = NetworkTtsRuleCodec.parse(text)
         val existingIds = dao.all().map { it.id }.toMutableSet()
+        val ruleIds = mutableListOf<Long>()
         var imported = 0
         var skipped = 0
         parsed.rules.forEach { original ->
@@ -67,8 +69,9 @@ class NetworkTtsRuleRepository(private val context: Context) {
                 imported++
             }
             existingIds.add(rule.id)
+            ruleIds.add(rule.id)
         }
-        ImportOutcome(imported = imported, skipped = skipped, errors = parsed.errors)
+        ImportOutcome(imported = imported, skipped = skipped, errors = parsed.errors, ruleIds = ruleIds)
     }
 
     suspend fun exportAll(): String = withContext(Dispatchers.IO) {

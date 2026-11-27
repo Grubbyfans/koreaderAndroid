@@ -47,7 +47,7 @@ private fun weightLabel(weight: Int): String = when (weight) {
 }
 
 @Composable
-internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int, onWeightChange: (Int) -> Unit) {
+internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int, outlinedSelection: Boolean = false, onWeightChange: (Int) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(context) { ReaderFontStore(context) }
@@ -77,7 +77,10 @@ internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int, onWei
 
     val choices = defaultFonts + installed
     val selected = choices.firstOrNull { it.id == selectedId } ?: defaultFonts.first()
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    if (outlinedSelection) {
+        com.yuezhou.reader.ui.components.SettingsSelectionRow("字体",
+            if (importing) "导入中…" else selected.label, enabled = !importing, onClick = { selecting = true })
+    } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("字体", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         TextButton(enabled = !importing, onClick = { selecting = true }) {
             Text(

@@ -1,5 +1,7 @@
 package com.yuezhou.reader
 
+import androidx.compose.ui.unit.dp
+
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -123,9 +125,9 @@ internal fun SpeechBackgroundSettings() {
             if (unrestricted) "系统电池优化已豁免" else "锁屏后若朗读中断，请将应用电池用量设为「不受限制」。",
             style = MaterialTheme.typography.bodySmall,
         )
-        Row {
-            TextButton(onClick = { context.startActivity(notificationSettings(context)) }) { Text("通知设置") }
-            TextButton(onClick = { context.startActivity(batterySettings(context)) }) { Text("电池设置") }
+        Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.OutlinedButton(onClick = { context.startActivity(notificationSettings(context)) }) { Text("通知设置") }
+            androidx.compose.material3.OutlinedButton(onClick = { context.startActivity(batterySettings(context)) }) { Text("电池设置") }
         }
     }
 }

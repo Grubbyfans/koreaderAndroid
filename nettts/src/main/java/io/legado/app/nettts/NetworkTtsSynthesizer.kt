@@ -13,6 +13,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import okhttp3.Response
 import java.io.Closeable
 import java.io.File
@@ -249,7 +251,7 @@ class NetworkTtsSynthesizer(
                 if (cancelRaw.get()) runCatching { errRaw.close() }
             }
         }
-        // response 现在归外层所有。类型校验只查看已缓冲的错误内容，不读取网络。
+        // response 现在归外层所有。错误详情读取有独立超时和取消关闭保护。
         // 首字节读取由 checkedAudioStream 延迟到 downloadToCache。
         // 整个 post-response 阶段都在这个 try/finally 保护下，任何异常都会关闭 response。
         try {
@@ -270,29 +272,61 @@ class NetworkTtsSynthesizer(
             analyzeUrl.evalJS(checkJs, response) as? Response
         }
 
-    private fun validateContentType(rule: HttpTTS, response: Response) {
-        // peekBody 会主动等待网络数据；错误类型已确定时只取现有缓冲，避免停止朗读被阻塞。
-        val errorBody = {
-            runCatching {
-                val buffer = response.body.source().buffer
-                buffer.snapshot(minOf(buffer.size, 4_096L).toInt()).string(
-                    response.body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8
-                )
-            }.getOrDefault("")
-        }
-        val contentType = response.headers["Content-Type"] ?: return
-        val mime = contentType.substringBefore(";").trim()
+    private suspend fun validateContentType(rule: HttpTTS, response: Response) {
+        val mime = response.headers["Content-Type"]?.substringBefore(";")?.trim()
+            ?.lowercase(java.util.Locale.ROOT).orEmpty()
         val expected = rule.contentType
-        if (mime == "application/json" || mime.startsWith("text/")) {
+        if (!response.isSuccessful || mime == "application/json" || mime.endsWith("+json") || mime.startsWith("text/")) {
+            val detail = readErrorBody(response)
+            val reason = when {
+                detail.contains("DEPLOYMENT_NOT_FOUND") -> "源服务部署已不存在，请联系源作者更新地址"
+                detail.contains("Invalid param pdt", ignoreCase = true) -> "源规则的 pdt 参数被服务器拒绝"
+                detail.contains("Error sk auth", ignoreCase = true) -> "源接口鉴权失败，请检查源规则或登录配置"
+                response.code == 401 || response.code == 403 -> "源服务器拒绝访问，请检查权限或登录配置"
+                response.code == 404 -> "源接口地址不存在"
+                else -> "TTS 服务器返回错误"
+            }
             throw SynthesisException(
-                NetworkTtsLog.sanitize("TTS 服务器返回错误（$mime）：${errorBody()}")
+                NetworkTtsLog.sanitize("$reason（HTTP ${response.code}，${mime.ifBlank { "未知类型" }}）：${formatErrorBody(detail)}")
             )
         }
-        if (!expected.isNullOrBlank() && !mime.matches(expected.toRegex())) {
+        if (mime.isNotBlank() && !expected.isNullOrBlank() && !mime.matches(expected.toRegex())) {
             throw SynthesisException(
-                NetworkTtsLog.sanitize("TTS 返回类型不匹配（期望 $expected，实际 $mime）：${errorBody()}")
+                NetworkTtsLog.sanitize("TTS 返回类型不匹配（期望 $expected，实际 $mime）")
             )
         }
+    }
+
+    /** 最多读取 4 KiB；取消或超时立即关闭响应，避免错误详情读取阻塞停止操作。 */
+    private suspend fun readErrorBody(response: Response): String {
+        return try {
+            withTimeout(5_000L) {
+                suspendCancellableCoroutine { cont ->
+                    cont.invokeOnCancellation { runCatching { response.close() } }
+                    try {
+                        val detail = response.peekBody(4_096L).use { it.string() }
+                        cont.resume(detail, onCancellation = {})
+                    } catch (e: IOException) {
+                        cont.resume("错误详情读取失败", onCancellation = {})
+                    } catch (e: Throwable) {
+                        cont.resumeWithException(e)
+                    }
+                }
+            }
+        } catch (e: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            "错误详情读取超时"
+        }
+    }
+
+    private fun formatErrorBody(body: String): String {
+        if (body.isBlank()) return "服务器未提供错误详情"
+        val json = runCatching { LOGIN_JSON.parseToJsonElement(body) }.getOrNull() as? JsonObject
+        val fields = listOf("err_detail", "err_msg", "message", "error_description", "error", "detail", "err_no", "err_subcode", "code")
+        val details = fields.mapNotNull { key ->
+            (json?.get(key) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }?.let { "$key=$it" }
+        }
+        return NetworkTtsLog.sanitize(if (details.isEmpty()) body.trim() else details.joinToString("；")).take(700)
     }
 
     /**

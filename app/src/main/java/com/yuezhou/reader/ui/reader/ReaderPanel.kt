@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
@@ -52,7 +54,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ColorScheme
@@ -163,10 +164,10 @@ internal fun ReaderPanel(
     // 进度滑块拖动中的本地预览值；null 表示未在拖动（跟随真实 fraction）
     var fractionPreview by remember { mutableStateOf<Float?>(null) }
     val appColors = MaterialTheme.colorScheme
-    val panelColors = ReaderPalette.panelTheme(appColors, prefs.theme)
+    val panelColors = ReaderPalette.panelTheme(appColors, ReaderPalette.effectiveTheme(prefs))
     MaterialTheme(colorScheme = panelColors) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val panelMaxHeight = maxHeight / 2
+        val panelMaxHeight = maxHeight * 0.45f
         // 全屏透明点击层：拦截对正文/翻页区的点击，直接隐藏面板
         Box(
             modifier = Modifier
@@ -226,13 +227,13 @@ internal fun ReaderPanel(
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 3.dp,
-                // 固定为半屏高度：切换栏目时面板大小保持稳定，内容超出时内部滚动
+                // 固定为屏幕高度的 45%：切换栏目时大小稳定，内容超出时内部滚动
                 modifier = Modifier.fillMaxWidth().height(panelMaxHeight),
             ) {
                 Column(
                     modifier = Modifier
-                        .windowInsetsPadding(WindowInsets.safeDrawing)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
                 ) {
                     // 进度
                     if (fraction != null) {
@@ -259,7 +260,7 @@ internal fun ReaderPanel(
                             )
                         }
                     }
-                    // 底部操作：目录 + 朗读 + 同步 + 设置（设置默认收起）
+                    // 目录是独立入口，右侧标签切换设置内容。
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -275,13 +276,8 @@ internal fun ReaderPanel(
                                     modifier = Modifier.size(18.dp),
                                 )
                             },
-                            border = null,
-                            colors = AssistChipDefaults.assistChipColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                leadingIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            ),
                         )
+                        Spacer(Modifier.width(4.dp))
                         listOf(ReaderOverlay.Layout, ReaderOverlay.Theme, ReaderOverlay.Speech, ReaderOverlay.More).forEach { item ->
                             FilterChip(
                                 selected = overlay == item,
@@ -488,27 +484,7 @@ private fun SettingsControls(
             }
         }
         if (overlay == ReaderOverlay.Theme) {
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                listOf("light" to "浅色", "sepia" to "米黄", "green" to "护眼",
-                    "dark" to "深色", "night-blue" to "夜蓝").forEach { (value, title) ->
-                    FilterChip(
-                        selected = prefs.theme == value,
-                        onClick = { onPrefsChange(prefs.copy(theme = value)) },
-                        label = {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Box(Modifier.size(14.dp).background(ReaderPalette.background(value), RoundedCornerShape(4.dp)))
-                                Text(title)
-                            }
-                        },
-                    )
-                }
-            }
+            ReaderThemeControls(prefs, onPrefsChange)
         }
         if (overlay == ReaderOverlay.Speech) {
             Button(
@@ -599,6 +575,8 @@ private fun SettingsControls(
             if (activeEngine == SpeechEngineType.NETWORK_TTS) {
                 com.yuezhou.reader.networktts.NetworkTtsVoicePreference(
                     prefs.networkTtsRuleId.takeIf { it != 0L } ?: SpeechRuntime.networkTtsRuleId,
+                    voiceScope = prefs.networkTtsVoiceScope,
+                    voiceGroup = prefs.networkTtsVoiceGroup,
                 ) { id -> onPrefsChange(prefs.copy(networkTtsRuleId = id)) }
             }
             if (activeEngine == SpeechEngineType.SYSTEM_TTS) {

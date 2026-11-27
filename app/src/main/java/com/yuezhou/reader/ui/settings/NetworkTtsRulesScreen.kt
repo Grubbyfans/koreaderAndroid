@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -19,15 +20,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +54,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -54,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.networktts.NetworkTtsAudition
+import com.yuezhou.reader.networktts.NetworkTtsRuleChecker
+import com.yuezhou.reader.networktts.RuleCheckResult
 import com.yuezhou.reader.reader.networktts.NetworkTtsRuleRepository
 import com.yuezhou.reader.ui.components.LibraryPageHeading
 import io.legado.app.data.entities.BaseSource.LoginRow
@@ -61,6 +75,7 @@ import io.legado.app.data.entities.HttpTTS
 import io.legado.app.nettts.NetworkTtsLog
 import io.legado.app.nettts.NetworkTtsSynthesizer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -77,17 +92,23 @@ import java.net.URL
  * 规则字段与 Legado 原版一致；导入保留原始 JSON，导出过滤常见凭证并由用户确认。
  */
 @Composable
-internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
+internal fun NetworkTtsRulesScreen(onBack: () -> Unit, externalImportUrl: String? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember(context) { NetworkTtsRuleRepository(context) }
     val audition = remember(context) { NetworkTtsAudition(context) }
+    val checker = remember(context) { NetworkTtsRuleChecker(context) }
+    var checkResults by remember { mutableStateOf(checker.load()) }
+    var checkJob by remember { mutableStateOf<Job?>(null) }
+    var checkingId by remember { mutableStateOf<Long?>(null) }
+    var checkCompleted by remember { mutableStateOf(0) }
+    var checkTotal by remember { mutableStateOf(0) }
     DisposableEffect(audition) { onDispose { audition.release() } }
 
     var rules by remember { mutableStateOf<List<HttpTTS>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var message by remember { mutableStateOf<String?>(null) }
-    var importOpen by remember { mutableStateOf(false) }
+    var importOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<HttpTTS?>(null) }
     var auditioning by remember { mutableStateOf<HttpTTS?>(null) }
     var loginTarget by remember { mutableStateOf<HttpTTS?>(null) }
@@ -96,6 +117,36 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
     var selectionMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var batchDeleteOpen by remember { mutableStateOf(false) }
+    val organizer = remember(context) { RuleOrganizer(context) }
+    var organization by remember { mutableStateOf(organizer.load()) }
+    var query by remember { mutableStateOf("") }
+    var favoritesOnly by remember { mutableStateOf(false) }
+    var groupFilter by remember { mutableStateOf<String?>(null) }
+    var sort by remember { mutableStateOf(organization.sort) }
+    var groupPicker by remember { mutableStateOf(false) }
+    var moveIds by remember { mutableStateOf<Set<Long>?>(null) }
+    var sortMenu by remember { mutableStateOf(false) }
+    var importGroup by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var choosingImportGroup by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(externalImportUrl != null) }
+    var pendingExternalUrl by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(externalImportUrl) }
+    var importFromFile by remember { mutableStateOf(false) }
+    fun updateOrganization(value: RuleOrganization) {
+        organizer.save(value)
+        organization = value
+    }
+    val visibleRules = rules.filter {
+        it.name.contains(query.trim(), ignoreCase = true) &&
+            (!favoritesOnly || it.id in organization.favorites) &&
+            (groupFilter == null || organization.memberships[it.id].orEmpty() == groupFilter)
+    }.let { list ->
+        if (sort == "updated") list.sortedByDescending { it.lastUpdateTime }
+        else list.sortedBy { it.name.lowercase(java.util.Locale.ROOT) }
+    }
+    fun toggleFavorites(ids: Set<Long>) {
+        val remove = ids.all { it in organization.favorites }
+        updateOrganization(organization.copy(favorites =
+            if (remove) organization.favorites - ids else organization.favorites + ids))
+    }
 
     fun reload() {
         scope.launch {
@@ -129,7 +180,10 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
             if (text.isNullOrBlank()) {
                 message = "读取文件失败"
             } else {
-                message = importText(repository, text)
+                message = importText(repository, text) { ids ->
+                    if (importGroup.isNotEmpty()) updateOrganization(organization.copy(
+                        memberships = organization.memberships + ids.associateWith { importGroup }))
+                }
                 reload()
             }
         }
@@ -162,11 +216,12 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                 color = YuezhouColors.TextSecondary,
             )
             if (selectionMode) {
-                val allSelected = rules.isNotEmpty() && selectedIds.size == rules.size
+                val allSelected = visibleRules.isNotEmpty() && visibleRules.all { it.id in selectedIds }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(onClick = {
-                        selectedIds = if (allSelected) emptySet() else rules.map { it.id }.toSet()
-                    }) { Text(if (allSelected) "取消全选" else "全选") }
+                        selectedIds = if (allSelected) selectedIds - visibleRules.map { it.id }.toSet()
+                        else selectedIds + visibleRules.map { it.id }.toSet()
+                    }) { Text(if (allSelected) "取消全选" else "全选结果") }
                     TextButton(enabled = selectedIds.isNotEmpty(), onClick = {
                         val orderedIds = rules.filter { it.id in selectedIds }.map { it.id }
                         scope.launch {
@@ -183,31 +238,76 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                     }
                 }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { importOpen = true }) { Text("导入") }
-                    TextButton(onClick = { fileLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { importFromFile = false; choosingImportGroup = true }) { Text("导入") }
+                    TextButton(onClick = { importFromFile = true; choosingImportGroup = true }) {
                         Text("从文件导入")
                     }
-                    TextButton(onClick = {
-                        scope.launch {
-                            val exported = runCatching { repository.exportAll() }.getOrNull()
-                            if (exported.isNullOrBlank()) {
-                                message = "暂无可导出的规则"
-                            } else {
-                                pendingExport = "全部规则" to exported
+                    Spacer(Modifier.weight(1f))
+                    Box {
+                        TextButton(onClick = { sortMenu = true }) { Text("排序 ▾", maxLines = 1) }
+                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                            listOf("name" to "名称", "updated" to "最近更新").forEach { (key, label) ->
+                                DropdownMenuItem(text = { Text(if (sort == key) "✓ $label" else label) }, onClick = {
+                                    sort = key
+                                    updateOrganization(organization.copy(sort = key))
+                                    sortMenu = false
+                                })
                             }
                         }
-                    }) { Text("导出到剪贴板") }
+                    }
                 }
             }
+            if (selectionMode) {
+                Row {
+                    TextButton(enabled = selectedIds.isNotEmpty(), onClick = { moveIds = selectedIds.toSet() }) { Text("移动到分组") }
+                    TextButton(enabled = selectedIds.isNotEmpty(), onClick = { toggleFavorites(selectedIds) }) {
+                        Text(if (selectedIds.isNotEmpty() && selectedIds.all { it in organization.favorites }) "取消收藏" else "收藏")
+                    }
+                    TextButton(enabled = selectedIds.isNotEmpty() && checkJob == null, onClick = {
+                        val targets = rules.filter { it.id in selectedIds }.map { it.copy() }
+                        checkCompleted = 0
+                        checkTotal = targets.size
+                        checkJob = scope.launch {
+                            var succeeded = 0
+                            try {
+                                targets.forEach { rule ->
+                                    checkingId = rule.id
+                                    val result = checker.check(rule)
+                                    checker.save(rule.id, result)
+                                    checkResults = checkResults + (rule.id to result)
+                                    checkCompleted++
+                                    if (result.success) succeeded++
+                                }
+                            } finally {
+                                checkingId = null
+                                checkJob = null
+                                val status = if (currentCoroutineContext().isActive) "检测完成" else "检测已取消"
+                                message = "$status $checkCompleted / $checkTotal 条：可用 $succeeded 条，失败 ${checkCompleted - succeeded} 条"
+                            }
+                        }
+                    }) { Text("检测") }
+                }
+            }
+            OutlinedTextField(query, { query = it }, label = { Text("搜索规则名称") },
+                singleLine = true, modifier = Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(selected = !favoritesOnly, onClick = { favoritesOnly = false }, label = { Text("全部") })
+                FilterChip(selected = favoritesOnly, onClick = { favoritesOnly = true }, label = { Text("收藏") })
+                TextButton(onClick = { groupPicker = true }, modifier = Modifier.weight(1f)) {
+                    Text("分组：${groupFilter ?: "全部"}${if (groupFilter == "") "未分组" else ""} ▾", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Text("共 ${visibleRules.size} / ${rules.size} 条", style = MaterialTheme.typography.bodySmall,
+                color = YuezhouColors.TextSecondary)
             message?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
             }
         }
 
-        if (rules.isEmpty() && !loading) {
+        if (visibleRules.isEmpty() && !loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("还没有规则，点击「导入」添加", color = YuezhouColors.TextSecondary)
+                Text(if (rules.isEmpty()) "还没有规则，点击「导入」添加" else "没有符合条件的规则", color = YuezhouColors.TextSecondary)
             }
         } else {
             LazyColumn(
@@ -215,9 +315,15 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(rules, key = { it.id }) { rule ->
+                items(visibleRules, key = { it.id }) { rule ->
                     RuleRow(
                         rule = rule,
+                        group = organization.memberships[rule.id] ?: "未分组",
+                        checkResult = checkResults[rule.id]?.takeIf { it.matches(rule) },
+                        checking = checkingId == rule.id,
+                        favorite = rule.id in organization.favorites,
+                        onFavorite = { toggleFavorites(setOf(rule.id)) },
+                        onMove = { moveIds = setOf(rule.id) },
                         selectionMode = selectionMode,
                         selected = rule.id in selectedIds,
                         onClick = {
@@ -253,13 +359,70 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
         }
     }
 
+    if (checkJob != null) {
+        AlertDialog(
+            onDismissRequest = { checkJob?.cancel() },
+            title = { Text("检测试听可用性") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("已完成 $checkCompleted / $checkTotal 条")
+                    rules.firstOrNull { it.id == checkingId }?.let {
+                        Text(it.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    NetworkTtsLoading("正在请求音频并静音验证解码…")
+                }
+            },
+            confirmButton = { TextButton(onClick = { checkJob?.cancel() }) { Text("取消检测") } },
+        )
+    }
+
+    if (choosingImportGroup) {
+        RuleGroupSheet(organization, rules, importGroup, true,
+            onChange = { updateOrganization(it) },
+            onSelect = {
+                importGroup = it.orEmpty()
+                choosingImportGroup = false
+                if (importFromFile) fileLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) else importOpen = true
+            }, onDismiss = { choosingImportGroup = false; pendingExternalUrl = null }, importing = true)
+    }
+    if (groupPicker || moveIds != null) {
+        RuleGroupSheet(
+            organization = organization,
+            rules = rules,
+            selectedGroup = if (moveIds == null) groupFilter else null,
+            moving = moveIds != null,
+            onChange = { updated ->
+                if (groupFilter != null && groupFilter != "" && groupFilter !in updated.groups) groupFilter = null
+                updateOrganization(updated)
+            },
+            onSelect = { group ->
+                val ids = moveIds
+                if (ids == null) {
+                    groupFilter = group
+                } else {
+                    updateOrganization(organization.copy(memberships = organization.memberships.toMutableMap().apply {
+                        ids.forEach { id -> if (group.isNullOrEmpty()) remove(id) else put(id, group) }
+                    }))
+                }
+                groupPicker = false
+                moveIds = null
+            },
+            onDismiss = { groupPicker = false; moveIds = null },
+        )
+    }
+
     if (importOpen) {
         ImportDialog(
-            onDismiss = { importOpen = false },
+            initialUrl = pendingExternalUrl.orEmpty(),
+            onDismiss = { importOpen = false; pendingExternalUrl = null },
             onImportText = { text ->
                 importOpen = false
+                pendingExternalUrl = null
                 scope.launch {
-                    message = importText(repository, text)
+                    message = importText(repository, text) { ids ->
+                        if (importGroup.isNotEmpty()) updateOrganization(organization.copy(
+                            memberships = organization.memberships + ids.associateWith { importGroup }))
+                    }
                     reload()
                 }
             },
@@ -330,7 +493,12 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                     deleteTarget = null
                     scope.launch {
                         runCatching { repository.delete(rule.id) }
-                            .onSuccess { message = "已删除「${rule.name}」" }
+                            .onSuccess {
+                                updateOrganization(organization.copy(
+                                    memberships = organization.memberships - rule.id,
+                                    favorites = organization.favorites - rule.id))
+                                message = "已删除「${rule.name}」"
+                            }
                             .onFailure { message = "删除失败：${it.message}" }
                         reload()
                     }
@@ -352,6 +520,9 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                     scope.launch {
                         runCatching { repository.deleteMany(ids) }
                             .onSuccess {
+                                updateOrganization(organization.copy(
+                                    memberships = organization.memberships - ids.toSet(),
+                                    favorites = organization.favorites - ids.toSet()))
                                 message = "已删除 ${ids.size} 条规则"
                                 exitSelection()
                             }
@@ -369,6 +540,12 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
 @Composable
 private fun RuleRow(
     rule: HttpTTS,
+    group: String,
+    checkResult: RuleCheckResult?,
+    checking: Boolean,
+    favorite: Boolean,
+    onFavorite: () -> Unit,
+    onMove: () -> Unit,
     selectionMode: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
@@ -390,38 +567,64 @@ private fun RuleRow(
                     YuezhouColors.Surface
                 }
             )
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(12.dp),
-        verticalAlignment = Alignment.Top,
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+                role = if (selectionMode) Role.Checkbox else null,
+            )
+            .then(if (selectionMode) Modifier.semantics {
+                toggleableState = ToggleableState(selected)
+            } else Modifier)
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selectionMode) {
-            Checkbox(checked = selected, onCheckedChange = { onClick() })
+            Box(
+                Modifier.size(22.dp)
+                    .clip(CircleShape)
+                    .background(if (selected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent)
+                    .border(1.5.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) Icon(Icons.Default.Check, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
+            }
+            Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f)) {
             Text(rule.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(group, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
             Text(
-                rule.url,
+                when {
+                    checking -> "检测中…"
+                    checkResult == null -> "未检测"
+                    checkResult.success -> "检测可用"
+                    else -> "检测失败：${checkResult.detail}"
+                },
                 style = MaterialTheme.typography.bodySmall,
-                color = YuezhouColors.TextSecondary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                color = when {
+                    checking || checkResult == null -> YuezhouColors.TextSecondary
+                    checkResult.success -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.error
+                },
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
-            val extras = buildList {
-                if (rule.pauseDuration > 0) add("停顿 ${rule.pauseDuration}ms")
-                if (!rule.contentType.isNullOrBlank()) add("类型 ${rule.contentType}")
-                if (!rule.loginUrl.isNullOrBlank() || !rule.loginUi.isNullOrBlank()) add("需登录")
-                if (!rule.concurrentRate.isNullOrBlank() && rule.concurrentRate != "0") add("并发 ${rule.concurrentRate}")
-            }
-            if (extras.isNotEmpty()) {
-                Text(extras.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = YuezhouColors.TextSecondary)
-            }
             if (!selectionMode) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                var menu by remember { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onFavorite) { Text(if (favorite) "★" else "☆") }
                     TextButton(onClick = onAudition) { Text("试听") }
-                    TextButton(onClick = onEdit) { Text("编辑") }
-                    onLogin?.let { TextButton(onClick = it) { Text("登录") } }
-                    TextButton(onClick = onExport) { Text("导出") }
-                    TextButton(onClick = onDelete) { Text("删除") }
+                    Box {
+                        TextButton(onClick = { menu = true }) { Text("更多") }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(text = { Text("移动到分组") }, onClick = { menu = false; onMove() })
+                            DropdownMenuItem(text = { Text("编辑") }, onClick = { menu = false; onEdit() })
+                            onLogin?.let { action -> DropdownMenuItem(text = { Text("登录") }, onClick = { menu = false; action() }) }
+                            DropdownMenuItem(text = { Text("导出") }, onClick = { menu = false; onExport() })
+                            DropdownMenuItem(text = { Text("删除") }, onClick = { menu = false; onDelete() })
+                        }
+                    }
                 }
             }
         }
@@ -429,11 +632,11 @@ private fun RuleRow(
 }
 
 @Composable
-private fun ImportDialog(onDismiss: () -> Unit, onImportText: (String) -> Unit) {
+private fun ImportDialog(initialUrl: String = "", onDismiss: () -> Unit, onImportText: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var text by remember { mutableStateOf("") }
-    var url by remember { mutableStateOf("") }
+    var url by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialUrl) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -483,11 +686,11 @@ private fun ImportDialog(onDismiss: () -> Unit, onImportText: (String) -> Unit) 
                     }) { Text("从剪贴板粘贴") }
                 }
                 error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                if (busy) CircularProgressIndicator(Modifier.height(20.dp), strokeWidth = 2.dp)
+                if (busy) NetworkTtsLoading("正在下载规则…")
             }
         },
         confirmButton = {
-            TextButton(enabled = text.isNotBlank(), onClick = { onImportText(text) }) { Text("导入") }
+            TextButton(enabled = !busy && text.isNotBlank(), onClick = { onImportText(text) }) { Text("导入") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
@@ -756,6 +959,13 @@ private fun AuditionDialog(
     val playing = state.phase == NetworkTtsAudition.Phase.PLAYING
     val busy = state.phase == NetworkTtsAudition.Phase.SYNTHESIZING
 
+    LaunchedEffect(rule.id) {
+        audition.audition(rule, text, speed.toInt())
+    }
+    DisposableEffect(audition, rule.id) {
+        onDispose { audition.stop() }
+    }
+
     LaunchedEffect(state.phase) {
         while (state.phase == NetworkTtsAudition.Phase.PLAYING && isActive) {
             audition.refreshProgress()
@@ -767,7 +977,7 @@ private fun AuditionDialog(
         onDismissRequest = onDismiss,
         title = { Text("试听 · ${rule.name}") },
         text = {
-            Column {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -781,7 +991,7 @@ private fun AuditionDialog(
                     style = MaterialTheme.typography.bodySmall
                 )
                 Slider(value = speed, onValueChange = { speed = it }, valueRange = NetworkTtsSynthesizer.MIN_SPEECH_RATE.toFloat()..NetworkTtsSynthesizer.MAX_SPEECH_RATE.toFloat(), steps = NetworkTtsSynthesizer.MAX_SPEECH_RATE - NetworkTtsSynthesizer.MIN_SPEECH_RATE - 1)
-                state.message?.let {
+                state.message?.takeUnless { busy }?.let {
                     Text(
                         it,
                         style = MaterialTheme.typography.bodySmall,
@@ -800,10 +1010,7 @@ private fun AuditionDialog(
                     )
                 }
                 if (busy) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.height(16.dp).padding(end = 6.dp), strokeWidth = 2.dp)
-                        Text("合成中…", style = MaterialTheme.typography.bodySmall)
-                    }
+                    NetworkTtsLoading("正在合成试听音频…")
                 }
             }
         },
@@ -827,10 +1034,19 @@ private fun AuditionDialog(
     )
 }
 
-private suspend fun importText(repository: NetworkTtsRuleRepository, text: String): String {
+@Composable
+private fun NetworkTtsLoading(message: String) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(message, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
+        LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)))
+    }
+}
+
+private suspend fun importText(repository: NetworkTtsRuleRepository, text: String, onImported: (List<Long>) -> Unit): String {
     val outcome = runCatching { repository.import(text) }.getOrElse {
         return "导入失败：${it.message}"
     }
+    onImported(outcome.ruleIds)
     return buildString {
         append("导入 ${outcome.imported} 条")
         if (outcome.skipped > 0) append("，跳过重复 ${outcome.skipped} 条")
@@ -843,13 +1059,19 @@ private suspend fun importText(repository: NetworkTtsRuleRepository, text: Strin
 
 private fun fetchText(url: String): String? {
     return runCatching {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        val source = URL(url)
+        require(source.protocol in setOf("http", "https") && source.host.isNotBlank())
+        val connection = (source.openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 30_000
             requestMethod = "GET"
             setRequestProperty("User-Agent", "Mozilla/5.0")
         }
-        connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        try {
+            connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        } finally {
+            connection.disconnect()
+        }
     }.getOrNull()
 }
 

@@ -23,8 +23,10 @@ data class ReaderPreferences(
     val lineHeight: Double = 1.6,
     /** 页面边距（px）。 */
     val pageMargin: Int = 12,
-    /** 主题：light / sepia / dark。 */
+    /** 阅读背景预设，与 ReaderPalette 和 bridge.js 保持一致。 */
     val theme: String = "light",
+    /** manual / day / night / system */
+    val themeMode: String = "manual",
     /** 翻页模式：false=左右翻页，true=上下滚动。 */
     val vertical: Boolean = false,
     /** 翻页动画方式：none=无动画（瞬时），slide=平滑滑动，fade=渐变，ios_curl=iOS 仿真，ripple=水波纹。 */
@@ -37,6 +39,9 @@ data class ReaderPreferences(
     val speechEngine: String = "system",
     /** 网络 TTS 音色对应的已导入规则 ID；0 表示沿用默认规则。 */
     val networkTtsRuleId: Long = 0L,
+    /** 阅读界面网络音色范围：all / group / favorites。 */
+    val networkTtsVoiceScope: String = "all",
+    val networkTtsVoiceGroup: String = "",
     /** Kokoro 模型 ID；空串表示用提供者的默认模型。 */
     val kokoroModel: String = "",
     /** Kokoro 中文音色 ID。 */
@@ -70,12 +75,15 @@ object ReaderSettings {
     private val KEY_FONT_SIZE = intPreferencesKey("font_size")
     private val KEY_LINE_HEIGHT = doublePreferencesKey("line_height")
     private val KEY_PAGE_MARGIN = intPreferencesKey("page_margin")
+    private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
     private val KEY_THEME = stringPreferencesKey("theme")
     private val KEY_VERTICAL = booleanPreferencesKey("vertical")
     private val KEY_PAGE_ANIMATION = stringPreferencesKey("page_animation")
     private val KEY_SPEECH_RATE = floatPreferencesKey("speech_rate")
     private val KEY_SPEECH_VOICE = stringPreferencesKey("speech_voice")
     private val KEY_NETWORK_TTS_RULE = longPreferencesKey("network_tts_rule_id")
+    private val KEY_NETWORK_TTS_VOICE_SCOPE = stringPreferencesKey("network_tts_voice_scope")
+    private val KEY_NETWORK_TTS_VOICE_GROUP = stringPreferencesKey("network_tts_voice_group")
     private val KEY_SPEECH_ENGINE = stringPreferencesKey("speech_engine")
     private val KEY_KOKORO_MODEL = stringPreferencesKey("kokoro_model")
     private val KEY_KOKORO_SPEAKER = intPreferencesKey("kokoro_speaker")
@@ -93,13 +101,16 @@ object ReaderSettings {
                 fontWeight = prefs[KEY_FONT_WEIGHT] ?: 0,
                 lineHeight = prefs[KEY_LINE_HEIGHT] ?: 1.6,
                 pageMargin = prefs[KEY_PAGE_MARGIN] ?: 12,
-                theme = prefs[KEY_THEME] ?: "light",
+                theme = (prefs[KEY_THEME] ?: "light").let { if (it == "custom") "light" else it },
+                themeMode = prefs[KEY_THEME_MODE] ?: "manual",
                 vertical = prefs[KEY_VERTICAL] ?: false,
                 pageAnimation = prefs[KEY_PAGE_ANIMATION] ?: "slide",
                 speechRate = prefs[KEY_SPEECH_RATE] ?: 1.0f,
                 speechVoice = prefs[KEY_SPEECH_VOICE] ?: "",
                 speechEngine = prefs[KEY_SPEECH_ENGINE] ?: "system",
                 networkTtsRuleId = prefs[KEY_NETWORK_TTS_RULE] ?: 0L,
+                networkTtsVoiceScope = prefs[KEY_NETWORK_TTS_VOICE_SCOPE] ?: "all",
+                networkTtsVoiceGroup = prefs[KEY_NETWORK_TTS_VOICE_GROUP] ?: "",
                 kokoroModel = prefs[KEY_KOKORO_MODEL] ?: "",
                 kokoroSpeaker = prefs[KEY_KOKORO_SPEAKER] ?: 3,
                 autoSync = prefs[KEY_AUTO_SYNC] ?: false,
@@ -138,11 +149,14 @@ object ReaderSettings {
         changed(KEY_LINE_HEIGHT, before.lineHeight, prefs.lineHeight)
         changed(KEY_PAGE_MARGIN, before.pageMargin, prefs.pageMargin)
         changed(KEY_THEME, before.theme, prefs.theme)
+        changed(KEY_THEME_MODE, before.themeMode, prefs.themeMode)
         changed(KEY_VERTICAL, before.vertical, prefs.vertical)
         changed(KEY_PAGE_ANIMATION, before.pageAnimation, prefs.pageAnimation)
         changed(KEY_SPEECH_RATE, before.speechRate, prefs.speechRate)
         changed(KEY_SPEECH_VOICE, before.speechVoice, prefs.speechVoice)
         changed(KEY_NETWORK_TTS_RULE, before.networkTtsRuleId, prefs.networkTtsRuleId)
+        changed(KEY_NETWORK_TTS_VOICE_SCOPE, before.networkTtsVoiceScope, prefs.networkTtsVoiceScope)
+        changed(KEY_NETWORK_TTS_VOICE_GROUP, before.networkTtsVoiceGroup, prefs.networkTtsVoiceGroup)
         changed(KEY_SPEECH_ENGINE, before.speechEngine, prefs.speechEngine)
         changed(KEY_KOKORO_MODEL, before.kokoroModel, prefs.kokoroModel)
         changed(KEY_KOKORO_SPEAKER, before.kokoroSpeaker, prefs.kokoroSpeaker)
