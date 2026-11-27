@@ -151,6 +151,7 @@ import com.yuezhou.reader.ui.shelf.ScanResultDialog
 import com.yuezhou.reader.ui.shelf.formatSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -208,6 +209,13 @@ private fun BookshelfScreen() {
     var loading by remember { mutableStateOf(true) }
     var importing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
+    // 顶部操作提示自动消失，避免长期停留在界面上
+    LaunchedEffect(status) {
+        if (status != null) {
+            delay(3000)
+            status = null
+        }
+    }
     // 刷新触发计数：+1 触发重新加载书库
     var refreshKey by remember { mutableStateOf(0) }
     var loadedShelfVersion by remember { mutableStateOf(0) }
