@@ -12,15 +12,20 @@ import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.ReaderPreferences
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 internal fun ReaderThemeControls(prefs: ReaderPreferences, onChange: (ReaderPreferences) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("背景色", style = MaterialTheme.typography.titleSmall)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            maxItemsInEachRow = 5,
+        ) {
             ReaderPalette.themes.forEach { (value, title) ->
                 FilterChip(
                     selected = prefs.themeMode == "manual" && prefs.theme == value,
                     onClick = { onChange(prefs.copy(theme = value, themeMode = "manual")) },
-                    label = { Text(title) },
+                    label = { Text(title, maxLines = 1, softWrap = false) },
                     leadingIcon = { Box(Modifier.size(14.dp).background(ReaderPalette.background(value), RoundedCornerShape(4.dp))) },
                 )
             }
