@@ -35,7 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.yuezhou.reader.CloudBookshelfContent
+import com.yuezhou.reader.ui.shelf.CloudBookshelfContent
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.provider.BookProvider
 import com.yuezhou.reader.core.online.provider.CatalogBookProvider
