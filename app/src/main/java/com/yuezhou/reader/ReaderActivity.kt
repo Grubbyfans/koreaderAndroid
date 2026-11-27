@@ -45,18 +45,25 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Slider
@@ -1364,9 +1371,26 @@ private fun ReaderPanel(
                     // 底部操作：目录 + 朗读 + 同步 + 设置（设置默认收起）
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        PanelAction("目录", onClick = onOpenToc)
+                        AssistChip(
+                            onClick = onOpenToc,
+                            label = { Text("目录") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.List,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            },
+                            border = null,
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                leadingIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            ),
+                        )
                         listOf(ReaderOverlay.Layout, ReaderOverlay.Theme, ReaderOverlay.Speech, ReaderOverlay.More).forEach { item ->
                             FilterChip(
                                 selected = overlay == item,
@@ -1395,11 +1419,6 @@ private fun ReaderPanel(
         }
     }
     }
-}
-
-@Composable
-private fun PanelAction(label: String, onClick: () -> Unit) {
-    TextButton(onClick = onClick) { Text(label) }
 }
 
 @Composable
@@ -1486,30 +1505,29 @@ private fun SettingsControls(
                 )
             }
             // 翻页模式
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text("翻页", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(12.dp))
-                TextButton(onClick = { onPrefsChange(prefs.copy(vertical = false)) }) {
-                    Text(
-                        "左右",
-                        color = if (!prefs.vertical) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (!prefs.vertical) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
-                TextButton(onClick = { onPrefsChange(prefs.copy(vertical = true)) }) {
-                    Text(
-                        "上下",
-                        color = if (prefs.vertical) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (prefs.vertical) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
+                FilterChip(
+                    selected = !prefs.vertical,
+                    onClick = { onPrefsChange(prefs.copy(vertical = false)) },
+                    label = { Text("左右") },
+                )
+                FilterChip(
+                    selected = prefs.vertical,
+                    onClick = { onPrefsChange(prefs.copy(vertical = true)) },
+                    label = { Text("上下") },
+                )
             }
             // 翻页动画方式
-            Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text("动画", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(12.dp))
                 listOf(
                     "none" to "无动画",
                     "slide" to "滑动",
@@ -1517,14 +1535,11 @@ private fun SettingsControls(
                     "ios_curl" to "iOS 仿真",
                     "ripple" to "水波纹",
                 ).forEach { (value, label) ->
-                    TextButton(onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) }) {
-                        Text(
-                            label,
-                            color = if (prefs.pageAnimation == value) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (prefs.pageAnimation == value) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    }
+                    FilterChip(
+                        selected = prefs.pageAnimation == value,
+                        onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) },
+                        label = { Text(label) },
+                    )
                 }
             }
             // 水波纹动画参数：仅选中水波纹时显示，实时预览、松手提交，下一次翻页生效。
@@ -1573,7 +1588,10 @@ private fun SettingsControls(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                TextButton(onClick = { onPrefsChange(prefs.copy(rippleDurationMs = 280, rippleRatio = 35)) }) {
+                OutlinedButton(
+                    onClick = { onPrefsChange(prefs.copy(rippleDurationMs = 280, rippleRatio = 35)) },
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                ) {
                     Text("恢复默认参数", style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -1602,9 +1620,21 @@ private fun SettingsControls(
             }
         }
         if (overlay == ReaderOverlay.Speech) {
-            TextButton(onClick = onSpeak) { Text(if (speaking) {
-                if (prefs.speechEngine == "network_tts") "暂停朗读" else "停止朗读"
-            } else "开始朗读") }
+            Button(
+                onClick = onSpeak,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            ) {
+                Icon(
+                    imageVector = if (speaking) Icons.Filled.Close else Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(if (speaking) {
+                    if (prefs.speechEngine == "network_tts") "暂停朗读" else "停止朗读"
+                } else "开始朗读")
+            }
+            Spacer(Modifier.height(8.dp))
             // 朗读语速
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("语速", style = MaterialTheme.typography.bodyMedium)
@@ -1637,38 +1667,38 @@ private fun SettingsControls(
                 if (kokoroAvailable) "kokoro" to "Kokoro" else null,
                 if (networkTtsAvailable) "network_tts" to "网络 TTS" else null,
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text("引擎", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(12.dp))
                 engines.forEach { (tag, label) ->
                     val selected = when {
                         tag == "system" -> activeEngine == SpeechEngineType.SYSTEM_TTS
                         tag == "kokoro" -> activeEngine == SpeechEngineType.KOKORO
                         else -> activeEngine == SpeechEngineType.NETWORK_TTS
                     }
-                    TextButton(onClick = { onPrefsChange(prefs.copy(speechEngine = tag)) }) {
-                        Text(
-                            label,
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    }
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onPrefsChange(prefs.copy(speechEngine = tag)) },
+                        label = { Text(label) },
+                    )
                 }
             }
             if (activeEngine == SpeechEngineType.KOKORO && kokoroModels.isNotEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text("模型", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.width(12.dp))
                     kokoroModels.forEach { model ->
-                        TextButton(onClick = { onPrefsChange(prefs.copy(kokoroModel = model.id)) }) {
-                            Text(
-                                model.label,
-                                color = if (prefs.kokoroModel == model.id) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = if (prefs.kokoroModel == model.id) FontWeight.Bold else FontWeight.Normal,
-                            )
-                        }
+                        FilterChip(
+                            selected = prefs.kokoroModel == model.id,
+                            onClick = { onPrefsChange(prefs.copy(kokoroModel = model.id)) },
+                            label = { Text(model.label) },
+                        )
                     }
                 }
                 KokoroSpeakerPreference(prefs.kokoroSpeaker) { id ->
@@ -1687,7 +1717,18 @@ private fun SettingsControls(
             }
         }
         if (overlay == ReaderOverlay.More) {
-            TextButton(onClick = onSync) { Text("阅读进度同步") }
+            FilledTonalButton(
+                onClick = onSync,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("阅读进度同步")
+            }
         }
     }
 }
@@ -1708,7 +1749,17 @@ private fun KokoroSpeakerPreference(selectedId: Int, onSelect: (Int) -> Unit) {
     val selectedLabel = presets.firstOrNull { it.first == selectedId }?.second ?: "sid $selectedId"
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("Kokoro 音色", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        TextButton(onClick = { open = true }) { Text(selectedLabel) }
+        OutlinedButton(
+            onClick = { open = true },
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Text(selectedLabel)
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
     if (open) {
         AlertDialog(
@@ -1756,7 +1807,17 @@ private fun SpeechVoicePreference(voices: List<TtsVoice>, selectedName: String, 
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("音色", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        TextButton(onClick = { open = true }) { Text(selectedLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        OutlinedButton(
+            onClick = { open = true },
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Text(selectedLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 
     if (open) {
@@ -1800,7 +1861,14 @@ private fun SpeechVoicePreference(voices: List<TtsVoice>, selectedName: String, 
 @Composable
 private fun SpeechVoiceOption(label: String, details: String?, selected: Boolean, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = null)
