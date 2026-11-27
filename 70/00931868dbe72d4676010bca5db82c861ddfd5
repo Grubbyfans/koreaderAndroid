@@ -1,0 +1,24 @@
+app/build.gradle.kts
+  s_f47bea30c0ae06::t_e4e859ba0cb387 88-89
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_f47bea30c0ae06::t_e4e859ba0cb387 1708,1737,1739,1741-1753
+app/src/androidTest/java/com/yuezhou/reader/TocDrawerTest.kt
+  s_f47bea30c0ae06::t_8296224fd598c6 1-5,7-10,12-37,39-60
+  s_f47bea30c0ae06::t_f126f5539ae02a 6,11,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7000931868dbe72d4676010bca5db82c861ddfd5",
+  "prompts": {},
+  "sessions": {
+    "s_f47bea30c0ae06": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21a8a-469d-7e62-8492-827a00f524b7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
