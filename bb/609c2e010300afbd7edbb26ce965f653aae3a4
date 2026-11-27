@@ -1,0 +1,62 @@
+docs/00-项目总览/功能完成情况.md
+  s_af381516367eab::t_57542f24ae1c59 44
+core/src/main/java/com/yuezhou/reader/core/protocol/CoverFile.kt
+  s_af381516367eab::t_57542f24ae1c59 11-12,16-17,37-39,44-46,51-58
+  s_af381516367eab::t_745e5477e4e06f 25
+speech/src/main/java/com/yuezhou/reader/speech/TtsEngine.kt
+  s_383e2e6443254a::t_4ce7a702111680 4,59-64
+app/src/main/java/com/yuezhou/reader/MainActivity.kt
+  s_f516a4dea8083f::t_77310a0d59aa5e 850,1622,1684,1709
+app/src/main/java/com/yuezhou/reader/ReaderActivity.kt
+  s_383e2e6443254a::t_363debe7284ce1 557,1001
+app/build.gradle.kts
+  s_f516a4dea8083f::t_77310a0d59aa5e 14-15
+speech/src/main/java/com/yuezhou/reader/speech/SpeechPlanStore.kt
+  s_383e2e6443254a::t_4ce7a702111680 117-118
+reader/src/main/java/com/yuezhou/reader/reader/ReaderWebView.kt
+  s_383e2e6443254a::t_cace1e7305f462 393-398
+  s_383e2e6443254a::t_363debe7284ce1 42,389-392,399,402-407
+reader/src/main/java/com/yuezhou/reader/reader/CoverExtractor.kt
+  s_af381516367eab::t_57542f24ae1c59 5-6,15-17,21,28,152,182-189,199-210,212
+reader/src/main/java/com/yuezhou/reader/reader/CloudSync.kt
+  s_af381516367eab::t_57542f24ae1c59 522
+reader/src/main/java/com/yuezhou/reader/reader/LibraryStore.kt
+  s_af381516367eab::t_57542f24ae1c59 264
+docs/00-项目总览/Android阅读App_技术方案.md
+  s_af381516367eab::t_57542f24ae1c59 196
+speech/src/main/java/com/yuezhou/reader/speech/SpeechService.kt
+  s_383e2e6443254a::t_363debe7284ce1 24,114,163,694,712,1042,1058-1063,1065-1071,1157-1184
+  s_383e2e6443254a::t_cace1e7305f462 589,591
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bb609c2e010300afbd7edbb26ce965f653aae3a4",
+  "prompts": {},
+  "sessions": {
+    "s_383e2e6443254a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21ab0-aaf7-7773-b4ec-b786806bf11d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    },
+    "s_af381516367eab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21a94-f5c9-7f60-a4b1-e2ffe6aeab60",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    },
+    "s_f516a4dea8083f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21ab6-fea8-7ab3-afd2-61265c5b38a5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "周康 <1412873631@qq.com>"
+    }
+  }
+}
