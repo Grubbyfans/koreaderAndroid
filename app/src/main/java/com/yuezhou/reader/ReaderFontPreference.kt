@@ -2,6 +2,8 @@ package com.yuezhou.reader
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -104,35 +106,25 @@ internal fun ReaderFontPreference(selectedId: String, selectedWeight: Int, outli
     error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
 
     if (selecting) {
-        AlertDialog(
-            onDismissRequest = { selecting = false },
-            title = { Text("阅读字体") },
-            text = {
-                androidx.compose.foundation.lazy.LazyColumn {
-                    items(choices.size) { index ->
-                        val font = choices[index]
-                        TextButton(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                selecting = false
-                                error = null
-                                scope.launch { ReaderSettings.selectFont(context, font.id) }
-                            },
-                        ) {
-                            Column(Modifier.fillMaxWidth()) {
-                                Text(if (font.id == selected.id) "✓ ${font.label}" else font.label)
-                            }
-                        }
+        com.yuezhou.reader.ui.components.AppBottomSheet("阅读字体", onDismiss = { selecting = false }) {
+            TextButton(onClick = {
+                selecting = false
+                importFont.launch(arrayOf("*/*"))
+            }) { Text("导入 TTF / OTF") }
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                items(choices.size) { index ->
+                    val font = choices[index]
+                    Row(Modifier.fillMaxWidth().selectable(selected = font.id == selected.id,
+                        role = androidx.compose.ui.semantics.Role.RadioButton, onClick = {
+                            selecting = false
+                            error = null
+                            scope.launch { ReaderSettings.selectFont(context, font.id) }
+                        }).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.RadioButton(selected = font.id == selected.id, onClick = null)
+                        Text(font.label, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    selecting = false
-                    importFont.launch(arrayOf("*/*"))
-                }) { Text("导入 TTF / OTF") }
-            },
-            dismissButton = { TextButton(onClick = { selecting = false }) { Text("关闭") } },
-        )
+            }
+        }
     }
 }

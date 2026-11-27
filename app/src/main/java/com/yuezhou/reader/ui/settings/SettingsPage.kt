@@ -1,5 +1,10 @@
 package com.yuezhou.reader.ui.settings
 
+import com.yuezhou.reader.ui.components.SectionCard as SettingsCard
+import com.yuezhou.reader.ui.components.SettingSwitchRow
+import com.yuezhou.reader.ui.components.SettingNavigationRow
+import com.yuezhou.reader.ui.components.PageBackHeader
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -216,26 +221,20 @@ internal fun SettingsPage(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (route == SettingsRoute.Home) {
-            SettingsRoute.groups.forEach { group ->
-                Surface(
-                    Modifier.fillMaxWidth().clickable { onNavigate(group) },
-                    shape = MaterialTheme.shapes.large,
-                    color = YuezhouColors.Surface,
-                    border = BorderStroke(1.dp, YuezhouColors.Divider),
-                ) {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(group.title, style = MaterialTheme.typography.titleMedium)
-                            Text(group.description, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
-                        }
-                        Text("›", style = MaterialTheme.typography.titleLarge, color = YuezhouColors.BrandDark)
+            listOf(
+                "阅读体验" to listOf(SettingsRoute.Reading, SettingsRoute.Appearance, SettingsRoute.Speech),
+                "书库与数据" to listOf(SettingsRoute.Sources, SettingsRoute.Sync, SettingsRoute.Downloads),
+                "其他" to listOf(SettingsRoute.About),
+            ).forEach { (title, groups) ->
+                SettingsCard(title) {
+                    groups.forEachIndexed { index, group ->
+                        if (index > 0) androidx.compose.material3.HorizontalDivider()
+                        SettingNavigationRow(group.title, group.description) { onNavigate(group) }
                     }
                 }
             }
         } else {
-            TextButton(onClick = { onNavigate(route.parent) }) { Text("返回") }
-            LibraryPageHeading(route.title)
+            PageBackHeader(route.title) { onNavigate(route.parent) }
         }
 
         if (route == SettingsRoute.Sync) {
@@ -244,21 +243,9 @@ internal fun SettingsPage(
             }
 
             SettingsCard("自动同步进度") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("自动同步", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "打开书籍时，云端位置更靠后则自动续读，更靠前则询问。退出或切出时，本机进度会覆盖云端。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = YuezhouColors.TextSecondary,
-                        )
-                    }
-                    Switch(
-                        checked = prefs.autoSync,
-                        onCheckedChange = { enabled ->
-                            scope.launch { ReaderSettings.save(context, prefs, prefs.copy(autoSync = enabled)) }
-                        },
-                    )
+                SettingSwitchRow("自动同步", prefs.autoSync,
+                    "打开书籍时，云端位置更靠后则自动续读，更靠前则询问。退出或切出时，本机进度会覆盖云端。") { enabled ->
+                    scope.launch { ReaderSettings.save(context, prefs, prefs.copy(autoSync = enabled)) }
                 }
                 Spacer(Modifier.height(8.dp))
                 // 同步记录入口：点击进入独立页面
@@ -310,26 +297,11 @@ internal fun SettingsPage(
         if (route == SettingsRoute.Appearance) {
             SettingsCard("主题与动效") { AppearanceOptions() }
             SettingsCard("书架布局") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("使用网格", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = localGridMode, onCheckedChange = onLocalGridMode)
-                }
+                SettingSwitchRow("使用网格", localGridMode, onCheckedChange = onLocalGridMode)
             }
             SettingsCard("栏目切换") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("左右滑动切换栏目", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "关闭后仅能点击底部导航与书源标签切换",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = YuezhouColors.TextSecondary,
-                        )
-                    }
-                    Switch(
-                        checked = tabSwipeEnabled,
-                        onCheckedChange = onTabSwipeChange,
-                    )
-                }
+                SettingSwitchRow("左右滑动切换栏目", tabSwipeEnabled,
+                    "关闭后仅能点击底部导航与书源标签切换", onTabSwipeChange)
             }
         }
 
@@ -588,23 +560,7 @@ private fun SyncLogPage(onBack: () -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 顶部栏：返回 + 标题
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) {
-                Text("← 返回", color = YuezhouColors.BrandDark)
-            }
-            Text(
-                "同步记录（最近 20 次）",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(64.dp))
-        }
+        PageBackHeader("同步记录（最近 20 次）", onBack)
         // 记录列表
         val list = logs
         if (list == null) {
@@ -630,8 +586,8 @@ private fun SyncLogPage(onBack: () -> Unit) {
                     val dirLabel = if (log.direction == "pull") "拉取" else "上传"
                     val time = formatLocalTime("MM-dd HH:mm:ss", log.at)
                     val (okLabel, okColor) = when (log.outcome) {
-                        SyncLogEntity.Outcome.SUCCESS -> "成功" to YuezhouColors.BrandDark
-                        SyncLogEntity.Outcome.OFFER -> "待确认" to MaterialTheme.colorScheme.tertiary
+                        SyncLogEntity.Outcome.SUCCESS -> "✓ 成功" to YuezhouColors.Success
+                        SyncLogEntity.Outcome.OFFER -> "待确认" to YuezhouColors.Warning
                         else -> "失败" to MaterialTheme.colorScheme.error
                     }
                     Surface(
@@ -669,56 +625,13 @@ private fun SyncLogPage(onBack: () -> Unit) {
                                 overflow = TextOverflow.Ellipsis,
                             )
                             if (log.message.isNotBlank()) {
-                                Text(
-                                    log.message,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = YuezhouColors.TextSecondary,
-                                )
+                                var expanded by remember(log.id) { mutableStateOf(false) }
+                                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起详情" else "查看详情") }
+                                if (expanded) Text(log.message, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
                             }
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingsCard(
-    title: String,
-    highlighted: Boolean = false,
-    expanded: Boolean = true,
-    onToggle: (() -> Unit)? = null,
-    content: @Composable () -> Unit,
-) {
-    val color = if (highlighted) YuezhouColors.BrandContainer else YuezhouColors.Surface
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = color,
-        border = BorderStroke(1.dp, if (highlighted) YuezhouColors.Brand.copy(alpha = 0.20f) else YuezhouColors.Divider),
-    ) {
-        Column {
-            val header = Modifier.fillMaxWidth()
-            Row(
-                modifier = (if (onToggle != null) header.clickable(onClick = onToggle) else header)
-                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                if (onToggle != null) {
-                    Icon(
-                        if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                        contentDescription = if (expanded) "收起" else "展开",
-                        tint = YuezhouColors.TextSecondary,
-                    )
-                }
-            }
-            if (expanded) {
-                Column(
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) { content() }
             }
         }
     }

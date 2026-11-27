@@ -23,7 +23,8 @@ internal fun ReaderThemeControls(prefs: ReaderPreferences, onChange: (ReaderPref
                 FilterChip(
                     selected = prefs.themeMode == "manual" && prefs.theme == value,
                     onClick = { onChange(prefs.copy(theme = value, themeMode = "manual")) },
-                    label = { Text(title, maxLines = 1, softWrap = false) },
+                    label = { Text(title, maxLines = 1) },
+                    modifier = Modifier.widthIn(min = 84.dp).heightIn(min = 48.dp),
                     leadingIcon = { Box(Modifier.size(14.dp).background(ReaderPalette.background(value), RoundedCornerShape(4.dp))) },
                 )
             }

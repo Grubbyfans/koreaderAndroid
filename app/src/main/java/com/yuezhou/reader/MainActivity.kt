@@ -16,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -26,7 +28,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -226,7 +227,6 @@ private fun BookshelfScreen() {
     var localBookDetail by remember { mutableStateOf<LibraryStore.Entry?>(null) }
     // 待确认删除的书（弹二次确认框用）；非空时展示确认弹窗
     var pendingDelete by remember { mutableStateOf<Set<String>?>(null) }
-    var shelfMenuOpen by remember { mutableStateOf(false) }
     var showHiddenBooks by remember { mutableStateOf(false) }
     var deletingLocalBooks by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -564,40 +564,6 @@ private fun BookshelfScreen() {
                                 }
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
-                        Box {
-                            IconButton(enabled = selected.isNotEmpty() && !deletingLocalBooks, onClick = { shelfMenuOpen = true }) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "更多")
-                            }
-                            DropdownMenu(expanded = shelfMenuOpen, onDismissRequest = { shelfMenuOpen = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("从书架移除") },
-                                    onClick = {
-                                        shelfMenuOpen = false
-                                        selecting = null
-                                        store.setBooksHidden(selected, true)
-                                        hiddenBooks = store.hiddenBookIds()
-                                        scope.launch {
-                                            val result = snackbarHostState.showSnackbar(
-                                                message = "已从书架移除 ${selected.size} 本，文件已保留",
-                                                actionLabel = "撤销",
-                                                duration = SnackbarDuration.Short,
-                                            )
-                                            if (result == SnackbarResult.ActionPerformed) {
-                                                store.setBooksHidden(selected, false)
-                                                hiddenBooks = store.hiddenBookIds()
-                                            }
-                                        }
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("删除本机文件", color = MaterialTheme.colorScheme.error) },
-                                    onClick = {
-                                        shelfMenuOpen = false
-                                        pendingDelete = selected
-                                    },
-                                )
-                            }
-                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = YuezhouColors.Surface,
@@ -731,7 +697,7 @@ private fun BookshelfScreen() {
         },
         floatingActionButton = {
             // 云端刷新改由下拉刷新与「更多」菜单承接，不再使用悬浮按钮。
-            if (!fullscreenSubPage && currentTab == Tab.书架) {
+            if (!fullscreenSubPage && currentTab == Tab.书架 && selecting == null) {
                 FloatingActionButton(
                     onClick = {
                         if (!scanning && !importing) importOptionsOpen = true
@@ -744,7 +710,30 @@ private fun BookshelfScreen() {
             }
         },
         bottomBar = {
-            if (!fullscreenSubPage) {
+            if (!fullscreenSubPage && currentTab == Tab.书架 && selecting != null) {
+                val selected = selecting!!
+                Surface(color = YuezhouColors.Surface) {
+                    Row(Modifier.fillMaxWidth().windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.navigationBars)
+                        .padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        TextButton(enabled = selected.isNotEmpty() && !deletingLocalBooks, onClick = {
+                            selecting = null
+                            store.setBooksHidden(selected, true)
+                            hiddenBooks = store.hiddenBookIds()
+                            scope.launch {
+                                val result = snackbarHostState.showSnackbar(
+                                    message = "已从书架移除 ${selected.size} 本，文件已保留", actionLabel = "撤销", duration = SnackbarDuration.Short)
+                                if (result == SnackbarResult.ActionPerformed) {
+                                    store.setBooksHidden(selected, false)
+                                    hiddenBooks = store.hiddenBookIds()
+                                }
+                            }
+                        }) { Text("从书架移除") }
+                        TextButton(enabled = selected.isNotEmpty() && !deletingLocalBooks, onClick = { pendingDelete = selected }) {
+                            Text("删除本机文件", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            } else if (!fullscreenSubPage) {
                 BottomNavBar(
                     current = currentTab,
                     onSelect = { tab ->
@@ -1163,22 +1152,16 @@ private fun BookshelfScreen() {
     }
 
     if (importOptionsOpen) {
-        AlertDialog(
-            onDismissRequest = { importOptionsOpen = false },
-            title = { Text("导入书籍") },
-            dismissButton = {
-                TextButton(onClick = {
-                    importOptionsOpen = false
-                    pickDirectory.launch(null)
-                }) { Text("扫描指定文件夹") }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    importOptionsOpen = false
-                    pickEpub.launch(arrayOf("application/epub+zip"))
-                }) { Text("选择书籍") }
-            },
-        )
+        com.yuezhou.reader.ui.components.AppBottomSheet("导入书籍", onDismiss = { importOptionsOpen = false }) {
+            com.yuezhou.reader.ui.components.SettingNavigationRow("选择书籍", "从文件中选择 EPUB") {
+                importOptionsOpen = false
+                pickEpub.launch(arrayOf("application/epub+zip"))
+            }
+            com.yuezhou.reader.ui.components.SettingNavigationRow("扫描指定文件夹", "查找文件夹中的 EPUB 书籍") {
+                importOptionsOpen = false
+                pickDirectory.launch(null)
+            }
+        }
     }
 
     // 扫描结果弹窗（方案 §8.3：列出发现的 EPUB + 同名冲突位置，不自动选）

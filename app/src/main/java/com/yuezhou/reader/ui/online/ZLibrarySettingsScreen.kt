@@ -210,9 +210,8 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onOpenServerSettings() },
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 color = YuezhouColors.Surface,
-                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -245,9 +244,8 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 color = YuezhouColors.Surface,
-                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("默认偏好", style = MaterialTheme.typography.titleMedium)
@@ -279,9 +277,8 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 color = YuezhouColors.Surface,
-                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("配置管理", style = MaterialTheme.typography.titleMedium)
@@ -332,9 +329,8 @@ fun ZLibrarySettingsScreen(onBack: () -> Unit, onOpenServerSettings: () -> Unit)
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 color = YuezhouColors.Surface,
-                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("账号", style = MaterialTheme.typography.titleMedium)

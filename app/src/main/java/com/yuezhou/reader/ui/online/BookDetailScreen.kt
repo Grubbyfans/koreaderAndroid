@@ -121,18 +121,7 @@ fun BookDetailScreen(
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
-                        Surface(
-                            Modifier.fillMaxSize(),
-                            color = coverPlaceholderColor(book.title),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    book.title.take(1).ifBlank { "书" },
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.headlineMedium,
-                                )
-                            }
-                        }
+                        com.yuezhou.reader.ui.components.BookCoverPlaceholder(book.title, book.title)
                     }
                 }
                 Spacer(Modifier.width(14.dp))

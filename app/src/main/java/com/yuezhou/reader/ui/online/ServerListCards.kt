@@ -66,9 +66,8 @@ fun ServerListCard(
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.large,
         color = YuezhouColors.Surface,
-        border = BorderStroke(1.dp, YuezhouColors.Divider),
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

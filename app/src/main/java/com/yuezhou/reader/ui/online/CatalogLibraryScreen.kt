@@ -236,7 +236,7 @@ fun CatalogLibraryScreen(
                     Spacer(Modifier.height(12.dp))
                     OutlinedButton(onClick = ::openWebSearch) { Text("网页搜索") }
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = onOpenSettings) { Text("配置 Z-Library 服务器") }
+                    TextButton(onClick = onOpenSettings) { Text("配置 Z-Library 服务器") }
                 }
             }
             state.items.isEmpty() -> {
@@ -712,8 +712,7 @@ private fun RemoteCover(
     }
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, YuezhouColors.Divider),
+        shape = MaterialTheme.shapes.extraSmall,
         color = coverPlaceholderColor(title),
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -725,12 +724,7 @@ private fun RemoteCover(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                Text(
-                    title.take(1).ifBlank { "书" },
-                    style = MaterialTheme.typography.titleLarge,
-                    color = Color.White,
-                    textAlign = TextAlign.Center,
-                )
+                com.yuezhou.reader.ui.components.BookCoverPlaceholder(title, title)
             }
         }
     }

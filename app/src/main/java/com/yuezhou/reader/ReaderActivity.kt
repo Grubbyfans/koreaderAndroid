@@ -853,13 +853,26 @@ private fun ReaderScreen(
         animationController?.setRippleParams(readerPrefs.rippleDurationMs, readerPrefs.rippleRatio)
     }
 
+    val chromeTheme = LocalYuezhouThemeDefinition.current
+    val chromeDark = ReaderPalette.isDark(effectiveTheme)
+    val chromeColors = ReaderPalette.panelTheme(chromeTheme.colors(chromeDark), effectiveTheme)
+    androidx.compose.runtime.SideEffect {
+        (context as? android.app.Activity)?.let { activity ->
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
+                isAppearanceLightStatusBars = !chromeDark
+                isAppearanceLightNavigationBars = !chromeDark
+            }
+        }
+    }
+    val chromeMotion = LocalAppMotionEnabled.current
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open,
         drawerContent = {
+            YuezhouThemeStyle(chromeTheme, chromeDark, MaterialTheme.shapes, MaterialTheme.typography, chromeColors) {
             ModalDrawerSheet(
                 modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
-                drawerContainerColor = YuezhouColors.Surface,
+                drawerContainerColor = chromeColors.surface,
                 drawerShape = RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp),
             ) {
                 TocDrawer(
@@ -875,6 +888,7 @@ private fun ReaderScreen(
                         webView?.goToToc(item.href)
                     },
                 )
+            }
             }
         },
     ) {
@@ -996,8 +1010,8 @@ private fun ReaderScreen(
             // 沉浸式面板：顶部（返回+书名+章节）+ 底部（目录/进度/设置）
             AnimatedVisibility(
                 visible = panelVisible,
-                enter = fadeIn(tween(200)),
-                exit = fadeOut(tween(180)),
+                enter = fadeIn(tween(if (chromeMotion) YuezhouMotion.Page else 0)),
+                exit = fadeOut(tween(if (chromeMotion) YuezhouMotion.Selection else 0)),
             ) {
                 val kokoroModels = SpeechRuntime.kokoro?.availableModels().orEmpty()
                 ReaderPanel(

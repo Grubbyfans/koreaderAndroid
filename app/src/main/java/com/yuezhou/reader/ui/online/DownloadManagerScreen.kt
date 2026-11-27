@@ -420,7 +420,8 @@ private fun DownloadTaskRow(
             )
         }
         task.errorMessage?.let { message ->
-            Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            var expanded by remember(task.taskId, message) { mutableStateOf(false) }
+            com.yuezhou.reader.ui.components.StatusDetail("! 任务异常", message, true, expanded) { expanded = !expanded }
         }
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (task.status.active || task.status == DownloadStatus.AWAITING_NAME) {

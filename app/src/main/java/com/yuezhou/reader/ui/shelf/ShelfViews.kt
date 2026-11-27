@@ -1,5 +1,7 @@
 package com.yuezhou.reader.ui.shelf
 
+import com.yuezhou.reader.ui.components.BookCoverPlaceholder
+
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -392,6 +394,7 @@ internal fun CloudBookshelfContent(
                             book = book,
                             onClick = { onOpenDetail(book) },
                             coversEnabled = coversEnabled,
+                            coverRefreshKey = fetchedAt,
                             loadCover = loadCover,
                         )
                     }
@@ -413,10 +416,11 @@ internal fun CloudBookCard(
     book: CloudSync.RemoteBook,
     onClick: () -> Unit,
     coversEnabled: Boolean,
+    coverRefreshKey: Long,
     loadCover: suspend (CloudSync.RemoteBook) -> ByteArray?,
 ) {
     val cover = androidx.compose.runtime.key(book.cloudCover, book.coverPng) {
-        val bytes by produceState(book.coverPng, coversEnabled) {
+        val bytes by produceState(book.coverPng, coversEnabled, coverRefreshKey) {
             if (coversEnabled && value == null) value = loadCover(book)
         }
         bytes
@@ -431,7 +435,7 @@ internal fun CloudBookCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.75f)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(MaterialTheme.shapes.extraSmall)
                 .background(coverPlaceholderColor(book.bookId)),
             contentAlignment = Alignment.Center,
         ) {
@@ -442,15 +446,7 @@ internal fun CloudBookCard(
                     contentScale = ContentScale.FillBounds,
                 )
             } else {
-                Text(
-                    text = book.bookId,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    textAlign = TextAlign.Center,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(8.dp),
-                )
+                BookCoverPlaceholder(book.bookId, book.bookId)
             }
 
             // 本机已存在角标
@@ -461,7 +457,7 @@ internal fun CloudBookCard(
                         .padding(6.dp)
                         .size(22.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(Color.White.copy(alpha = 0.92f)),
+                        .background(MaterialTheme.colorScheme.surface),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -716,17 +712,7 @@ internal fun BookCard(
                     contentScale = ContentScale.FillBounds,
                 )
             } else {
-                // 无封面：书名文字占位（渐变色底 + 书名）
-                Text(
-                    text = book.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(8.dp),
-                )
+                BookCoverPlaceholder(book.title, book.bookId)
             }
 
             // 管理态：右上角勾选圆点
@@ -737,7 +723,7 @@ internal fun BookCard(
                         .padding(6.dp)
                         .size(22.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (checked) YuezhouColors.Brand else Color.White.copy(alpha = 0.9f))
+                        .background(if (checked) YuezhouColors.Brand else MaterialTheme.colorScheme.surface)
                         .border(
                             1.dp,
                             if (checked) Color.Transparent else YuezhouColors.Divider,
@@ -762,9 +748,9 @@ internal fun BookCard(
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
             color = YuezhouColors.TextPrimary,
-            minLines = 1,
-            maxLines = 1,
-            softWrap = false,
+            minLines = 2,
+            maxLines = 2,
+            softWrap = true,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(top = YuezhouDimens.Gap),
         )
@@ -819,11 +805,7 @@ internal fun BookListRow(
                     contentScale = ContentScale.Crop,
                 )
             } else {
-                Text(
-                    text = book.title.take(1),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                )
+                BookCoverPlaceholder(book.title.take(1), book.bookId)
             }
         }
 
@@ -864,7 +846,7 @@ internal fun BookListRow(
                 modifier = Modifier
                     .size(22.dp)
                     .clip(androidx.compose.foundation.shape.CircleShape)
-                    .background(if (checked) YuezhouColors.Brand else Color.White)
+                    .background(if (checked) YuezhouColors.Brand else MaterialTheme.colorScheme.surface)
                     .border(
                         1.dp,
                         if (checked) Color.Transparent else YuezhouColors.Divider,

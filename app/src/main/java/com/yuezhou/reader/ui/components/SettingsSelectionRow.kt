@@ -35,8 +35,8 @@ internal fun SettingsSelectionRow(title: String, value: String, enabled: Boolean
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 10.dp),
@@ -62,26 +62,19 @@ internal fun <T : Any> SettingsChoiceDialog(
 ) {
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = options.indexOfFirst { it.first == selected }.coerceAtLeast(0))
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp), state = listState) {
-                items(options.size) { index ->
-                    val (value, label) = options[index]
-                    val checked = value == selected
-                    Row(
-                        Modifier.fillMaxWidth().selectable(selected = checked, role = Role.RadioButton,
-                            onClick = { onSelect(value) }).heightIn(min = 56.dp).padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        RadioButton(selected = checked, onClick = null)
-                        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    }
+    AppBottomSheet(title, onDismiss) {
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp), state = listState) {
+            items(options.size) { index ->
+                val (value, label) = options[index]
+                val checked = value == selected
+                Row(Modifier.fillMaxWidth().selectable(selected = checked, role = Role.RadioButton,
+                    onClick = { onSelect(value) }).heightIn(min = 56.dp).padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    RadioButton(selected = checked, onClick = null)
+                    Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
+        }
+    }
 }

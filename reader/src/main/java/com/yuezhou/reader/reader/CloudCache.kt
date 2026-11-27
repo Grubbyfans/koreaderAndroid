@@ -123,7 +123,9 @@ class CloudCache(private val context: Context) {
                 // 版本变化：旧缓存失效，需重新拉取
                 CoverResult.Miss
             } else if (m.failed) {
-                CoverResult.Failed
+                if (shouldRetryCoverFailure(m.failedAt, listFile(namespace).lastModified(), System.currentTimeMillis())) {
+                    CoverResult.Miss
+                } else CoverResult.Failed
             } else {
                 val data = File(dir(namespace), "$key.png")
                 val bytes = if (data.exists()) data.readBytes() else null
@@ -139,7 +141,8 @@ class CloudCache(private val context: Context) {
     fun writeCover(namespace: String, bookId: String, coverVersion: String, pngBytes: ByteArray?) {
         val key = coverKey(namespace, bookId)
         try {
-            val meta = CoverMeta(coverVersion, failed = pngBytes == null)
+            val meta = CoverMeta(coverVersion, failed = pngBytes == null,
+                failedAt = if (pngBytes == null) System.currentTimeMillis() else 0L)
             File(dir(namespace), "$key.meta").writeText(json.encodeToString(meta))
             if (pngBytes != null) {
                 File(dir(namespace), "$key.png").writeBytes(pngBytes)
@@ -151,13 +154,13 @@ class CloudCache(private val context: Context) {
         }
     }
 
-    /** 记录封面拉取失败（防抖：本轮/下次进入不再反复请求）。 */
+    /** 失败短暂防抖；到期或成功刷新列表后允许重新拉取。 */
     fun markCoverFailed(namespace: String, bookId: String, coverVersion: String) {
         writeCover(namespace, bookId, coverVersion, null)
     }
 
     @Serializable
-    private data class CoverMeta(val coverVersion: String, val failed: Boolean)
+    private data class CoverMeta(val coverVersion: String, val failed: Boolean, val failedAt: Long = 0L)
 
     private fun coverKey(namespace: String, bookId: String): String =
         // 目录名已按 namespace 隔离，这里只需保证文件名合法且不冲突：
@@ -166,3 +169,7 @@ class CloudCache(private val context: Context) {
 
     // endregion
 }
+
+/** 旧失败标记没有时间戳，首次读取即可重试；时钟回拨也不应永久阻塞封面。 */
+internal fun shouldRetryCoverFailure(failedAt: Long, catalogUpdatedAt: Long, now: Long): Boolean =
+    failedAt <= 0L || catalogUpdatedAt > failedAt || now < failedAt || now - failedAt >= 60_000L

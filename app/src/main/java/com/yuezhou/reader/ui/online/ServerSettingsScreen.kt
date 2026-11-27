@@ -295,9 +295,8 @@ fun ServerSettingsScreen(onBack: () -> Unit) {
             // 服务器选择方式
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 color = YuezhouColors.Surface,
-                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text("服务器选择方式", style = MaterialTheme.typography.titleMedium)
@@ -334,9 +333,8 @@ fun ServerSettingsScreen(onBack: () -> Unit) {
             // 当前服务器状态
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 color = YuezhouColors.Surface,
-                border = BorderStroke(1.dp, YuezhouColors.Divider),
             ) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                     val currentSummary = currentServerSummary(manualMode, selectedBaseUrl, selectedId, probeResults, config, lastCheckedAt)

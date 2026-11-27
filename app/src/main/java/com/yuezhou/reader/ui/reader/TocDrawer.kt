@@ -295,7 +295,7 @@ internal fun TocDrawer(
                             Icons.AutoMirrored.Filled.List,
                             contentDescription = null,
                             tint = YuezhouColors.BrandDark,
-                            modifier = Modifier.size(28.dp),
+                            modifier = Modifier.size(48.dp),
                         )
                     }
                     Spacer(Modifier.height(14.dp))
@@ -351,7 +351,7 @@ internal fun TocDrawer(
                         }
                         if (hasChildren) {
                             Box(
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(48.dp)
                                     .clip(RoundedCornerShape(9.dp))
                                     .background(if (isExpanded) YuezhouColors.BrandContainer else MaterialTheme.colorScheme.surfaceVariant)
                                     .clickable(onClick = toggle),
@@ -366,7 +366,7 @@ internal fun TocDrawer(
                             }
                             Spacer(Modifier.width(8.dp))
                         } else {
-                            Spacer(Modifier.width(36.dp))
+                            Spacer(Modifier.width(56.dp))
                         }
 
                         Text(

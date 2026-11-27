@@ -45,6 +45,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
@@ -162,28 +167,33 @@ internal fun ReaderPanel(
 ) {
     // 进度滑块拖动中的本地预览值；null 表示未在拖动（跟随真实 fraction）
     var fractionPreview by remember { mutableStateOf<Float?>(null) }
-    val appColors = MaterialTheme.colorScheme
-    val panelColors = ReaderPalette.panelTheme(appColors, ReaderPalette.effectiveTheme(prefs))
-    MaterialTheme(colorScheme = panelColors) {
+    val readerTheme = ReaderPalette.effectiveTheme(prefs)
+    val definition = com.yuezhou.reader.LocalYuezhouThemeDefinition.current
+    val dark = ReaderPalette.isDark(readerTheme)
+    val panelColors = ReaderPalette.panelTheme(definition.colors(dark), readerTheme)
+    val motion = com.yuezhou.reader.LocalAppMotionEnabled.current
+    val pageDuration = if (motion) com.yuezhou.reader.YuezhouMotion.Page else 0
+    val sheetDuration = if (motion) com.yuezhou.reader.YuezhouMotion.Sheet else 0
+    com.yuezhou.reader.YuezhouThemeStyle(definition, dark, MaterialTheme.shapes, MaterialTheme.typography, panelColors) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val panelMaxHeight = maxHeight * 0.45f
         // 全屏透明点击层：拦截对正文/翻页区的点击，直接隐藏面板
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(onClick = onDismiss),
+                .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onDismiss),
         )
         Column(modifier = Modifier.fillMaxSize()) {
         // 顶部栏：从上方滑入/滑出
         AnimatedVisibility(
             visible = true,
-            enter = slideInVertically(tween(220)) { -it } + fadeIn(tween(220)),
-            exit = slideOutVertically(tween(220)) { -it } + fadeOut(tween(220)),
+            enter = slideInVertically(tween(pageDuration)) { -it } + fadeIn(tween(pageDuration)),
+            exit = slideOutVertically(tween(pageDuration)) { -it } + fadeOut(tween(pageDuration)),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
+                tonalElevation = 0.dp,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
@@ -219,13 +229,14 @@ internal fun ReaderPanel(
         // 底部栏：从下方滑入/滑出
         AnimatedVisibility(
             visible = true,
-            enter = slideInVertically(tween(240)) { it } + fadeIn(tween(240)),
-            exit = slideOutVertically(tween(240)) { it } + fadeOut(tween(240)),
+            enter = slideInVertically(tween(sheetDuration)) { it } + fadeIn(tween(sheetDuration)),
+            exit = slideOutVertically(tween(sheetDuration)) { it } + fadeOut(tween(sheetDuration)),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
+                tonalElevation = 0.dp,
+                shape = MaterialTheme.shapes.extraLarge,
                 // 固定为屏幕高度的 45%：切换栏目时大小稳定，内容超出时内部滚动
                 modifier = Modifier.fillMaxWidth().height(panelMaxHeight),
             ) {
@@ -234,6 +245,9 @@ internal fun ReaderPanel(
                         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                 ) {
+                    Box(Modifier.align(Alignment.CenterHorizontally).padding(vertical = 4.dp)
+                        .size(width = 32.dp, height = 3.dp).clip(MaterialTheme.shapes.extraSmall)
+                        .background(MaterialTheme.colorScheme.outlineVariant))
                     // 进度
                     if (fraction != null) {
                         val shownFraction = fractionPreview ?: fraction
@@ -259,30 +273,17 @@ internal fun ReaderPanel(
                             )
                         }
                     }
-                    // 目录是独立入口，右侧标签切换设置内容。
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        AssistChip(
-                            onClick = onOpenToc,
-                            label = { Text("目录") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.List,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            },
-                        )
-                        Spacer(Modifier.width(4.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        ReaderToolbarItem("目录", Icons.AutoMirrored.Filled.List, false, onOpenToc, Modifier.weight(1f))
                         listOf(ReaderOverlay.Layout, ReaderOverlay.Theme, ReaderOverlay.Speech, ReaderOverlay.More).forEach { item ->
-                            FilterChip(
-                                selected = overlay == item,
-                                onClick = { onOverlay(if (overlay == item) ReaderOverlay.Toolbar else item) },
-                                label = { Text(item.title, maxLines = 1) },
-                            )
+                            val icon = when (item) {
+                                ReaderOverlay.Layout -> Icons.Filled.Settings
+                                ReaderOverlay.Theme -> Icons.Filled.Star
+                                ReaderOverlay.Speech -> Icons.Filled.PlayArrow
+                                else -> Icons.Filled.MoreVert
+                            }
+                            ReaderToolbarItem(item.title, icon, overlay == item,
+                                { onOverlay(if (overlay == item) ReaderOverlay.Toolbar else item) }, Modifier.weight(1f))
                         }
                     }
                     if (overlay != ReaderOverlay.Toolbar && overlay != ReaderOverlay.Hidden) {
@@ -578,3 +579,17 @@ private fun SpeechVoiceOption(label: String, details: String?, selected: Boolean
     }
 }
 
+
+@Composable
+private fun ReaderToolbarItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.clip(MaterialTheme.shapes.small)
+        .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+        .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+        .heightIn(min = 56.dp).padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp),
+            tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+    }
+}

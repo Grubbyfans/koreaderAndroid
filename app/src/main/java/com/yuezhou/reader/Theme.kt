@@ -38,17 +38,17 @@ import kotlinx.coroutines.withContext
 
 /** 应用浅色语义色。正文配色仍由阅读器的阅读主题管理。 */
 private object LiteraryLightColors {
-    val Brand = Color(0xFF526B53)
-    val BrandDark = Color(0xFF344E36)
-    val Background = Color(0xFFF7F3EB)
-    val Surface = Color(0xFFFFFCF7)
-    val BrandContainer = Color(0xFFDCE3CF)
+    val Brand = Color(0xFF48634F)
+    val BrandDark = Color(0xFF2D4834)
+    val Background = Color(0xFFF5F2EB)
+    val Surface = Color(0xFFFFFCF6)
+    val BrandContainer = Color(0xFFDCE6D5)
     val BrandContainerSoft = Color(0xFFF0F1E6)
-    val TextPrimary = Color(0xFF252821)
-    val TextSecondary = Color(0xFF62665D)
-    val Divider = Color(0xFFD8D5CA)
+    val TextPrimary = Color(0xFF292E29)
+    val TextSecondary = Color(0xFF62695F)
+    val Divider = Color(0xFFE5E1D8)
     val Outline = Color(0xFF858879)
-    val Error = Color(0xFFA43E35)
+    val Error = Color(0xFF963F36)
 }
 
 object YuezhouColors {
@@ -62,6 +62,9 @@ object YuezhouColors {
     val TextSecondary: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.onSurfaceVariant
     val Divider: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.outlineVariant
     val Outline: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.outline
+    val Success: Color @Composable @ReadOnlyComposable get() = LocalYuezhouSemanticColors.current.success
+    val Warning: Color @Composable @ReadOnlyComposable get() = LocalYuezhouSemanticColors.current.warning
+    val SelectedSurface: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.secondaryContainer
     val Error: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.error
 }
 
@@ -70,8 +73,13 @@ internal object YuezhouDimens {
     val Gap = 8.dp
     val GapMedium = 12.dp
     val PageInset = 16.dp
-    val CoverRadius = 8.dp
-    val CardRadius = 16.dp
+    val CoverRadius = 4.dp
+    val ControlRadius = 8.dp
+    val CardRadius = 12.dp
+    val SheetRadius = 24.dp
+    val SectionGap = 24.dp
+    val TouchTarget = 48.dp
+    val IconSize = 24.dp
 }
 
 private val YuezhouColorScheme = lightColorScheme(
@@ -101,7 +109,7 @@ private val YuezhouColorScheme = lightColorScheme(
     surfaceContainerHighest = Color(0xFFECE7DB),
     inverseSurface = Color(0xFF31352C),
     inverseOnSurface = Color(0xFFF8F3E9),
-    inversePrimary = Color(0xFFB0C5A4),
+    inversePrimary = Color(0xFFA5BDA0),
     outline = LiteraryLightColors.Outline,
     outlineVariant = LiteraryLightColors.Divider,
     error = LiteraryLightColors.Error,
@@ -111,47 +119,64 @@ private val YuezhouColorScheme = lightColorScheme(
 )
 
 private val YuezhouDarkScheme = darkColorScheme(
-    primary = Color(0xFFB0C5A4),
+    primary = Color(0xFFA5BDA0),
     onPrimary = Color(0xFF202D1E),
-    primaryContainer = Color(0xFF394B36),
+    primaryContainer = Color(0xFF354638),
     onPrimaryContainer = Color(0xFFDCEACF),
-    secondary = Color(0xFFB0C5A4),
+    secondary = Color(0xFFA5BDA0),
     onSecondary = Color(0xFF202D1E),
-    secondaryContainer = Color(0xFF394B36),
+    secondaryContainer = Color(0xFF354638),
     onSecondaryContainer = Color(0xFFDCEACF),
     tertiary = Color(0xFFDDC3A0),
     onTertiary = Color(0xFF3F2E19),
     tertiaryContainer = Color(0xFF4B3D2C),
     onTertiaryContainer = Color(0xFFF0DCC1),
-    background = Color(0xFF20231F),
-    onBackground = Color(0xFFE8E9E1),
-    surface = Color(0xFF292D27),
-    onSurface = Color(0xFFE8E9E1),
+    background = Color(0xFF191C19),
+    onBackground = Color(0xFFE8E5DA),
+    surface = Color(0xFF242923),
+    onSurface = Color(0xFFE8E5DA),
     surfaceVariant = Color(0xFF333831),
-    onSurfaceVariant = Color(0xFFB6BBAF),
-    surfaceTint = Color(0xFFB0C5A4),
+    onSurfaceVariant = Color(0xFFA0A69B),
+    surfaceTint = Color(0xFFA5BDA0),
     surfaceContainerLowest = Color(0xFF1B1E1A),
     surfaceContainerLow = Color(0xFF242823),
     surfaceContainer = Color(0xFF2C302A),
     surfaceContainerHigh = Color(0xFF353A32),
     surfaceContainerHighest = Color(0xFF3E443A),
     outline = Color(0xFF899483),
-    outlineVariant = Color(0xFF53594E),
-    inverseSurface = Color(0xFFE8E9E1),
-    inverseOnSurface = Color(0xFF292D27),
-    inversePrimary = Color(0xFF526B53),
-    error = Color(0xFFFFB4A9),
+    outlineVariant = Color(0xFF363C35),
+    inverseSurface = Color(0xFFE8E5DA),
+    inverseOnSurface = Color(0xFF242923),
+    inversePrimary = Color(0xFF48634F),
+    error = Color(0xFFE49A90),
     onError = Color(0xFF641C15),
     errorContainer = Color(0xFF762D25),
     onErrorContainer = Color(0xFFFFDAD2),
 )
 
+// 配色与明暗模式独立；临时验证主题仍只存在于测试源集。
+private val LiteraryCoverColors = listOf(
+    Color(0xFF536B58), Color(0xFF80634B), Color(0xFF596A7B),
+    Color(0xFF756B5D), Color(0xFF766A80), Color(0xFF886B63),
+)
+internal val YuezhouThemes = YuezhouThemeRegistry(
+    definitions = listOf(YuezhouThemeDefinition(
+        id = DefaultThemeId,
+        name = "纸墨森林",
+        light = YuezhouColorScheme,
+        dark = YuezhouDarkScheme,
+        lightSemantic = YuezhouSemanticColors.from(YuezhouColorScheme).copy(coverColors = LiteraryCoverColors, onCover = Color.White),
+        darkSemantic = YuezhouSemanticColors.from(YuezhouDarkScheme).copy(coverColors = LiteraryCoverColors, onCover = Color.White),
+    )) + literaryColorVariants(YuezhouColorScheme, YuezhouDarkScheme),
+    defaultId = DefaultThemeId,
+)
+
 private val YuezhouShapes = Shapes(
     extraSmall = RoundedCornerShape(YuezhouDimens.GapSmall),
-    small = RoundedCornerShape(YuezhouDimens.CoverRadius),
+    small = RoundedCornerShape(YuezhouDimens.ControlRadius),
     medium = RoundedCornerShape(YuezhouDimens.GapMedium),
     large = RoundedCornerShape(YuezhouDimens.CardRadius),
-    extraLarge = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(YuezhouDimens.SheetRadius),
 )
 
 private object LiteraryHeadingFont {
@@ -176,14 +201,10 @@ private object LiteraryHeadingFont {
 fun YuezhouTheme(followsAppAppearance: Boolean = true, content: @Composable () -> Unit) {
     val context = LocalContext.current
     val assets = context.applicationContext.assets
-    val appearance = if (followsAppAppearance) {
-        val data = remember(context) { AppearanceSettings.flow(context.applicationContext) }
-        val current by data.collectAsState(initial = AppAppearance())
-        current
-    } else {
-        AppAppearance()
-    }
-    val dark = when (appearance.mode) {
+    val data = remember(context) { AppearanceSettings.flow(context.applicationContext) }
+    val appearance by data.collectAsState(initial = AppAppearance())
+    val definition = LocalYuezhouThemeRegistry.current.resolve(appearance.themeId)
+    val dark = when (if (followsAppAppearance) appearance.mode else AppThemeMode.Light) {
         AppThemeMode.Dark -> true
         AppThemeMode.Light -> false
         AppThemeMode.System -> isSystemInDarkTheme()
@@ -212,22 +233,17 @@ fun YuezhouTheme(followsAppAppearance: Boolean = true, content: @Composable () -
     val typography = remember(serif) {
         val defaults = Typography()
         Typography(
-            headlineLarge = defaults.headlineLarge.copy(fontFamily = serif, fontSize = 30.sp, lineHeight = 38.sp),
+            headlineLarge = defaults.headlineLarge.copy(fontFamily = serif, fontSize = 28.sp, lineHeight = 36.sp),
             headlineMedium = defaults.headlineMedium.copy(fontFamily = serif),
             headlineSmall = defaults.headlineSmall.copy(fontFamily = serif, fontSize = 26.sp, lineHeight = 34.sp),
-            titleLarge = defaults.titleLarge.copy(fontFamily = serif, fontSize = 20.sp, lineHeight = 28.sp),
-            titleMedium = defaults.titleMedium.copy(fontFamily = serif, fontSize = 18.sp, lineHeight = 26.sp),
+            titleLarge = defaults.titleLarge.copy(fontSize = 20.sp, lineHeight = 28.sp),
+            titleMedium = defaults.titleMedium.copy(fontSize = 18.sp, lineHeight = 26.sp),
         )
     }
     CompositionLocalProvider(
         LocalAppAppearance provides appearance,
         LocalAppMotionEnabled provides (systemAnimations.value && !appearance.reduceMotion),
     ) {
-        MaterialTheme(
-            colorScheme = if (dark) YuezhouDarkScheme else YuezhouColorScheme,
-            shapes = YuezhouShapes,
-            typography = typography,
-            content = content,
-        )
+        YuezhouThemeStyle(definition, dark, YuezhouShapes, typography, content = content)
     }
 }

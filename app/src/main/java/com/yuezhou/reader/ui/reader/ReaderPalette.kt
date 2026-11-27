@@ -172,20 +172,13 @@ internal object ReaderPalette {
 
     /** 阅读面板配色：沿用应用色板，但正文区与面板保持同一底色。 */
     fun panelTheme(base: ColorScheme, theme: String): ColorScheme {
-        val dark = isDark(theme)
         val surface = if (theme == "light") base.surface else background(theme)
         return base.copy(
             surface = surface,
             surfaceContainer = surface,
             surfaceContainerHigh = surface,
-            onSurface = if (dark) Color(0xFFE8E9E1) else Color(0xFF252821),
-            onSurfaceVariant = if (dark) Color(0xFFBDC7B8) else Color(0xFF51584B),
-            primary = if (dark) Color(0xFFB0C5A4) else Color(0xFF526B53),
-            onPrimary = if (dark) Color(0xFF202D1E) else Color.White,
-            secondaryContainer = if (dark) Color(0xFF394B36) else Color(0xFFDCE3CF),
-            onSecondaryContainer = if (dark) Color(0xFFE2E9D9) else Color(0xFF344E36),
-            outline = if (dark) Color(0xFF869083) else Color(0xFF737867),
-            outlineVariant = if (dark) Color(0xFF53594E) else Color(0xFFC4C6B7),
+            surfaceContainerLow = surface,
+            surfaceContainerHighest = surface,
         )
     }
 }

@@ -209,7 +209,6 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit, externalImportUrl: String
             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LibraryPageHeading("网络 TTS 规则")
             Text(
                 "支持 Legado 网络朗读规则、登录参数与试听；具体规则兼容性以实际验收为准。",
                 style = MaterialTheme.typography.bodySmall,
@@ -562,7 +561,7 @@ private fun RuleRow(
             .clip(RoundedCornerShape(10.dp))
             .background(
                 if (selected) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    YuezhouColors.SelectedSurface
                 } else {
                     YuezhouColors.Surface
                 }
@@ -576,7 +575,7 @@ private fun RuleRow(
                 toggleableState = ToggleableState(selected)
             } else Modifier)
             .heightIn(min = 64.dp)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selectionMode) {
@@ -595,20 +594,19 @@ private fun RuleRow(
         Column(Modifier.weight(1f)) {
             Text(rule.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(group, style = MaterialTheme.typography.bodySmall, color = YuezhouColors.TextSecondary)
-            Text(
-                when {
+            var detailExpanded by remember(rule.id, checkResult) { mutableStateOf(false) }
+            com.yuezhou.reader.ui.components.StatusDetail(
+                summary = when {
                     checking -> "检测中…"
                     checkResult == null -> "未检测"
-                    checkResult.success -> "检测可用"
-                    else -> "检测失败：${checkResult.detail}"
+                    checkResult.success -> "✓ 检测可用"
+                    else -> "! 检测失败"
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = when {
-                    checking || checkResult == null -> YuezhouColors.TextSecondary
-                    checkResult.success -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.error
-                },
-                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                detail = checkResult?.takeIf { !it.success }?.detail,
+                isError = !checking && checkResult?.success == false,
+                expanded = detailExpanded,
+                isSuccess = !checking && checkResult?.success == true,
+                onToggle = { detailExpanded = !detailExpanded },
             )
             if (!selectionMode) {
                 var menu by remember { mutableStateOf(false) }
