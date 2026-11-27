@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.dp
 
 /** 底部导航的一级栏目。页面模型只依赖此枚举，不反向依赖 MainActivity。 */
 enum class Tab(val label: String, val icon: ImageVector) {
+    阅读("阅读", bookTabIcon()),
     书架("书库", bookTabIcon()),
     云端("云端", cloudTabIcon()),
     发现("发现", discoverTabIcon()),
@@ -77,6 +78,11 @@ sealed interface ShelfPage {
     val key: String
     val tab: Tab
 
+    data object Reading : ShelfPage {
+        override val key = "reading"
+        override val tab = Tab.阅读
+    }
+
     data object LocalShelf : ShelfPage {
         override val key = "shelf.local"
         override val tab = Tab.书架
@@ -107,6 +113,7 @@ sealed interface ShelfPage {
     companion object {
         /** 书源只以 id 参与导航，新增/移除书源无需改动此模型。 */
         fun build(providerIds: List<String>): List<ShelfPage> = buildList {
+            add(Reading)
             add(LocalShelf)
             val cloud = providerIds.filterNot { it == Discover.PROVIDER_ID }
             if (cloud.isEmpty()) add(CloudEmpty) else cloud.forEach { add(Cloud(it)) }

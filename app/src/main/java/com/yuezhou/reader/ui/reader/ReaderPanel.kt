@@ -68,7 +68,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -245,7 +244,7 @@ internal fun ReaderPanel(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.width(12.dp))
-                            Slider(
+                            ReaderPanelSlider(
                                 value = shownFraction,
                                 onValueChange = { fractionPreview = it },
                                 onValueChangeFinished = {
@@ -320,168 +319,11 @@ private fun SettingsControls(
     onSpeak: () -> Unit,
 ) {
     // 拖动中的本地预览值；null 表示未拖动（跟随真实 prefs），松手才提交，避免连续写 DataStore + 重排全文
-    var fontSizePreview by remember { mutableStateOf<Int?>(null) }
-    var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
     // 语速预览值；null 表示未拖动
     var ratePreview by remember { mutableStateOf<Float?>(null) }
     Column(modifier = Modifier.fillMaxWidth()) {
         if (overlay == ReaderOverlay.Layout) {
-            ReaderFontPreference(prefs.fontId, prefs.fontWeight, onWeightChange = { w ->
-                onPrefsChange(prefs.copy(fontWeight = w))
-            })
-            // 字号
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("字号", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    "${fontSizePreview ?: prefs.fontSize}",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.width(32.dp),
-                    textAlign = TextAlign.Center,
-                )
-                Slider(
-                    value = (fontSizePreview ?: prefs.fontSize).toFloat(),
-                    onValueChange = { fontSizePreview = it.toInt() },
-                    onValueChangeFinished = {
-                        val v = fontSizePreview
-                        if (v != null) {
-                            onPrefsChange(prefs.copy(fontSize = v))
-                            fontSizePreview = null
-                        }
-                    },
-                    valueRange = 12f..30f,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            // 行距
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("行距", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    String.format("%.1f", lineHeightPreview ?: prefs.lineHeight),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.width(32.dp),
-                    textAlign = TextAlign.Center,
-                )
-                Slider(
-                    value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
-                    onValueChange = { lineHeightPreview = it.toDouble() },
-                    onValueChangeFinished = {
-                        val v = lineHeightPreview
-                        if (v != null) {
-                            onPrefsChange(prefs.copy(lineHeight = v))
-                            lineHeightPreview = null
-                        }
-                    },
-                    valueRange = 1.2f..2.5f,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            var marginPreview by remember { mutableStateOf<Int?>(null) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("页边距 ${marginPreview ?: prefs.pageMargin}", style = MaterialTheme.typography.bodyMedium)
-                Slider(
-                    value = (marginPreview ?: prefs.pageMargin).toFloat(),
-                    onValueChange = { marginPreview = it.toInt() },
-                    onValueChangeFinished = {
-                        marginPreview?.let { onPrefsChange(prefs.copy(pageMargin = it)) }
-                        marginPreview = null
-                    },
-                    valueRange = 0f..48f,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            // 翻页模式
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text("翻页", style = MaterialTheme.typography.bodyMedium)
-                FilterChip(
-                    selected = !prefs.vertical,
-                    onClick = { onPrefsChange(prefs.copy(vertical = false)) },
-                    label = { Text("左右") },
-                )
-                FilterChip(
-                    selected = prefs.vertical,
-                    onClick = { onPrefsChange(prefs.copy(vertical = true)) },
-                    label = { Text("上下") },
-                )
-            }
-            // 翻页动画方式
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("动画", style = MaterialTheme.typography.bodyMedium)
-                listOf(
-                    "none" to "无动画",
-                    "slide" to "滑动",
-                    "fade" to "渐变",
-                    "ios_curl" to "iOS 仿真",
-                    "ripple" to "水波纹",
-                ).forEach { (value, label) ->
-                    FilterChip(
-                        selected = prefs.pageAnimation == value,
-                        onClick = { onPrefsChange(prefs.copy(pageAnimation = value)) },
-                        label = { Text(label) },
-                    )
-                }
-            }
-            // 水波纹动画参数：仅选中水波纹时显示，实时预览、松手提交，下一次翻页生效。
-            if (prefs.pageAnimation == "ripple") {
-                var rippleDurationPreview by remember { mutableStateOf<Int?>(null) }
-                var rippleRatioPreview by remember { mutableStateOf<Int?>(null) }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("时长", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "${rippleDurationPreview ?: prefs.rippleDurationMs}ms",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.width(52.dp),
-                        textAlign = TextAlign.Center,
-                    )
-                    Slider(
-                        value = (rippleDurationPreview ?: prefs.rippleDurationMs).toFloat(),
-                        onValueChange = { rippleDurationPreview = it.toInt() },
-                        onValueChangeFinished = {
-                            rippleDurationPreview?.let { onPrefsChange(prefs.copy(rippleDurationMs = it)) }
-                            rippleDurationPreview = null
-                        },
-                        valueRange = 100f..600f,
-                        steps = 50,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("过渡区", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "${rippleRatioPreview ?: prefs.rippleRatio}%",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.width(52.dp),
-                        textAlign = TextAlign.Center,
-                    )
-                    Slider(
-                        value = (rippleRatioPreview ?: prefs.rippleRatio).toFloat(),
-                        onValueChange = { rippleRatioPreview = it.toInt() },
-                        onValueChangeFinished = {
-                            rippleRatioPreview?.let { onPrefsChange(prefs.copy(rippleRatio = it)) }
-                            rippleRatioPreview = null
-                        },
-                        valueRange = 10f..80f,
-                        steps = 70,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                OutlinedButton(
-                    onClick = { onPrefsChange(prefs.copy(rippleDurationMs = 280, rippleRatio = 35)) },
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                ) {
-                    Text("恢复默认参数", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
+            ReaderLayoutControls(prefs, onPrefsChange)
         }
         if (overlay == ReaderOverlay.Theme) {
             ReaderThemeControls(prefs, onPrefsChange)
@@ -502,30 +344,18 @@ private fun SettingsControls(
                 } else "开始朗读")
             }
             Spacer(Modifier.height(8.dp))
-            // 朗读语速
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("语速", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    String.format("%.1fx", ratePreview ?: prefs.speechRate),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.width(44.dp),
-                    textAlign = TextAlign.Center,
-                )
-                Slider(
-                    value = (ratePreview ?: prefs.speechRate).coerceIn(0.5f, 2.0f),
-                    onValueChange = { ratePreview = it },
-                    onValueChangeFinished = {
-                        val v = ratePreview
-                        if (v != null) {
-                            onPrefsChange(prefs.copy(speechRate = v))
-                            ratePreview = null
-                        }
-                    },
-                    valueRange = 0.5f..2.0f,
-                    modifier = Modifier.weight(1f),
-                )
-            }
+            // 拖动时预览，松手后保存语速。
+            ReaderValueSlider(
+                label = "语速",
+                displayValue = String.format("%.1fx", ratePreview ?: prefs.speechRate),
+                value = (ratePreview ?: prefs.speechRate).coerceIn(0.5f, 2.0f),
+                valueRange = 0.5f..2.0f,
+                onValueChange = { ratePreview = it },
+                onValueChangeFinished = {
+                    ratePreview?.let { onPrefsChange(prefs.copy(speechRate = it)) }
+                    ratePreview = null
+                },
+            )
             val kokoroAvailable = SpeechRuntime.kokoroAvailable
             val networkTtsAvailable = SpeechRuntime.networkTtsAvailable && SpeechRuntime.networkTtsRuleId != null
             val activeEngine = prefs.effectiveSpeechEngine(kokoroAvailable, networkTtsAvailable)

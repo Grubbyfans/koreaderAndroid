@@ -1,9 +1,7 @@
 package com.yuezhou.reader.ui.reader
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,7 +29,7 @@ internal fun ReaderThemeControls(prefs: ReaderPreferences, onChange: (ReaderPref
             }
         }
         Text("日夜主题切换", style = MaterialTheme.typography.titleSmall)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("manual" to "手动", "day" to "日间", "night" to "夜间", "system" to "跟随系统").forEach { (mode, label) ->
                 FilterChip(selected = prefs.themeMode == mode, onClick = { onChange(prefs.copy(themeMode = mode)) }, label = { Text(label) })
             }

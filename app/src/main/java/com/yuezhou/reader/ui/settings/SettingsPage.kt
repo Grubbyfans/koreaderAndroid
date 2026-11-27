@@ -32,7 +32,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -68,7 +67,6 @@ import com.yuezhou.reader.reader.CloudSync
 import com.yuezhou.reader.reader.db.SyncLogEntity
 import com.yuezhou.reader.reader.DownloadDirectory
 import com.yuezhou.reader.reader.SyncLogStore
-import com.yuezhou.reader.ReaderFontPreference
 import com.yuezhou.reader.ReaderPreferences
 import com.yuezhou.reader.ReaderSettings
 import com.yuezhou.reader.speech.KokoroImportState
@@ -176,13 +174,6 @@ internal fun SettingsPage(
             }
         }
     }
-
-    // 松手才保存的预览值（避免拖动中频繁写 DataStore）
-    var fontSizePreview by remember { mutableStateOf<Int?>(null) }
-    var lineHeightPreview by remember { mutableStateOf<Double?>(null) }
-    var marginPreview by remember { mutableStateOf<Int?>(null) }
-    var rippleDurationPreview by remember { mutableStateOf<Int?>(null) }
-    var rippleRatioPreview by remember { mutableStateOf<Int?>(null) }
 
     val credentialStore = remember(context) { CloudCredentialStore(context) }
 
@@ -554,152 +545,17 @@ internal fun SettingsPage(
         }
 
         if (route == SettingsRoute.Reading) {
-            SettingsCard("默认阅读排版") {
+            SettingsCard("排版与翻页") {
+                com.yuezhou.reader.ui.reader.ReaderLayoutControls(
+                    prefs = prefs,
+                    onChange = { updated -> scope.launch { ReaderSettings.save(context, prefs, updated) } },
+                    outlinedFont = true,
+                )
+            }
+            SettingsCard("阅读主题") {
                 com.yuezhou.reader.ui.reader.ReaderThemeControls(prefs) { updated ->
                     scope.launch { ReaderSettings.save(context, prefs, updated) }
                 }
-                Spacer(Modifier.height(4.dp))
-
-                // 翻页模式
-                Text("翻页模式", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(false to "左右翻页", true to "上下滚动").forEach { (value, label) ->
-                        val selected = prefs.vertical == value
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                                .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(vertical = value)) } }
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-
-                // 翻页动画方式
-                Text("翻页动画", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    listOf(
-                        "none" to "无动画",
-                        "slide" to "滑动",
-                        "fade" to "渐变",
-                        "ios_curl" to "iOS 仿真",
-                        "ripple" to "水波纹",
-                    ).forEach { (value, label) ->
-                        val selected = prefs.pageAnimation == value
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (selected) YuezhouColors.BrandDark else YuezhouColors.TextSecondary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (selected) YuezhouColors.BrandContainer else YuezhouColors.Surface)
-                                .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(pageAnimation = value)) } }
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-
-                // 水波纹动画参数：仅选中水波纹时显示，松手提交，下一次翻页生效。
-                if (prefs.pageAnimation == "ripple") {
-                    Text("水波纹时长：${rippleDurationPreview ?: prefs.rippleDurationMs}ms", style = MaterialTheme.typography.bodyMedium)
-                    Slider(
-                        value = (rippleDurationPreview ?: prefs.rippleDurationMs).toFloat(),
-                        onValueChange = { rippleDurationPreview = it.toInt() },
-                        onValueChangeFinished = {
-                            val v = rippleDurationPreview
-                            if (v != null) {
-                                scope.launch { ReaderSettings.save(context, prefs, prefs.copy(rippleDurationMs = v)) }
-                                rippleDurationPreview = null
-                            }
-                        },
-                        valueRange = 100f..600f,
-                        steps = 50,
-                    )
-                    Text("过渡区域：${rippleRatioPreview ?: prefs.rippleRatio}%", style = MaterialTheme.typography.bodyMedium)
-                    Slider(
-                        value = (rippleRatioPreview ?: prefs.rippleRatio).toFloat(),
-                        onValueChange = { rippleRatioPreview = it.toInt() },
-                        onValueChangeFinished = {
-                            val v = rippleRatioPreview
-                            if (v != null) {
-                                scope.launch { ReaderSettings.save(context, prefs, prefs.copy(rippleRatio = v)) }
-                                rippleRatioPreview = null
-                            }
-                        },
-                        valueRange = 10f..80f,
-                        steps = 70,
-                    )
-                    Text(
-                        "恢复默认参数",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = YuezhouColors.BrandDark,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(YuezhouColors.BrandContainer)
-                            .clickable { scope.launch { ReaderSettings.save(context, prefs, prefs.copy(rippleDurationMs = 280, rippleRatio = 35)) } }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                }
-
-                ReaderFontPreference(prefs.fontId, prefs.fontWeight, outlinedSelection = true, onWeightChange = { w ->
-                    scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontWeight = w)) }
-                })
-
-                // 字号
-                Text("默认字号：${fontSizePreview ?: prefs.fontSize}", style = MaterialTheme.typography.bodyMedium)
-                Slider(
-                    value = (fontSizePreview ?: prefs.fontSize).toFloat(),
-                    onValueChange = { fontSizePreview = it.toInt() },
-                    onValueChangeFinished = {
-                        val v = fontSizePreview
-                        if (v != null) {
-                            scope.launch { ReaderSettings.save(context, prefs, prefs.copy(fontSize = v)) }
-                            fontSizePreview = null
-                        }
-                    },
-                    valueRange = 12f..30f,
-                )
-
-                // 行距
-                Text("默认行距：${String.format("%.1f", lineHeightPreview ?: prefs.lineHeight)}", style = MaterialTheme.typography.bodyMedium)
-                Slider(
-                    value = (lineHeightPreview ?: prefs.lineHeight).toFloat(),
-                    onValueChange = { lineHeightPreview = it.toDouble() },
-                    onValueChangeFinished = {
-                        val v = lineHeightPreview
-                        if (v != null) {
-                            scope.launch { ReaderSettings.save(context, prefs, prefs.copy(lineHeight = v)) }
-                            lineHeightPreview = null
-                        }
-                    },
-                    valueRange = 1.2f..2.5f,
-                )
-
-                // 页边距
-                Text("默认页边距：${marginPreview ?: prefs.pageMargin}", style = MaterialTheme.typography.bodyMedium)
-                Slider(
-                    value = (marginPreview ?: prefs.pageMargin).toFloat(),
-                    onValueChange = { marginPreview = it.toInt() },
-                    onValueChangeFinished = {
-                        val v = marginPreview
-                        if (v != null) {
-                            scope.launch { ReaderSettings.save(context, prefs, prefs.copy(pageMargin = v)) }
-                            marginPreview = null
-                        }
-                    },
-                    valueRange = 0f..48f,
-                )
             }
         }
 

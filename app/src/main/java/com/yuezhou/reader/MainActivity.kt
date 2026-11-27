@@ -258,14 +258,10 @@ private fun BookshelfScreen() {
 
     // 唯一的已提交导航状态：currentTab / 当前书源均由页面 key 派生。
     // 优先恢复上次落页的稳定 key；没有记录时再按一级栏目兜底。
+    var sessionPage by rememberSaveable { mutableStateOf(ShelfPage.Reading.key) }
     val navigator = remember {
         ShelfNavigator(
-            initialKey = uiPrefs.lastSectionPage ?: uiPrefs.lastShelfKey ?: when (restoredTab) {
-                Tab.书架 -> ShelfPage.LocalShelf.key
-                Tab.云端 -> "cloud.${uiPrefs.lastCloudProvider ?: "baidu"}"
-                Tab.发现 -> ShelfPage.Discover.key
-                Tab.设置 -> ShelfPage.Settings.key
-            },
+            initialKey = sessionPage,
             providerIds = onlineVm.registry.enabled().map { it.id },
         )
     }
@@ -484,6 +480,7 @@ private fun BookshelfScreen() {
     // 只有 committed 页（真正落页后）才触发业务加载，动画期间不提前切书源。
     LaunchedEffect(navigator.committedKey) {
         // 进程重建时把当前页写回保存状态，保证下次恢复仍停在原位置。
+        sessionPage = navigator.committedKey
         restoredTab = navigator.tab
         uiPrefs.lastSectionPage = navigator.committedKey
         uiPrefs.lastShelfKey = if (currentTab == Tab.发现) "cloud.zlibrary" else navigator.committedKey
@@ -612,6 +609,7 @@ private fun BookshelfScreen() {
                     title = {
                         LibraryPageHeading(
                             title = when (currentTab) {
+                                Tab.阅读 -> "我的阅读"
                                 Tab.书架 -> "书库"
                                 Tab.云端 -> "云端"
                                 Tab.发现 -> "发现"
@@ -752,6 +750,7 @@ private fun BookshelfScreen() {
                     onSelect = { tab ->
                         navigator.navigateTo(
                             when (tab) {
+                                Tab.阅读 -> ShelfPage.Reading.key
                                 Tab.书架 -> ShelfPage.LocalShelf.key
                                 Tab.云端 -> navigator.cloudKey(uiPrefs.lastCloudProvider ?: onlineVm.selectedProviderId)
                                 Tab.发现 -> ShelfPage.Discover.key
@@ -828,6 +827,8 @@ private fun BookshelfScreen() {
                 key = { index -> pageKeys.getOrNull(index) ?: index },
             ) { index ->
                 when (val page = navigator.pages.getOrNull(index)) {
+                    ShelfPage.Reading -> ReadingHome(books, store, loadedShelfVersion,
+                        onLibrary = { navigator.navigateTo(ShelfPage.LocalShelf.key) })
                     ShelfPage.LocalShelf -> Column(Modifier.fillMaxSize()) {
                         if (selecting == null) {
                             LocalLibraryFilters(

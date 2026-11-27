@@ -26,11 +26,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         OnlineDownloadTaskEntity::class,
         OnlineBookMappingEntity::class,
         NetworkTtsRuleEntity::class,
+        ReadingProfile::class,
+        ReadingSession::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun readingDao(): ReadingDao
     abstract fun pendingPublicationDao(): PendingPublicationDao
     abstract fun diagnosticEventDao(): DiagnosticEventDao
     abstract fun speechPositionDao(): SpeechPositionDao
@@ -172,6 +175,14 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val addReading = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS reading_profile (bookId TEXT NOT NULL PRIMARY KEY, rating INTEGER NOT NULL, status TEXT NOT NULL, firstRead INTEGER, lastRead INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS reading_session (id TEXT NOT NULL PRIMARY KEY, bookId TEXT NOT NULL, startTime INTEGER NOT NULL, endTime INTEGER NOT NULL, durationMs INTEGER NOT NULL, startProgress REAL, endProgress REAL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_reading_session_bookId ON reading_session(bookId)")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -189,6 +200,7 @@ abstract class AppDatabase : RoomDatabase() {
                     addOnlineDownloadTables,
                     addNetworkTtsRule,
                     addSyncLogOutcome,
+                    addReading,
                 )
                     .build().also { instance = it }
             }

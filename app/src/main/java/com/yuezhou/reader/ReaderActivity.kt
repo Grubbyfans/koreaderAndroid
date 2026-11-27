@@ -157,6 +157,19 @@ class ReaderActivity : ComponentActivity() {
         fun isBookOpen(bookId: String): Boolean = openReaders.containsValue(bookId)
     }
 
+    internal var readingTimer: ReadingTimer? = null
+
+    override fun onResume() { super.onResume(); readingTimer?.foreground(true) }
+    override fun onPause() { readingTimer?.foreground(false); super.onPause() }
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN || event.actionMasked == android.view.MotionEvent.ACTION_MOVE) readingTimer?.interaction()
+        return super.dispatchTouchEvent(event)
+    }
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) readingTimer?.interaction()
+        return super.dispatchKeyEvent(event)
+    }
+
     private var onEpubReady: ((Uri) -> Unit)? = null
     private var pickEpubLauncher: (() -> Unit)? = null
 
@@ -165,7 +178,7 @@ class ReaderActivity : ComponentActivity() {
         enableEdgeToEdge()
         hideNavigationBar()
         val bookId = intent.getStringExtra(EXTRA_BOOK_ID)
-        if (bookId != null) openReaders[this] = bookId
+        if (bookId != null) { openReaders[this] = bookId; readingTimer = ReadingTimer(applicationContext, bookId) }
         val launcher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) onEpubReady?.invoke(uri)
         }
@@ -195,6 +208,7 @@ class ReaderActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        readingTimer?.foreground(false)
         openReaders.remove(this)
         super.onDestroy()
     }
@@ -687,6 +701,7 @@ private fun ReaderScreen(
     val eventListener: (ReaderEvent) -> Unit = { event ->
         when (event) {
             is ReaderEvent.BookOpened -> {
+                (context as? ReaderActivity)?.readingTimer?.opened()
                 title = event.title.ifBlank { bookId ?: "阅读" }
                 totalSections = event.sections
                 loading = false
@@ -700,6 +715,7 @@ private fun ReaderScreen(
             is ReaderEvent.Relocated -> {
                 event.cfi?.let { animationController?.relocated(it) }
                 currentCfi = event.cfi
+                (context as? ReaderActivity)?.readingTimer?.position(event.fraction?.toDouble())
                 currentFraction = event.fraction
                 currentIndex = event.index
                 currentTocId = event.tocId
