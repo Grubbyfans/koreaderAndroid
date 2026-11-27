@@ -11,6 +11,7 @@ import kotlinx.coroutines.withTimeout
 import okhttp3.Response
 import java.io.File
 import java.io.InputStream
+import kotlin.math.roundToInt
 
 /**
  * 网络 TTS 合成（原版 `HttpReadAloudService.getSpeakStream` 的精简移植，GPLv3 来源）。
@@ -86,47 +87,67 @@ class NetworkTtsSynthesizer(
 
     /** 打开音频流：规则解析 → 请求 → loginCheckJs → Content-Type 校验 → 首字节校验。 */
     private suspend fun openStream(rule: HttpTTS, text: String, speechRate: Int): InputStream {
+        // 阶段 1：URL 解析（含 @js 模板）。AnalyzeUrl 构造时传入本阶段活跃的 Job，
+        // Rhino 指令观察器据此在 jsTimeoutMs 超时后中断 URL 模板里的死循环。
         val analyzeUrl = withTimeout(jsTimeoutMs) {
             AnalyzeUrl(
                 rule.url,
                 speakText = text,
-                speakSpeed = speechRate,
+                speakSpeed = requestSpeechRate(speechRate),
                 source = rule,
                 readTimeout = requestTimeoutMs,
                 callTimeout = requestTimeoutMs,
-                // 注入带超时的子协程上下文：Rhino 指令观察器据此中断死循环脚本。
                 coroutineContext = currentCoroutineContext(),
             )
         }
-        val context = currentCoroutineContext()
-        context.ensureActive()
+        val outerContext = currentCoroutineContext()
+        outerContext.ensureActive()
+        // 阶段 2：请求 + loginCheckJs，整体受 requestTimeoutMs 约束。
+        // 每个执行 JS 的子阶段都把 AnalyzeUrl 的上下文切换为当前活跃 Job——
+        // 否则复用已完成（completed）的 Job 会让 Rhino ensureActive 抛"任务已完成"。
         val response = withTimeout(requestTimeoutMs) {
-            try {
-                analyzeUrl.getResponseAwait().let { response ->
-                    context.ensureActive()
-                    val checkJs = rule.loginCheckJs
-                    if (!checkJs.isNullOrBlank()) {
-                        (analyzeUrl.evalJS(checkJs, response) as? Response) ?: response
-                    } else {
-                        response
-                    }
-                }
+            analyzeUrl.updateCoroutineContext(currentCoroutineContext())
+            val raw = try {
+                analyzeUrl.getResponseAwait()
             } catch (e: Throwable) {
+                if (e is CancellationException) throw e
                 val checkJs = rule.loginCheckJs
                 if (checkJs.isNullOrBlank()) throw e
                 val errResponse = analyzeUrl.getErrResponse(e)
-                val checked = analyzeUrl.evalJS(checkJs, errResponse) as? Response
-                if (checked == null || checked.code == 500) throw e
-                checked
+                val checked = evalLoginCheck(analyzeUrl, checkJs, errResponse)
+                if (checked == null || checked.code == 500) {
+                    runCatching { errResponse.close() }
+                    throw e
+                }
+                return@withTimeout checked
             }
+            outerContext.ensureActive()
+            val checkJs = rule.loginCheckJs
+            if (checkJs.isNullOrBlank()) return@withTimeout raw
+            val replaced = evalLoginCheck(analyzeUrl, checkJs, raw)
+            // loginCheckJs 返回新响应时，释放被替换的旧响应，避免连接泄漏。
+            if (replaced != null && replaced !== raw) runCatching { raw.close() }
+            replaced ?: raw
         }
-        context.ensureActive()
-        // 不关闭 response：流由调用方消费完后 close（与原版一致），提前关闭会让后续读取报错。
-        validateContentType(rule, response)
-        val checked = checkedAudioStream(response.body.byteStream())
-        context.ensureActive()
-        return checked
+        outerContext.ensureActive()
+        // 校验失败/取消时必须关闭 response；成功路径由返回流的 close 负责关闭 body。
+        try {
+            validateContentType(rule, response)
+            val checked = checkedAudioStream(response.body.byteStream())
+            outerContext.ensureActive()
+            return checked
+        } catch (e: Throwable) {
+            runCatching { response.close() }
+            throw e
+        }
     }
+
+    /** 在独立的 jsTimeoutMs 活跃 Job 下执行 loginCheckJs：既让死循环可被超时中断，也避免误用已完成 Job。 */
+    private suspend fun evalLoginCheck(analyzeUrl: AnalyzeUrl, checkJs: String, response: Response): Response? =
+        withTimeout(jsTimeoutMs) {
+            analyzeUrl.updateCoroutineContext(currentCoroutineContext())
+            analyzeUrl.evalJS(checkJs, response) as? Response
+        }
 
     private fun validateContentType(rule: HttpTTS, response: Response) {
         val errorBody = { runCatching { response.peekBody(4_096).string() }.getOrDefault("") }
@@ -214,8 +235,10 @@ class NetworkTtsSynthesizer(
     /**
      * 规则特征哈希：缓存键的一部分。
      *
-     * 原版缓存键不含 header/jsLib/loginCheckJs，规则改动会复用旧音频；这里补上，
-     * 且不放登录头/凭证，避免凭证变化导致缓存永久失效。
+     * 除 url/header/jsLib/loginCheckJs 外，还纳入 `sourceVariable`（规则自定义变量，
+     * 常用于切换音色/发音人等）。这样修改影响音频结果的配置后不会复用旧缓存。
+     * 登录凭证本身（token/cookie）**不**纳入——它们是短期值，纳入会导致缓存永久失效；
+     * 若登录信息里的音色体现在最终 URL，则已被 url 覆盖。
      */
     fun ruleHash(rule: HttpTTS): String {
         val identity = buildString {
@@ -226,6 +249,7 @@ class NetworkTtsSynthesizer(
                 rule.jsLib.orEmpty(),
                 rule.loginCheckJs.orEmpty(),
                 rule.concurrentRate.orEmpty(),
+                rule.getVariable(),
             ).forEach { append(it.length).append(':').append(it) }
         }
         return NetworkTtsAudioCache.md5(identity).take(16)
@@ -240,7 +264,19 @@ class NetworkTtsSynthesizer(
     companion object {
         private const val COPY_BUFFER_SIZE = 16 * 1024
 
-        /** 语音速率基准：与原版一致，`AppConfig.ttsSpeechRate + 5`。 */
+        /** 内部语速范围与默认值（对应原版 `AppConfig.ttsSpeechRate`，默认 10）。 */
+        const val MIN_SPEECH_RATE = 0
+        const val MAX_SPEECH_RATE = 20
+        const val DEFAULT_SPEECH_RATE = 10
+
+        /**
+         * 界面倍速（0.5~2.0，默认 1.0）→ 内部语速（0~20，默认 10）。
+         * 试听与正式朗读共用一个入口，保证同一规则两条链路的语速一致。
+         */
+        fun uiRateToSpeechRate(uiRate: Float): Int =
+            (uiRate * 10).roundToInt().coerceIn(MIN_SPEECH_RATE, MAX_SPEECH_RATE)
+
+        /** 内部语速 → 实际请求参数 `speakSpeed`：与原版一致 `+5`（默认 10 → 15）。 */
         fun requestSpeechRate(speechRate: Int): Int = speechRate + 5
     }
 }

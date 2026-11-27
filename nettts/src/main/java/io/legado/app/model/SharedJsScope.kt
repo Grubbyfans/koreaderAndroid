@@ -8,6 +8,7 @@ import io.legado.app.help.CacheManager
 import io.legado.app.help.http.CookieStore
 import org.htmlunit.corejs.javascript.TopLevel
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.CoroutineContext
 
 /**
  * 规则 `jsLib` 共享作用域。
@@ -27,7 +28,13 @@ object SharedJsScope {
         return "${source.getKey()}:${jsLib.hashCode()}"
     }
 
-    fun scopeFor(source: BaseSource): TopLevel? {
+    /**
+     * 获取（或初始化）规则的 jsLib 共享作用域。
+     *
+     * [coroutineContext] 传入后，首次初始化执行 jsLib 时会被 Rhino 指令观察器纳入取消检查，
+     * 死循环 jsLib 可随调用方超时/取消中断；缓存命中后不再重复求值，无需上下文。
+     */
+    fun scopeFor(source: BaseSource, coroutineContext: CoroutineContext? = null): TopLevel? {
         if (source.jsLib.isNullOrBlank()) return null
         val key = cacheKey(source)
         libScopes[key]?.let { return it }
@@ -39,7 +46,7 @@ object SharedJsScope {
             bindings["cookie"] = CookieStore
             bindings["cache"] = CacheManager
         }
-        RhinoScriptEngine.eval(source.jsLib!!, bindings)
+        RhinoScriptEngine.eval(source.jsLib!!, bindings, coroutineContext)
         return libScopes.putIfAbsent(key, bindings) ?: bindings
     }
 

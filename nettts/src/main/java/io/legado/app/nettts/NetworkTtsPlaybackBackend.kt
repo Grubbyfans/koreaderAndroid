@@ -90,7 +90,7 @@ class NetworkTtsPlaybackBackend(
     private var active = false
     private var stopped = false
     private var nextSynthIndex = 0
-    private var speechRate = 5
+    private var speechRate = NetworkTtsSynthesizer.DEFAULT_SPEECH_RATE
 
     override suspend fun prepare(config: SpeechEngineConfig): PrepareResult {
         val ruleId = config.networkTtsRuleId
@@ -102,12 +102,9 @@ class NetworkTtsPlaybackBackend(
         val p = NetworkTtsPlayer(context, cacheDir)
         player = p
         installPlayerListener(p)
-        // SpeechEngineConfig.rate: 1.0 默认；Network TTS 规则里 rate 字段也是 1.0。合入 rate=0.5~2.0。
-        speechRate = when {
-            config.rate <= 0.5f -> 0
-            config.rate >= 2.0f -> 20
-            else -> ((config.rate - 0.5f) / 1.5f * 20).toInt().coerceIn(0, 20)
-        }
+        // 与试听共用同一转换入口：界面倍速 0.5~2.0（默认 1.0）→ 内部语速 0~20（默认 10）。
+        // 最终请求参数 speakSpeed 由 Synthesizer 在 openStream 内统一 +5，两条链路一致。
+        speechRate = NetworkTtsSynthesizer.uiRateToSpeechRate(config.rate)
         return PrepareResult(true, "已加载规则「${r.name}」")
     }
 

@@ -39,6 +39,13 @@ object NetworkTtsRuleCodec {
         prettyPrint = true
     }
 
+    /**
+     * 无 ID 规则的兜底主键生成器：进程内单调递增。
+     * 直接用 `System.currentTimeMillis()` 会让同一毫秒解析的多条无 ID 规则得到相同主键，
+     * 随后被 upsert 互相覆盖；递增值保证批内与进程内唯一。
+     */
+    private val fallbackId = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
+
     data class ParseResult(
         val rules: List<HttpTTS>,
         val errors: List<String>,
@@ -79,7 +86,7 @@ object NetworkTtsRuleCodec {
         require(name.isNotEmpty()) { "缺少 name" }
         require(url.isNotEmpty()) { "缺少 url" }
         HttpTTS(
-            id = obj.long("id") ?: System.currentTimeMillis(),
+            id = obj.long("id") ?: fallbackId.incrementAndGet(),
             name = name,
             url = url,
             contentType = obj.string("contentType"),

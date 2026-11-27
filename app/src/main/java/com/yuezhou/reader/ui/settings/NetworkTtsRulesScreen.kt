@@ -50,6 +50,7 @@ import com.yuezhou.reader.networktts.NetworkTtsAudition
 import com.yuezhou.reader.reader.networktts.NetworkTtsRuleRepository
 import com.yuezhou.reader.ui.components.LibraryPageHeading
 import io.legado.app.data.entities.HttpTTS
+import io.legado.app.nettts.NetworkTtsSynthesizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -442,7 +443,7 @@ private fun AuditionDialog(
 ) {
     val state by audition.state.collectAsStateWithLifecycle()
     var text by remember { mutableStateOf("你好，这是网络朗读规则试听。") }
-    var speed by remember { mutableStateOf(5f) }
+    var speed by remember { mutableStateOf(NetworkTtsSynthesizer.DEFAULT_SPEECH_RATE.toFloat()) }
     val playing = state.phase == NetworkTtsAudition.Phase.PLAYING
     val busy = state.phase == NetworkTtsAudition.Phase.SYNTHESIZING
 
@@ -465,7 +466,11 @@ private fun AuditionDialog(
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text("语速参数 speakSpeed = ${speed.toInt()}", style = MaterialTheme.typography.bodySmall)
+                // 显示最终请求参数（内部语速 +5），与实际下发给服务器的 speakSpeed 一致。
+                Text(
+                    "语速参数 speakSpeed = ${NetworkTtsSynthesizer.requestSpeechRate(speed.toInt())}",
+                    style = MaterialTheme.typography.bodySmall
+                )
                 Slider(value = speed, onValueChange = { speed = it }, valueRange = 0f..20f, steps = 19)
                 state.message?.let {
                     Text(

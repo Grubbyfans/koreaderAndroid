@@ -140,6 +140,18 @@ class AnalyzeUrl(
         unsupportedOption?.let { throw UnsupportedOptionException(it) }
     }
 
+    /**
+     * 更新 JS 执行用的协程上下文。
+     *
+     * Rhino 通过 `observeInstructionCount` 轮询该上下文的 Job 来中断死循环，而
+     * `Job.ensureActive()` 在 Job **正常完成**时也会抛取消异常。因此每个执行阶段
+     * （URL 解析 / loginCheckJs / bodyJs）都必须把上下文切换为当前阶段**活跃**的 Job，
+     * 否则会误用已完成（completed）的 Job，导致后续 JS 一执行就报"任务已完成"。
+     */
+    fun updateCoroutineContext(ctx: CoroutineContext) {
+        coroutineContext = ctx.minusKey(ContinuationInterceptor)
+    }
+
     private fun analyzeJs() {
         var start = 0
         val jsMatcher = AppPattern.JS_PATTERN.matcher(ruleUrl)
@@ -330,7 +342,7 @@ class AnalyzeUrl(
             }
             bindings["infoMap"] = infoMap
         }
-        val sharedScope = source?.let { SharedJsScope.scopeFor(it) }
+        val sharedScope = source?.let { SharedJsScope.scopeFor(it, coroutineContext.takeIf { it !== EmptyCoroutineContext }) }
         val scope = if (sharedScope == null) {
             RhinoScriptEngine.getRuntimeScope(bindings)
         } else {

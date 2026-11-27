@@ -79,7 +79,11 @@ interface BaseSource : JsExtensions {
         }
     }
 
-    /** 解析 header 规则（支持 `@js:` 动态生成）。 */
+    /** 解析 header 规则（支持 `@js:` 动态生成）。
+     *
+     * 动态 header 脚本执行失败时**直接抛出**，不静默降级——否则会把脚本错误变成
+     * "缺少鉴权头的请求"，既可能打到服务器产生无效请求，也掩盖了规则本身的问题。
+     */
     fun getHeaderMap(hasLoginHeader: Boolean = false) = HashMap<String, String>().apply {
         header?.let {
             try {
@@ -93,6 +97,7 @@ interface BaseSource : JsExtensions {
                 throw e
             } catch (e: Exception) {
                 NetworkTtsLog.put("执行请求头规则出错：${e.message}", e)
+                throw IllegalStateException("请求头规则执行失败：${e.message}", e)
             }
         }
         if (!containsKey(AppConst.UA_NAME)) {
@@ -218,7 +223,7 @@ interface BaseSource : JsExtensions {
             bindings["cache"] = CacheManager
             bindings.apply(bindingsConfig)
         }
-        val sharedScope = SharedJsScope.scopeFor(this)
+        val sharedScope = SharedJsScope.scopeFor(this, coroutineContext)
         val scope = if (sharedScope == null) {
             RhinoScriptEngine.getRuntimeScope(bindings)
         } else {

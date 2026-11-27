@@ -71,7 +71,9 @@ class NetworkTtsAudition(context: Context) {
                 val result = synthesizer.synthesize(
                     rule = rule,
                     text = trimmed,
-                    speechRate = NetworkTtsSynthesizer.requestSpeechRate(speechRate),
+                    // 直接传内部语速（0~20）；最终请求参数 speakSpeed 由 Synthesizer 统一 +5，
+                    // 与正式朗读 backend 走同一转换，保证试听与正文朗读语速一致。
+                    speechRate = speechRate,
                     chapterTitle = "试听",
                     forceRefresh = false,
                 )
