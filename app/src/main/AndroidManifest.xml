@@ -20,6 +20,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
             android:label="@string/app_name"
             android:theme="@style/Theme.YuezhouReader">
             <intent-filter>
@@ -62,7 +63,7 @@
             android:exported="false"
             android:label="@string/app_name"
             android:theme="@style/Theme.YuezhouReader"
-            android:configChanges="orientation|screenSize|keyboardHidden" />
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
 
         <!-- 下载保活前台服务：切后台/锁屏时防止进程被冻结导致下载超时 -->
         <service

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.model.BookFormatState
 import com.yuezhou.reader.core.online.model.OnlineBook
+import com.yuezhou.reader.ui.components.coverPlaceholderColor
 
 /**
  * 检索型书源详情：展示搜索结果已有字段，并异步补全服务端详情。
@@ -122,7 +123,7 @@ fun BookDetailScreen(
                     } else {
                         Surface(
                             Modifier.fillMaxSize(),
-                            color = detailPlaceholder(book.title),
+                            color = coverPlaceholderColor(book.title),
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
@@ -201,7 +202,7 @@ fun BookDetailScreen(
                 Text(
                     message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFC0392B),
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
 
@@ -210,7 +211,7 @@ fun BookDetailScreen(
                 Text(
                     reason,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFC0392B),
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
 
@@ -267,14 +268,6 @@ private fun decodeCoverBitmap(bytes: ByteArray): androidx.compose.ui.graphics.Im
     val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
         ?: android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
     return bitmap.asImageBitmap()
-}
-
-private fun detailPlaceholder(key: String): Color {
-    val palette = listOf(
-        Color(0xFF5B8FF9), Color(0xFF61C0BF), Color(0xFFF6903D), Color(0xFF9D7BD8),
-        Color(0xFFE8684A), Color(0xFF5DADEC), Color(0xFF6DC8EC), Color(0xFF78D3A0),
-    )
-    return palette[(key.hashCode() and Int.MAX_VALUE) % palette.size]
 }
 
 private fun formatDetailSize(bytes: Long): String = when {

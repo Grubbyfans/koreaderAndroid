@@ -19,6 +19,15 @@ import androidx.compose.ui.unit.dp
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.YuezhouDimens
 
+/** 无封面书籍的占位底色：按 key 稳定取色，保证同一本书跨页面颜色一致。 */
+private val CoverPlaceholderPalette = listOf(
+    Color(0xFF5B8FF9), Color(0xFF61C0BF), Color(0xFFF6903D), Color(0xFF9D7BD8),
+    Color(0xFFE8684A), Color(0xFF5DADEC), Color(0xFF6DC8EC), Color(0xFF78D3A0),
+)
+
+internal fun coverPlaceholderColor(key: String): Color =
+    CoverPlaceholderPalette[(key.hashCode() and Int.MAX_VALUE) % CoverPlaceholderPalette.size]
+
 internal val LibraryGridIcon = ImageVector.Builder("LibraryGrid", 24.dp, 24.dp, 24f, 24f).apply {
     path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.7f) {
         for (x in listOf(3.5f, 13.5f)) {

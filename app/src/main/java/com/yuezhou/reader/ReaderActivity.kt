@@ -55,6 +55,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -821,7 +822,7 @@ private fun ReaderScreen(
         val source = openedSource ?: return@LaunchedEffect
         if (!readerPrefs.vertical && readerPrefs.pageAnimation in setOf("fade", "ios_curl", "ripple")) {
             controller.settings(readerPrefs.pageAnimation, layoutChanged = true)
-            controller.background = themeBackground(readerPrefs.theme).let { color ->
+            controller.background = ReaderPalette.background(readerPrefs.theme).let { color ->
                 android.graphics.Color.argb((color.alpha * 255).toInt(), (color.red * 255).toInt(),
                     (color.green * 255).toInt(), (color.blue * 255).toInt())
             }
@@ -873,7 +874,7 @@ private fun ReaderScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(themeBackground(readerPrefs.theme)),
+                .background(ReaderPalette.background(readerPrefs.theme)),
         ) {
             // 正文 WebView（铺满，单击呼出面板）
             AndroidView(
@@ -1222,13 +1223,42 @@ private fun formatTime(millis: Long): String {
     return fmt.format(java.util.Date(millis))
 }
 
-/** 主题背景色（与 bridge.js 主题一致）。 */
-private fun themeBackground(theme: String): Color = when (theme) {
-    "sepia" -> Color(0xFFF5ECD7)
-    "dark" -> Color(0xFF1A1A1A)
-    "green" -> Color(0xFFCCE8CF)
-    "night-blue" -> Color(0xFF0D1B2A)
-    else -> Color(0xFFFAF9F7)
+/** 阅读器色板：正文背景与阅读面板共用，theme 取值须与 bridge.js 保持一致。 */
+private object ReaderPalette {
+    private val Light = Color(0xFFFAF9F7)
+    private val Sepia = Color(0xFFF5ECD7)
+    private val Dark = Color(0xFF1A1A1A)
+    private val Green = Color(0xFFCCE8CF)
+    private val NightBlue = Color(0xFF0D1B2A)
+
+    fun background(theme: String): Color = when (theme) {
+        "sepia" -> Sepia
+        "dark" -> Dark
+        "green" -> Green
+        "night-blue" -> NightBlue
+        else -> Light
+    }
+
+    fun isDark(theme: String): Boolean = theme == "dark" || theme == "night-blue"
+
+    /** 阅读面板配色：沿用应用色板，但正文区与面板保持同一底色。 */
+    fun panelTheme(base: ColorScheme, theme: String): ColorScheme {
+        val dark = isDark(theme)
+        val surface = if (theme == "light") base.surface else background(theme)
+        return base.copy(
+            surface = surface,
+            surfaceContainer = surface,
+            surfaceContainerHigh = surface,
+            onSurface = if (dark) Color(0xFFE8E9E1) else Color(0xFF252821),
+            onSurfaceVariant = if (dark) Color(0xFFBDC7B8) else Color(0xFF51584B),
+            primary = if (dark) Color(0xFFB0C5A4) else Color(0xFF526B53),
+            onPrimary = if (dark) Color(0xFF202D1E) else Color.White,
+            secondaryContainer = if (dark) Color(0xFF394B36) else Color(0xFFDCE3CF),
+            onSecondaryContainer = if (dark) Color(0xFFE2E9D9) else Color(0xFF344E36),
+            outline = if (dark) Color(0xFF869083) else Color(0xFF737867),
+            outlineVariant = if (dark) Color(0xFF53594E) else Color(0xFFC4C6B7),
+        )
+    }
 }
 
 private enum class ReaderOverlay(val title: String) {
@@ -1259,21 +1289,7 @@ private fun ReaderPanel(
     // 进度滑块拖动中的本地预览值；null 表示未在拖动（跟随真实 fraction）
     var fractionPreview by remember { mutableStateOf<Float?>(null) }
     val appColors = MaterialTheme.colorScheme
-    val dark = prefs.theme == "dark" || prefs.theme == "night-blue"
-    val surface = if (prefs.theme == "light") appColors.surface else themeBackground(prefs.theme)
-    val panelColors = appColors.copy(
-        surface = surface,
-        surfaceContainer = surface,
-        surfaceContainerHigh = surface,
-        onSurface = if (dark) Color(0xFFE8E9E1) else Color(0xFF252821),
-        onSurfaceVariant = if (dark) Color(0xFFBDC7B8) else Color(0xFF51584B),
-        primary = if (dark) Color(0xFFB0C5A4) else Color(0xFF526B53),
-        onPrimary = if (dark) Color(0xFF202D1E) else Color.White,
-        secondaryContainer = if (dark) Color(0xFF394B36) else Color(0xFFDCE3CF),
-        onSecondaryContainer = if (dark) Color(0xFFE2E9D9) else Color(0xFF344E36),
-        outline = if (dark) Color(0xFF869083) else Color(0xFF737867),
-        outlineVariant = if (dark) Color(0xFF53594E) else Color(0xFFC4C6B7),
-    )
+    val panelColors = ReaderPalette.panelTheme(appColors, prefs.theme)
     MaterialTheme(colorScheme = panelColors) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val panelMaxHeight = maxHeight / 2
@@ -1612,7 +1628,7 @@ private fun SettingsControls(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Box(Modifier.size(14.dp).background(themeBackground(value), RoundedCornerShape(4.dp)))
+                                Box(Modifier.size(14.dp).background(ReaderPalette.background(value), RoundedCornerShape(4.dp)))
                                 Text(title)
                             }
                         },
@@ -2101,7 +2117,7 @@ internal fun TocDrawer(
                             Box(
                                 modifier = Modifier.size(28.dp)
                                     .clip(RoundedCornerShape(9.dp))
-                                    .background(if (isExpanded) YuezhouColors.BrandContainer else Color(0xFFF5F5F5))
+                                    .background(if (isExpanded) YuezhouColors.BrandContainer else MaterialTheme.colorScheme.surfaceVariant)
                                     .clickable(onClick = toggle),
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -2120,7 +2136,7 @@ internal fun TocDrawer(
                         Text(
                             text = item.label,
                             style = if (depth == 0) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
-                            color = if (current) YuezhouColors.BrandDark else if (depth == 0) YuezhouColors.TextPrimary else Color(0xFF4A4A4A),
+                            color = if (current) YuezhouColors.BrandDark else if (depth == 0) YuezhouColors.TextPrimary else YuezhouColors.TextSecondary,
                             fontWeight = if (current || depth == 0) FontWeight.SemiBold else FontWeight.Normal,
                             modifier = Modifier.weight(1f),
                             maxLines = 2,

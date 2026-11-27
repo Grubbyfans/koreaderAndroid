@@ -123,6 +123,7 @@ import com.yuezhou.reader.ui.LibraryUiPrefs
 import com.yuezhou.reader.ui.components.BookReadingProgress
 import com.yuezhou.reader.ui.components.LibraryPageHeading
 import com.yuezhou.reader.ui.components.LibraryGridIcon
+import com.yuezhou.reader.ui.components.coverPlaceholderColor
 import com.yuezhou.reader.ui.LibrarySort
 import com.yuezhou.reader.ui.LocalLibraryFilters
 import com.yuezhou.reader.ui.ReadingFilter
@@ -1238,7 +1239,7 @@ private fun ScanResultDialog(
                                                 "${loc.displayName}（${formatSize(loc.size)}）",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = if (book.locations.size > 1)
-                                                    Color(0xFFE64340)
+                                                    MaterialTheme.colorScheme.error
                                                 else YuezhouColors.TextSecondary,
                                                 modifier = Modifier.weight(1f),
                                             )
@@ -1251,7 +1252,7 @@ private fun ScanResultDialog(
                                         Text(
                                             "同名文件有多个位置，请选择要导入的一项",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFFE64340),
+                                            color = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.padding(start = 12.dp),
                                         )
                                     }
@@ -1473,7 +1474,7 @@ private fun CloudBookCard(
                 .fillMaxWidth()
                 .aspectRatio(0.75f)
                 .clip(RoundedCornerShape(10.dp))
-                .background(CoverPlaceholder.color(book.bookId)),
+                .background(coverPlaceholderColor(book.bookId)),
             contentAlignment = Alignment.Center,
         ) {
             if (cover != null) {
@@ -1738,7 +1739,7 @@ private fun BookCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(YuezhouDimens.CoverRadius))
-                .background(CoverPlaceholder.color(book.bookId))
+                .background(coverPlaceholderColor(book.bookId))
                 .then(
                     if (selecting && checked) {
                         Modifier.border(2.dp, YuezhouColors.Brand, RoundedCornerShape(YuezhouDimens.CoverRadius))
@@ -1841,7 +1842,7 @@ private fun BookListRow(
             modifier = Modifier
                 .size(width = 52.dp, height = 78.dp)
                 .clip(RoundedCornerShape(YuezhouDimens.CoverRadius))
-                .background(CoverPlaceholder.color(book.bookId))
+                .background(coverPlaceholderColor(book.bookId))
                 .then(
                     if (selecting && checked) {
                         Modifier.border(2.dp, YuezhouColors.Brand, RoundedCornerShape(YuezhouDimens.CoverRadius))
@@ -2003,24 +2004,6 @@ private fun decodeCoverDownsampled(bytes: ByteArray, targetPx: Int = 512): andro
     while (maxDim / (sample * 2) >= targetPx) sample *= 2
     val opts = BitmapFactory.Options().apply { inSampleSize = sample }
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-}
-
-/** 封面占位：根据 bookId 生成稳定的渐变底色。 */
-private object CoverPlaceholder {
-    private val palette = listOf(
-        Color(0xFF5B8FF9),
-        Color(0xFF61C0BF),
-        Color(0xFFF6903D),
-        Color(0xFF9D7BD8),
-        Color(0xFFE8684A),
-        Color(0xFF5DADEC),
-        Color(0xFF6DC8EC),
-        Color(0xFF78D3A0),
-    )
-    fun color(key: String): Color {
-        val idx = (key.hashCode() and Int.MAX_VALUE) % palette.size
-        return palette[idx]
-    }
 }
 
 @Composable

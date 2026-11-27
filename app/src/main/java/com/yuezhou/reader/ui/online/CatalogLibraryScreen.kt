@@ -75,6 +75,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.core.online.model.OnlineBook
 import com.yuezhou.reader.ui.LibraryUiPrefs
+import com.yuezhou.reader.ui.components.coverPlaceholderColor
 import com.yuezhou.reader.ui.navigation.SwipeBlockRegistry
 import com.yuezhou.reader.ui.rememberRestoredGridState
 import com.yuezhou.reader.web.ZLibraryWebEntry
@@ -256,7 +257,7 @@ fun CatalogLibraryScreen(
                         Text(
                             message,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFC0392B),
+                            color = MaterialTheme.colorScheme.error,
                             textAlign = TextAlign.Center,
                         )
                     }
@@ -524,7 +525,7 @@ private fun CatalogResults(
                     Text(
                         "加载更多失败：${state.loadMoreError}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFC0392B),
+                        color = MaterialTheme.colorScheme.error,
                         textAlign = TextAlign.Center,
                     )
                     OutlinedButton(
@@ -562,13 +563,13 @@ private fun SearchNoticeBar(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
-        color = if (error != null) Color(0xFFFDECEA) else YuezhouColors.BrandContainer,
+        color = if (error != null) MaterialTheme.colorScheme.errorContainer else YuezhouColors.BrandContainer,
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(
                 text = notice ?: error.orEmpty(),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (error != null) Color(0xFFC0392B) else YuezhouColors.BrandDark,
+                color = if (error != null) MaterialTheme.colorScheme.error else YuezhouColors.BrandDark,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -713,7 +714,7 @@ private fun RemoteCover(
         modifier = modifier,
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, YuezhouColors.Divider),
-        color = placeholderColor(title),
+        color = coverPlaceholderColor(title),
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (bitmap != null) {
@@ -745,14 +746,6 @@ private fun decodeCover(bytes: ByteArray): android.graphics.Bitmap? {
     return BitmapFactory.decodeByteArray(
         bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample },
     )
-}
-
-private fun placeholderColor(key: String): Color {
-    val palette = listOf(
-        Color(0xFF5B8FF9), Color(0xFF61C0BF), Color(0xFFF6903D), Color(0xFF9D7BD8),
-        Color(0xFFE8684A), Color(0xFF5DADEC), Color(0xFF6DC8EC), Color(0xFF78D3A0),
-    )
-    return palette[(key.hashCode() and Int.MAX_VALUE) % palette.size]
 }
 
 private fun formatSize(bytes: Long): String = when {
