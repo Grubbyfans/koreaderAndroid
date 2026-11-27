@@ -78,6 +78,26 @@ class ReaderAutomaticSyncTest {
     }
 
     @Test
+    fun `位置一致时即使等待期间翻页也不打扰`() = runBlocking {
+        var moved = false
+        val result = sync.pull(
+            bookId = "Example",
+            localCfi = "local",
+            isActive = { true },
+            hasMoved = { moved },
+            acceptsAutomaticJump = { true },
+            resolve = { "remote-cfi" },
+            compare = { _, _ ->
+                // 模拟比较期间 WebView 又发出一次定位
+                moved = true
+                0
+            },
+            apply = { _, _ -> error("identical position must not jump") },
+        )
+        assertEquals(PullResult.NoChange, result)
+    }
+
+    @Test
     fun `云端更早或目标校验失败时保留远端信息供手动选择`() = runBlocking {
         for ((order, expected) in listOf(-1 to Reason.REMOTE_BEHIND, 1 to Reason.CONFIRM_POSITION)) {
             val decision = sync.pull(

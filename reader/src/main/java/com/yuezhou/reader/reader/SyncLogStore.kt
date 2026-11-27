@@ -20,16 +20,27 @@ class SyncLogStore(context: Context) {
         private const val TAG = "SyncLogStore"
     }
 
-    /** 追加一条同步记录，超出上限时淘汰最旧条目。 */
-    suspend fun append(direction: String, bookTitle: String, success: Boolean, message: String) {
+    /**
+     * 追加一条同步记录，超出上限时淘汰最旧条目。
+     *
+     * [outcome] 取 [SyncLogEntity.Outcome]；其中 [SyncLogEntity.Outcome.OFFER]
+     * 表示等待用户确认或主动跳过，不算失败。
+     */
+    suspend fun append(
+        direction: String,
+        bookTitle: String,
+        outcome: String,
+        message: String,
+    ) {
         try {
             dao.insert(
                 SyncLogEntity(
                     direction = direction,
                     bookTitle = bookTitle,
                     at = System.currentTimeMillis(),
-                    success = success,
+                    success = outcome != SyncLogEntity.Outcome.FAILED,
                     message = message,
+                    outcome = outcome,
                 ),
             )
             val total = dao.count()

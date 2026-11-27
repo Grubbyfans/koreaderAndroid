@@ -109,6 +109,7 @@ import com.yuezhou.reader.reader.LibraryStore
 import com.yuezhou.reader.reader.ReaderEvent
 import com.yuezhou.reader.reader.ReaderWebView
 import com.yuezhou.reader.reader.SyncLogStore
+import com.yuezhou.reader.reader.db.SyncLogEntity
 import com.yuezhou.reader.reader.TocItem
 import com.yuezhou.reader.core.speech.SpeechTextPlanning
 import com.yuezhou.reader.core.speech.SourceAnchor
@@ -129,6 +130,7 @@ import com.yuezhou.reader.ui.reader.ReaderOverlay
 import com.yuezhou.reader.ui.reader.ReaderPalette
 import com.yuezhou.reader.ui.reader.ReaderPanel
 import com.yuezhou.reader.ui.reader.ReaderViewModel
+import com.yuezhou.reader.ui.reader.SyncActionResult
 import com.yuezhou.reader.ui.reader.RemoteProgressOffer
 import com.yuezhou.reader.ui.reader.TocDrawer
 import com.yuezhou.reader.ui.reader.formatSyncProgress
@@ -358,7 +360,7 @@ private fun ReaderScreen(
                     ReaderAutomaticSync.PullResult.Applied -> {
                         vm.undoPosition = initial
                         status = "已续读到云端进度，可在进度同步中撤销"
-                        syncLogStore.append("pull", title, true, "已续读到云端进度")
+                        syncLogStore.append("pull", title, SyncLogEntity.Outcome.SUCCESS, "已续读到云端进度")
                     }
                     is ReaderAutomaticSync.PullResult.Offer -> {
                         val reason = when (result.reason) {
@@ -367,13 +369,14 @@ private fun ReaderScreen(
                             ReaderAutomaticSync.Reason.CONFIRM_POSITION -> "需要确认云端位置"
                         }
                         vm.remoteOffer = RemoteProgressOffer(result.cfi, result.remote.xpointer, result.remote.percent, reason)
-                        syncLogStore.append("pull", title, false, "${reason}，保留本机位置")
+                        vm.offerResult = null
+                        syncLogStore.append("pull", title, SyncLogEntity.Outcome.OFFER, "${reason}，保留本机位置")
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                syncLogStore.append("pull", title, false, e.message ?: "拉取失败")
+                syncLogStore.append("pull", title, SyncLogEntity.Outcome.FAILED, e.message ?: "拉取失败")
             }
         }
     }
@@ -394,15 +397,20 @@ private fun ReaderScreen(
         vm.autoSyncBusy = true
         try {
             if (position == null) {
-                syncLogStore.append("push", title, false, "当前位置尚未确认或转换，已跳过上传")
+                syncLogStore.append("push", title, SyncLogEntity.Outcome.OFFER, "当前位置尚未确认或转换，已跳过上传")
                 return
             }
             val error = cloudSync.uploadLocalProgress(id, position.first, position.second)
-            syncLogStore.append("push", title, error == null, error ?: "已覆盖云端进度")
+            syncLogStore.append(
+                    "push",
+                    title,
+                    if (error == null) SyncLogEntity.Outcome.SUCCESS else SyncLogEntity.Outcome.FAILED,
+                    error ?: "已覆盖云端进度",
+                )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            syncLogStore.append("push", title, false, e.message ?: "上传失败")
+            syncLogStore.append("push", title, SyncLogEntity.Outcome.FAILED, e.message ?: "上传失败")
         } finally {
             vm.autoSyncBusy = false
         }
@@ -474,6 +482,7 @@ private fun ReaderScreen(
         if (bookId == null || vm.syncDialogOpen) return
         vm.syncLoading = true
         vm.syncInfo = null
+        vm.syncResult = null
         vm.syncDialogOpen = true
     }
 
@@ -500,8 +509,11 @@ private fun ReaderScreen(
                 val cfi = wv.xPointerToCfi(remote)
                 val applied = cfi != null && jumpAndSave(id, wv, previous, cfi to info.remotePercent, remote)
                 if (applied) vm.undoPosition = previous
-                status = if (applied) "已应用云端进度，可在进度同步中撤销" else "无法确认云端落点，已保留本机进度"
-                vm.syncDialogOpen = false
+                vm.syncResult = SyncActionResult(
+                    if (applied) "已应用云端进度，可在进度同步中撤销"
+                    else "无法确认云端落点，已保留本机进度",
+                    isError = !applied,
+                )
             } finally {
                 vm.syncBusy = false
             }
@@ -519,8 +531,10 @@ private fun ReaderScreen(
             try {
                 val restored = jumpAndSave(id, wv, previous, restore)
                 if (restored) vm.undoPosition = null
-                status = if (restored) "已恢复到同步前位置" else "无法确认撤销位置"
-                vm.syncDialogOpen = false
+                vm.syncResult = SyncActionResult(
+                    if (restored) "已恢复到同步前位置" else "无法确认撤销位置",
+                    isError = !restored,
+                )
             } finally {
                 vm.syncBusy = false
             }
@@ -532,21 +546,24 @@ private fun ReaderScreen(
         val id = bookId ?: return
         val pos = vm.lastPosition
         if (pos == null) {
-            status = "本机暂无进度可上传"
+            vm.syncResult = SyncActionResult("本机暂无进度可上传", isError = true)
             return
         }
         val cfi = pos.first
         val wv = webView
         if (wv == null) {
-            status = "阅读器尚未就绪，无法上传进度"
+            vm.syncResult = SyncActionResult("阅读器尚未就绪，无法上传进度", isError = true)
             return
         }
         vm.syncBusy = true
         scope.launch {
             try {
-                status = vm.uploadProgress(id, cfi, pos.second) { wv.cfiToXPointer(it) }
-                    ?: "已上传本机进度"
-                vm.syncDialogOpen = false
+                val error = vm.uploadProgress(id, cfi, pos.second) { wv.cfiToXPointer(it) }
+                vm.syncResult = SyncActionResult(
+                    error ?: "已上传本机进度",
+                    isError = error != null,
+                )
+                if (error == null) vm.syncInfo = vm.loadProgressInfo(id)
             } finally {
                 vm.syncBusy = false
             }
@@ -1055,16 +1072,30 @@ private fun ReaderScreen(
                 onDismissRequest = { vm.remoteOffer = null },
                 title = { Text("发现云端进度") },
                 text = {
-                    Text("${offer.reason}。云端 ${formatSyncProgress(offer.xpointer, offer.percent)}，本机 " +
-                        formatSyncProgress(vm.lastPosition?.first, vm.lastPosition?.second))
+                    Column {
+                        Text("${offer.reason}。云端 ${formatSyncProgress(offer.xpointer, offer.percent)}，本机 " +
+                            formatSyncProgress(vm.lastPosition?.first, vm.lastPosition?.second))
+                        vm.offerResult?.let {
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                it.message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (it.isError) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
                 },
                 confirmButton = {
-                    TextButton(onClick = { vm.remoteOffer = null }) { Text("保留本机位置") }
+                    if (vm.offerResult != null) {
+                        TextButton(onClick = { vm.remoteOffer = null }) { Text("关闭") }
+                    } else {
+                        TextButton(onClick = { vm.remoteOffer = null }) { Text("保留本机位置") }
+                    }
                 },
                 dismissButton = {
-                    if (offer.cfi != null) {
+                    if (vm.offerResult == null && offer.cfi != null) {
                         TextButton(onClick = {
-                            vm.remoteOffer = null
                             val id = bookId ?: return@TextButton
                             val wv = webView ?: return@TextButton
                             val previous = vm.lastPosition ?: return@TextButton
@@ -1072,8 +1103,11 @@ private fun ReaderScreen(
                             scope.launch {
                                 val applied = jumpAndSave(id, wv, previous, offer.cfi to offer.percent, offer.xpointer)
                                 if (applied) vm.undoPosition = previous
-                                status = if (applied) "已应用云端进度，可在进度同步中撤销"
-                                else "无法确认云端落点，已保留本机进度"
+                                vm.offerResult = SyncActionResult(
+                                    if (applied) "已跳到云端位置，可在进度同步中撤销"
+                                    else "无法确认云端落点，已保留本机进度",
+                                    isError = !applied,
+                                )
                             }
                         }) { Text("跳到云端位置") }
                     }
@@ -1088,6 +1122,7 @@ private fun ReaderScreen(
                 localPosition = vm.lastPosition,
                 loading = vm.syncLoading,
                 busy = vm.syncBusy || pendingJump != null,
+                result = vm.syncResult,
                 onUpload = { uploadLocalProgress() },
                 onApply = { applyRemoteProgress() },
                 onUndo = if (vm.undoPosition != null) ::undoRemoteProgress else null,

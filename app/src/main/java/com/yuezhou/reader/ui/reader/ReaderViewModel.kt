@@ -15,6 +15,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 
+/** 同步操作的结果，用于在进度对话框中就地展示。 */
+internal data class SyncActionResult(val message: String, val isError: Boolean)
+
 /**
  * 阅读进度与云端同步状态。
  *
@@ -44,12 +47,17 @@ internal class ReaderViewModel(application: Application) : AndroidViewModel(appl
     var syncBusy by mutableStateOf(false)
     var undoPosition by mutableStateOf<Pair<String, Double?>?>(null)
 
+    /** 上次同步操作结果；非空时对话框保留并展示结果，直到用户关闭。 */
+    var syncResult by mutableStateOf<SyncActionResult?>(null)
+
     // —— 自动同步 ——
     var autoSyncBusy by mutableStateOf(false)
     /** 本次打开是否已执行过自动拉取。 */
     var autoPulled by mutableStateOf(false)
     /** 需要用户确认的云端进度。 */
     var remoteOffer by mutableStateOf<RemoteProgressOffer?>(null)
+    /** 手动跳转到云端位置的结果；非空时弹框就地展示。 */
+    var offerResult by mutableStateOf<SyncActionResult?>(null)
 
     /** 切换书籍时清空上一次阅读残留的进度状态。 */
     fun resetForBook() {
@@ -62,9 +70,11 @@ internal class ReaderViewModel(application: Application) : AndroidViewModel(appl
         syncLoading = false
         syncBusy = false
         undoPosition = null
+        syncResult = null
         autoSyncBusy = false
         autoPulled = false
         remoteOffer = null
+        offerResult = null
     }
 
     /**

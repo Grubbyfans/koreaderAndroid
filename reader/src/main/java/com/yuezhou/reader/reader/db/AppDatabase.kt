@@ -27,7 +27,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         OnlineBookMappingEntity::class,
         NetworkTtsRuleEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -162,6 +162,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 同步记录增加结果类别：成功 / 待确认 / 失败。旧记录按 success 回填。 */
+        private val addSyncLogOutcome = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE sync_log ADD COLUMN outcome TEXT NOT NULL DEFAULT 'SUCCESS'",
+                )
+                db.execSQL("UPDATE sync_log SET outcome = 'FAILED' WHERE success = 0")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -178,6 +188,7 @@ abstract class AppDatabase : RoomDatabase() {
                     addSpeechAnchor,
                     addOnlineDownloadTables,
                     addNetworkTtsRule,
+                    addSyncLogOutcome,
                 )
                     .build().also { instance = it }
             }

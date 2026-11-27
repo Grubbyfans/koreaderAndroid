@@ -146,6 +146,7 @@ internal fun ProgressSyncDialog(
     localPosition: Pair<String, Double?>?,
     loading: Boolean,
     busy: Boolean,
+    result: SyncActionResult?,
     onUpload: () -> Unit,
     onApply: () -> Unit,
     onUndo: (() -> Unit)?,
@@ -204,24 +205,39 @@ internal fun ProgressSyncDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                result?.let {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        it.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (it.isError) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         },
         confirmButton = {
-            if (onUndo != null) {
-                TextButton(onClick = onUndo, enabled = !busy && !loading) { Text("撤销上次应用") }
+            if (result != null) {
+                TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
+            } else {
+                if (onUndo != null) {
+                    TextButton(onClick = onUndo, enabled = !busy && !loading) { Text("撤销上次应用") }
+                }
+                TextButton(
+                    onClick = onApply,
+                    enabled = !busy && !loading && localPosition != null && info?.remoteLocation != null,
+                ) { Text("应用云端进度") }
             }
-            TextButton(
-                onClick = onApply,
-                enabled = !busy && !loading && localPosition != null && info?.remoteLocation != null,
-            ) { Text("应用云端进度") }
         },
         dismissButton = {
-            Row {
-                TextButton(
-                    onClick = onUpload,
-                    enabled = !busy && !loading && localPosition != null,
-                ) { Text("上传本机进度") }
-                TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
+            if (result == null) {
+                Row {
+                    TextButton(
+                        onClick = onUpload,
+                        enabled = !busy && !loading && localPosition != null,
+                    ) { Text("上传本机进度") }
+                    TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
+                }
             }
         },
     )

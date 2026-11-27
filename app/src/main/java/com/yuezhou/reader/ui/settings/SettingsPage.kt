@@ -780,8 +780,11 @@ private fun SyncLogPage(onBack: () -> Unit) {
                 items(list, key = { it.id }) { log ->
                     val dirLabel = if (log.direction == "pull") "拉取" else "上传"
                     val time = formatLocalTime("MM-dd HH:mm:ss", log.at)
-                    val ok = if (log.success) "成功" else "失败"
-                    val okColor = if (log.success) YuezhouColors.BrandDark else MaterialTheme.colorScheme.error
+                    val (okLabel, okColor) = when (log.outcome) {
+                        SyncLogEntity.Outcome.SUCCESS -> "成功" to YuezhouColors.BrandDark
+                        SyncLogEntity.Outcome.OFFER -> "待确认" to MaterialTheme.colorScheme.tertiary
+                        else -> "失败" to MaterialTheme.colorScheme.error
+                    }
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -798,7 +801,7 @@ private fun SyncLogPage(onBack: () -> Unit) {
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    ok,
+                                    okLabel,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = okColor,
                                 )

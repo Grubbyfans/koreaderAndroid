@@ -30,8 +30,9 @@ internal class ReaderAutomaticSync(
         val cfi = resolve(remote.xpointer)
         val order = cfi?.let { compare(it, localCfi) }
         if (!isActive()) return PullResult.NoChange
+        // 云端与本机一致：没有可应用的内容，即使比较期间又翻页也不打扰用户。
+        if (order == 0) return PullResult.NoChange
         val moved = hasMoved()
-        if (!moved && order == 0) return PullResult.NoChange
         if (!moved && acceptsAutomaticJump() && order == 1 && cfi != null && apply(cfi, remote)) {
             return PullResult.Applied
         }
