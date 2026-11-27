@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -42,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,13 +52,17 @@ import com.yuezhou.reader.YuezhouColors
 import com.yuezhou.reader.networktts.NetworkTtsAudition
 import com.yuezhou.reader.reader.networktts.NetworkTtsRuleRepository
 import com.yuezhou.reader.ui.components.LibraryPageHeading
+import io.legado.app.data.entities.BaseSource.LoginRow
 import io.legado.app.data.entities.HttpTTS
+import io.legado.app.nettts.NetworkTtsLog
 import io.legado.app.nettts.NetworkTtsSynthesizer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -63,7 +70,7 @@ import java.net.URL
  * 网络 TTS 规则管理（设置 → 语音朗读 → 网络 TTS 规则管理）。
  *
  * 阶段 A 能力：导入（文件/剪贴板/链接/文本）、新建、编辑、删除、导出、单规则试听。
- * 规则字段与 Legado 原版一致；导入保留原始 JSON，导出以编辑后的字段覆盖且不带凭证。
+ * 规则字段与 Legado 原版一致；导入保留原始 JSON，导出过滤常见凭证并由用户确认。
  */
 @Composable
 internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
@@ -79,7 +86,9 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
     var importOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<HttpTTS?>(null) }
     var auditioning by remember { mutableStateOf<HttpTTS?>(null) }
+    var loginTarget by remember { mutableStateOf<HttpTTS?>(null) }
     var deleteTarget by remember { mutableStateOf<HttpTTS?>(null) }
+    var pendingExport by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     fun reload() {
         scope.launch {
@@ -127,7 +136,7 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
         ) {
             LibraryPageHeading("网络 TTS 规则")
             Text(
-                "兼容 Legado 原版网络朗读规则；阶段 A 仅提供规则管理与单条试听。",
+                "支持 Legado 网络朗读规则、登录参数与试听；具体规则兼容性以实际验收为准。",
                 style = MaterialTheme.typography.bodySmall,
                 color = YuezhouColors.TextSecondary,
             )
@@ -142,8 +151,7 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                         if (exported.isNullOrBlank()) {
                             message = "暂无可导出的规则"
                         } else {
-                            copyToClipboard(context, exported)
-                            message = "已复制全部规则到剪贴板（不含登录凭证）"
+                            pendingExport = "全部规则" to exported
                         }
                     }
                 }) { Text("导出到剪贴板") }
@@ -168,6 +176,7 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                         rule = rule,
                         onAudition = { auditioning = rule },
                         onEdit = { editing = rule },
+                        onLogin = if (rule.hasLogin()) ({ loginTarget = rule }) else null,
                         onDelete = { deleteTarget = rule },
                         onExport = {
                             scope.launch {
@@ -175,8 +184,7 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
                                 if (text.isNullOrBlank()) {
                                     message = "导出失败"
                                 } else {
-                                    copyToClipboard(context, text)
-                                    message = "已复制「${rule.name}」到剪贴板（不含登录凭证）"
+                                    pendingExport = "「${rule.name}」" to text
                                 }
                             }
                         },
@@ -227,6 +235,32 @@ internal fun NetworkTtsRulesScreen(onBack: () -> Unit) {
         )
     }
 
+    loginTarget?.let { rule ->
+        LoginDialog(
+            rule = rule,
+            onDismiss = { loginTarget = null },
+            onMessage = { message = it },
+        )
+    }
+
+    pendingExport?.let { (title, text) ->
+        AlertDialog(
+            onDismissRequest = { pendingExport = null },
+            title = { Text("确认导出") },
+            text = {
+                Text("已递归过滤常见凭证字段，并遮盖静态请求头与链接中的敏感参数。脚本中的硬编码敏感值不一定能被识别，导出后仍需自行检查。")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    copyToClipboard(context, text)
+                    pendingExport = null
+                    message = "已复制$title（常见凭证已脱敏，请检查脚本与链接）"
+                }) { Text("确认并复制") }
+            },
+            dismissButton = { TextButton(onClick = { pendingExport = null }) { Text("取消") } },
+        )
+    }
+
     deleteTarget?.let { rule ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
@@ -253,6 +287,7 @@ private fun RuleRow(
     rule: HttpTTS,
     onAudition: () -> Unit,
     onEdit: () -> Unit,
+    onLogin: (() -> Unit)?,
     onDelete: () -> Unit,
     onExport: () -> Unit,
 ) {
@@ -283,6 +318,7 @@ private fun RuleRow(
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(onClick = onAudition) { Text("试听") }
             TextButton(onClick = onEdit) { Text("编辑") }
+            onLogin?.let { TextButton(onClick = it) { Text("登录") } }
             TextButton(onClick = onExport) { Text("导出") }
             TextButton(onClick = onDelete) { Text("删除") }
         }
@@ -352,6 +388,176 @@ private fun ImportDialog(onDismiss: () -> Unit, onImportText: (String) -> Unit) 
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+@Composable
+private fun LoginDialog(
+    rule: HttpTTS,
+    onDismiss: () -> Unit,
+    onMessage: (String) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var rows by remember(rule.id) { mutableStateOf<List<LoginRow>>(emptyList()) }
+    var values by remember(rule.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var loading by remember(rule.id) { mutableStateOf(true) }
+    var busy by remember(rule.id) { mutableStateOf(false) }
+    var error by remember(rule.id) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(rule.id) {
+        try {
+            val loaded = withContext(Dispatchers.IO) {
+                withTimeout(10_000) {
+                    val parsedRows = rule.getLoginRows(currentCoroutineContext())
+                    parsedRows to rule.getLoginInfoMap(parsedRows)
+                }
+            }
+            rows = loaded.first
+            values = loaded.second
+            loading = false
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            error = "登录表单脚本执行超时"
+            loading = false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            error = NetworkTtsLog.sanitize(e.message ?: "登录表单加载失败")
+            loading = false
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("登录 / 参数 · ${rule.name}") },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    "表单值与 Cookie 会加密保存在本机。登录脚本由规则提供，仅在点击登录时执行。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YuezhouColors.TextSecondary,
+                )
+                if (loading) {
+                    CircularProgressIndicator(Modifier.height(20.dp), strokeWidth = 2.dp)
+                } else if (rows.isEmpty()) {
+                    Text(
+                        "该规则没有登录表单，点击登录将直接执行 loginUrl 脚本。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                rows.forEach { row ->
+                    LoginField(
+                        row = row,
+                        value = values[row.name].orEmpty(),
+                        enabled = !busy,
+                        onChange = { values = values + (row.name to it) },
+                    )
+                }
+                error?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                if (busy) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.height(16.dp).padding(end = 6.dp), strokeWidth = 2.dp)
+                        Text("正在执行登录脚本…", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !loading && !busy, onClick = {
+                busy = true
+                error = null
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            withTimeout(120_000) {
+                                if (values.isNotEmpty() && !rule.putLoginInfo(org.json.JSONObject(values).toString())) {
+                                    throw IllegalStateException("登录信息保存失败")
+                                }
+                                rule.loginWithContext(currentCoroutineContext())
+                            }
+                        }
+                        busy = false
+                        onMessage("「${rule.name}」登录参数已保存，脚本已执行；请通过试听确认鉴权结果")
+                        onDismiss()
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        busy = false
+                        error = "登录脚本执行超时"
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        busy = false
+                        error = NetworkTtsLog.sanitize(e.message ?: "登录失败")
+                    }
+                }
+            }) { Text("登录") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(enabled = !busy, onClick = {
+                    runCatching {
+                        rule.removeLoginHeader()
+                        rule.removeLoginInfo()
+                    }.onSuccess {
+                        values = rows.associate { it.name to it.default.orEmpty() }
+                        error = null
+                        onMessage("已清除「${rule.name}」的登录信息与登录头")
+                    }.onFailure {
+                        error = NetworkTtsLog.sanitize(it.message ?: "清除登录态失败")
+                    }
+                }) { Text("清除登录态") }
+                TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun LoginField(
+    row: LoginRow,
+    value: String,
+    enabled: Boolean,
+    onChange: (String) -> Unit,
+) {
+    val label = row.hint?.takeIf { it.isNotBlank() } ?: row.name
+    val choices = row.choices()
+    if (row.type.equals("select", ignoreCase = true) || choices.isNotEmpty()) {
+        var expanded by remember(row.name) { mutableStateOf(false) }
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = {},
+                label = { Text(label) },
+                readOnly = true,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { expanded = true },
+            )
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                choices.forEach { choice ->
+                    DropdownMenuItem(
+                        text = { Text(choice) },
+                        onClick = {
+                            onChange(choice)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+    } else {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            label = { Text(label) },
+            enabled = enabled,
+            singleLine = true,
+            visualTransformation = if (row.type.equals("password", ignoreCase = true)) {
+                PasswordVisualTransformation()
+            } else {
+                androidx.compose.ui.text.input.VisualTransformation.None
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable
@@ -466,12 +672,12 @@ private fun AuditionDialog(
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                // 显示最终请求参数（内部语速 +5），与实际下发给服务器的 speakSpeed 一致。
+                // 显示最终 speakSpeed，与实际下发给服务器的请求参数一致（范围 5–20，默认 10）。
                 Text(
-                    "语速参数 speakSpeed = ${NetworkTtsSynthesizer.requestSpeechRate(speed.toInt())}",
+                    "语速参数 speakSpeed = ${speed.toInt()}",
                     style = MaterialTheme.typography.bodySmall
                 )
-                Slider(value = speed, onValueChange = { speed = it }, valueRange = 0f..20f, steps = 19)
+                Slider(value = speed, onValueChange = { speed = it }, valueRange = NetworkTtsSynthesizer.MIN_SPEECH_RATE.toFloat()..NetworkTtsSynthesizer.MAX_SPEECH_RATE.toFloat(), steps = NetworkTtsSynthesizer.MAX_SPEECH_RATE - NetworkTtsSynthesizer.MIN_SPEECH_RATE - 1)
                 state.message?.let {
                     Text(
                         it,

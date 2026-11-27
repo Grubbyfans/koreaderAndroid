@@ -48,6 +48,7 @@ class NetworkTtsAudition(context: Context) {
     val state: StateFlow<State> = _state.asStateFlow()
 
     private var synthJob: Job? = null
+    private var currentResult: NetworkTtsSynthesizer.Result? = null
     private var released = false
 
     init {
@@ -64,21 +65,35 @@ class NetworkTtsAudition(context: Context) {
             return
         }
         synthJob?.cancel()
-        scope.launch { player.stop() }
+        scope.launch {
+            player.stop()
+            currentResult?.close()
+            currentResult = null
+        }
         _state.value = State(phase = Phase.SYNTHESIZING, message = "正在合成…", ruleId = rule.id)
         synthJob = scope.launch {
             try {
                 val result = synthesizer.synthesize(
                     rule = rule,
                     text = trimmed,
-                    // 直接传内部语速（0~20）；最终请求参数 speakSpeed 由 Synthesizer 统一 +5，
-                    // 与正式朗读 backend 走同一转换，保证试听与正文朗读语速一致。
+                    // 直接传最终 speakSpeed（5~20）；试听页 Slider 范围即为 speakSpeed 范围，
+                    // 与正式朗读 backend 的 uiRateToSpeechRate 映射后的值一致。
                     speechRate = speechRate,
                     chapterTitle = "试听",
                     forceRefresh = false,
                 )
-                if (released) return@launch
-                player.play(listOf(result.file), silenceMs = rule.pauseDuration)
+                if (released) {
+                    result.close()
+                    return@launch
+                }
+                currentResult = result
+                try {
+                    player.play(listOf(result.file), silenceMs = rule.pauseDuration)
+                } catch (e: Throwable) {
+                    currentResult = null
+                    result.close()
+                    throw e
+                }
                 _state.update {
                     it.copy(
                         phase = Phase.PLAYING,
@@ -115,12 +130,20 @@ class NetworkTtsAudition(context: Context) {
     fun stop() {
         synthJob?.cancel()
         synthJob = null
-        scope.launch { player.stop() }
+        scope.launch {
+            player.stop()
+            currentResult?.close()
+            currentResult = null
+        }
         _state.value = State()
     }
 
     fun refreshProgress() {
         val snapshot = player.state.value
+        if (snapshot.finished || snapshot.error != null) {
+            currentResult?.close()
+            currentResult = null
+        }
         _state.update {
             it.copy(
                 positionMs = snapshot.positionMs,
@@ -143,7 +166,11 @@ class NetworkTtsAudition(context: Context) {
         released = true
         NetworkTtsRuntime.ttsCacheClearer = null
         synthJob?.cancel()
-        scope.launch { runCatching { player.release() } }
+        scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            runCatching { player.release() }
+            currentResult?.close()
+            currentResult = null
+        }
         scope.cancel()
     }
 }

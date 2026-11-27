@@ -112,7 +112,10 @@ class AnalyzeUrl(
         coroutineContext = coroutineContext.minusKey(ContinuationInterceptor)
         val urlMatcher = paramPattern.matcher(baseUrl)
         if (urlMatcher.find()) baseUrl = baseUrl.substring(0, urlMatcher.start())
-        (headerMapF ?: source?.getHeaderMap(hasLoginHeader && isLoginHeaderSite(mUrl)))?.let {
+        (headerMapF ?: source?.getHeaderMap(
+            hasLoginHeader = hasLoginHeader && isLoginHeaderSite(mUrl),
+            coroutineContext = coroutineContext.takeIf { it !== EmptyCoroutineContext },
+        ))?.let {
             headerMap.putAll(it)
         }
         initUrl()

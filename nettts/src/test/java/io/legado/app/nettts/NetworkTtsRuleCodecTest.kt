@@ -85,4 +85,36 @@ class NetworkTtsRuleCodecTest {
         val parsedJson = Json.parseToJsonElement(text)
         assertTrue(parsedJson.toString().isNotBlank())
     }
+
+    @Test
+    fun `missing ids are unique and marked as generated`() {
+        val result = NetworkTtsRuleCodec.parse(
+            """[{"name":"a","url":"https://a.example"},{"name":"b","url":"https://b.example"}]"""
+        )
+        assertEquals(2, result.rules.map { it.id }.distinct().size)
+        assertEquals(result.rules.map { it.id }.toSet(), result.generatedIds)
+    }
+
+    @Test
+    fun `export recursively masks nested header and url credentials`() {
+        val input = """
+            {
+              "id": 9,
+              "name": "secure",
+              "url": "https://example.com/tts?access_token=secret-value&text={{speakText}}",
+              "header": "{\"Authorization\":\"Bearer header-secret\",\"X-Keep\":\"ok\"}",
+              "nested": {"password":"nested-secret","keep":"yes"}
+            }
+        """.trimIndent()
+        val rule = NetworkTtsRuleCodec.parse(input).rules.first()
+        val exported = NetworkTtsRuleCodec.exportRule(rule)
+        val text = exported.toString()
+        assertFalse(text.contains("secret-value"))
+        assertFalse(text.contains("header-secret"))
+        assertFalse(text.contains("nested-secret"))
+        assertTrue(exported["url"]?.jsonPrimitive?.content?.contains("access_token=***") == true)
+        assertTrue(exported["header"]?.jsonPrimitive?.content?.contains("X-Keep") == true)
+        assertFalse(exported["nested"]?.jsonObject?.containsKey("password") == true)
+        assertEquals("yes", exported["nested"]?.jsonObject?.get("keep")?.jsonPrimitive?.content)
+    }
 }

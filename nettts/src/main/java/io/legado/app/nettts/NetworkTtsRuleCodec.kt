@@ -23,14 +23,17 @@ import kotlinx.serialization.json.put
  * 但改为"保留原始 JSON"的实现，以满足既定要求：
  *  - 导入时保存整条原始 JSON（[HttpTTS.rawJson]），未知字段不丢失；
  *  - 导出时以原始 JSON 为基底，用当前编辑后的已知字段覆盖；
- *  - 默认剔除独立登录凭证类字段（登录信息/登录头/cookie 等），凭证永不写进导出的规则文本。
+ *  - 默认递归剔除独立登录凭证类字段，并遮盖静态 header 与 URL 中的常见敏感值；
+ *  - 脚本可能包含无法静态识别的敏感值，导出界面必须提示用户自行检查。
  */
 object NetworkTtsRuleCodec {
 
-    /** 导出时禁止携带的凭证字段（导入的原始 JSON 里若存在也会被剔除）。 */
+    /** 键名统一为小写字母数字后比较，覆盖 access_token / access-token 等变体。 */
     private val CREDENTIAL_KEYS = setOf(
         "logininfo", "loginheader", "userinfo", "cookie", "cookies",
-        "authorization", "accesstoken", "refreshtoken", "password",
+        "authorization", "token", "accesstoken", "refreshtoken", "password",
+        "secret", "apikey", "accesskey", "accesskeyid", "appkey", "sign", "signature",
+        "session", "sessionid",
     )
 
     private val json = Json {
@@ -49,7 +52,10 @@ object NetworkTtsRuleCodec {
     data class ParseResult(
         val rules: List<HttpTTS>,
         val errors: List<String>,
+        val generatedIds: Set<Long> = emptySet(),
     )
+
+    fun nextGeneratedId(): Long = fallbackId.incrementAndGet()
 
     /** 解析单条或数组；数组里单条失败不影响其他条。 */
     fun parse(text: String): ParseResult {
@@ -62,16 +68,24 @@ object NetworkTtsRuleCodec {
             is JsonArray -> {
                 val rules = mutableListOf<HttpTTS>()
                 val errors = mutableListOf<String>()
+                val generatedIds = mutableSetOf<Long>()
                 element.forEachIndexed { index, item ->
-                    parseOne(item).onSuccess(rules::add).onFailure {
+                    val generated = (item as? JsonObject)?.long("id") == null
+                    parseOne(item).onSuccess { rule ->
+                        rules.add(rule)
+                        if (generated) generatedIds.add(rule.id)
+                    }.onFailure {
                         errors.add("第 ${index + 1} 条：${it.message}")
                     }
                 }
-                ParseResult(rules, errors)
+                ParseResult(rules, errors, generatedIds)
             }
 
             is JsonObject -> parseOne(element).fold(
-                onSuccess = { ParseResult(listOf(it), emptyList()) },
+                onSuccess = {
+                    val generatedIds = if (element.long("id") == null) setOf(it.id) else emptySet()
+                    ParseResult(listOf(it), emptyList(), generatedIds)
+                },
                 onFailure = { ParseResult(emptyList(), listOf(it.message.orEmpty())) },
             )
 
@@ -103,27 +117,27 @@ object NetworkTtsRuleCodec {
         )
     }
 
-    /** 导出单条规则：原始 JSON 为底，已知字段覆盖，凭证字段剔除。 */
+    /** 导出单条规则：原始 JSON 为底，已知字段覆盖，递归过滤常见凭证。 */
     fun exportRule(rule: HttpTTS): JsonObject {
         val base = rule.rawJson?.let { raw ->
             runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
         } ?: JsonObject(emptyMap())
         return buildJsonObject {
             base.forEach { (key, value) ->
-                if (key.lowercase() !in CREDENTIAL_KEYS) put(key, value)
+                if (normalizeKey(key) !in CREDENTIAL_KEYS) put(key, sanitizeElement(value))
             }
             put("id", rule.id)
             put("name", rule.name)
-            put("url", rule.url)
+            put("url", sanitizeText(rule.url))
             put("contentType", rule.contentType.orEmpty())
             put("pauseDuration", rule.pauseDuration)
             put("concurrentRate", rule.concurrentRate.orEmpty())
-            put("loginUrl", rule.loginUrl.orEmpty())
-            put("loginUi", rule.loginUi.orEmpty())
-            put("header", rule.header.orEmpty())
-            put("jsLib", rule.jsLib.orEmpty())
+            put("loginUrl", sanitizeText(rule.loginUrl.orEmpty()))
+            put("loginUi", sanitizeText(rule.loginUi.orEmpty()))
+            put("header", sanitizeText(rule.header.orEmpty()))
+            put("jsLib", sanitizeText(rule.jsLib.orEmpty()))
             put("enabledCookieJar", rule.enabledCookieJar == true)
-            put("loginCheckJs", rule.loginCheckJs.orEmpty())
+            put("loginCheckJs", sanitizeText(rule.loginCheckJs.orEmpty()))
             put("lastUpdateTime", rule.lastUpdateTime)
         }
     }
@@ -135,6 +149,39 @@ object NetworkTtsRuleCodec {
 
     fun exportRuleText(rule: HttpTTS): String =
         json.encodeToString(JsonElement.serializer(), exportRule(rule))
+
+    private fun sanitizeElement(element: JsonElement): JsonElement = when (element) {
+        is JsonObject -> buildJsonObject {
+            element.forEach { (key, value) ->
+                if (normalizeKey(key) !in CREDENTIAL_KEYS) put(key, sanitizeElement(value))
+            }
+        }
+
+        is JsonArray -> buildJsonArray { element.forEach { add(sanitizeElement(it)) } }
+        is JsonPrimitive -> if (element.isString) JsonPrimitive(sanitizeText(element.content)) else element
+    }
+
+    private fun sanitizeText(text: String): String {
+        val queryMasked = SENSITIVE_QUERY_PATTERN.replace(text) { "${it.groupValues[1]}***" }
+        val parsed = runCatching { json.parseToJsonElement(queryMasked) }.getOrNull()
+        if (parsed is JsonObject || parsed is JsonArray) return sanitizeElement(parsed).toString()
+        return QUOTED_CREDENTIAL_PATTERN.replace(queryMasked) {
+            "${it.groupValues[1]}${it.groupValues[2]}***${it.groupValues[2]}"
+        }
+    }
+
+    private fun normalizeKey(key: String): String = key.lowercase().filter { it.isLetterOrDigit() }
+
+    private val SENSITIVE_QUERY_PATTERN = Regex(
+        "(?i)([?&](?:token|access_token|refresh_token|authorization|cookie|password|secret|" +
+            "api[_-]?key|access[_-]?key(?:id)?|app[_-]?key|sign|signature|session(?:id)?)=)[^&#]*"
+    )
+
+    private val QUOTED_CREDENTIAL_PATTERN = Regex(
+        "(?i)([\\\"']?(?:authorization|cookie|token|access_token|refresh_token|password|secret|" +
+            "api[_-]?key|access[_-]?key(?:id)?|app[_-]?key|sign|signature|session(?:id)?)" +
+            "[\\\"']?\\s*[:=]\\s*)([\\\"'])(.*?)\\2"
+    )
 
     private fun JsonObject.string(key: String): String? = this[key].asStringOrNull()
 

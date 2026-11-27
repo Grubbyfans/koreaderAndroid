@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.io.File
 import java.nio.file.Files
 
@@ -65,5 +66,45 @@ class NetworkTtsAudioCacheTest {
         }
         assertEquals(3, cache.clear())
         assertTrue(dir.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun `trim protects retained audio until release`() {
+        val (cache, _) = newCache(maxBytes = 150)
+        runBlocking {
+            cache.write("active") { it.write(ByteArray(100)) }
+            cache.fileFor("active").setLastModified(System.currentTimeMillis() - 10_000)
+            val lease = cache.retain("active")
+            val newLease = cache.retain("new")
+            cache.write("new") { it.write(ByteArray(100)) }
+            assertTrue(cache.exists("active"))
+            assertTrue(cache.exists("new"))
+            lease.close()
+            assertFalse(cache.exists("active"))
+            assertTrue(cache.exists("new"))
+            newLease.close()
+        }
+    }
+
+    @Test
+    fun `clear from another cache instance protects retained audio`() {
+        val (first, dir) = newCache()
+        runBlocking { first.write("shared") { it.write(ByteArray(100)) } }
+        val lease = first.retain("shared")
+        val second = NetworkTtsAudioCache(dir)
+        assertEquals(0, second.clear())
+        assertTrue(first.exists("shared"))
+        lease.close()
+    }
+
+    @Test
+    fun `write rejects oversized audio and removes temporary file`() {
+        val dir = Files.createTempDirectory("nettts-limit").toFile()
+        val cache = NetworkTtsAudioCache(dir, maxAudioBytes = 8)
+        assertThrows<NetworkTtsAudioCache.SizeLimitException> {
+            runBlocking { cache.write("large") { it.write(ByteArray(9)) } }
+        }
+        assertFalse(cache.exists("large"))
+        assertTrue(dir.listFiles().orEmpty().none { it.name.endsWith(".tmp") })
     }
 }

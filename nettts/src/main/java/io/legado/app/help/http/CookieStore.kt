@@ -5,6 +5,7 @@ import io.legado.app.help.http.CookieManager.mergeCookiesToMap
 import io.legado.app.nettts.NetworkTtsLog
 import io.legado.app.nettts.NetworkTtsRuntime
 import io.legado.app.utils.NetworkUtils
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Cookie 存储。
@@ -15,7 +16,7 @@ import io.legado.app.utils.NetworkUtils
  */
 object CookieStore {
 
-    private val cache = HashMap<String, String>()
+    private val cache = ConcurrentHashMap<String, String>()
 
     private fun storageKey(domain: String, url: String): String {
         val key = NetworkUtils.getSubDomain(url)

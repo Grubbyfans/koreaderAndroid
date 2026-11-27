@@ -4,6 +4,8 @@
 > 基准方案：[静读网络TTS原版规则移植技术实施方案.md](./静读网络TTS原版规则移植技术实施方案.md)
 > 决策：R3（仅自用、直接复用 GPLv3 源码）· B（Media3 ExoPlayer 独立播放链路）
 > 评审调整 8 条已入方案文档 §十七，本报告逐条对照
+>
+> **历史阶段报告**：仅记录阶段 A 当时交付，不代表当前完成度；当前实现、已接入能力与待验收项以技术实施方案顶部“当前实施状态”为准。文中的 19/19、版本 17 和离线安装状态均为历史记录。
 
 ---
 
@@ -63,9 +65,9 @@
 
 ### 3.4 队列上限与缓存
 - 播放队列上限常量 `MAX_HTTP_TTS_PLAYER_QUEUE_SIZE=12`（预留，阶段 A 不启用队列逻辑）；
-- ExoPlayer `SimpleCache(128 MB LRU)`；
+- ExoPlayer 当前通过 `DefaultDataSource` 播放本地文件；`SimpleCache` 保留为预留代码，未接入实际播放；
 - `NetworkTtsAudioCache` 另对落盘音频目录设上限（默认 256 MB，超出按 `lastModified` 淘汰最旧文件）；
-- 单条音频上限 32 MB，超出 `checkedAudioStream` 校验。
+- 单条音频上限 32 MB，由 `NetworkTtsAudioCache` 的受限输出流校验。
 
 ### 3.5 段间停顿
 `NetworkTtsPlayer.silentWavFile(durationMs)` 生成 WAV（24 kHz / 单声道 / 16 bit，与原版一致），作为普通 MediaItem 顺序插入播放列表。**不引入独立 PCM 播放逻辑**；静音项本身不携带任何规则标识，队列层（后续阶段）据此跳过阅读位置推进。

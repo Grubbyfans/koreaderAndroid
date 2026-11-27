@@ -286,7 +286,12 @@ class SpeechService : Service() {
                         Log.w(TAG, "网络 TTS 失败：${event.reason}")
                         handleStop("网络 TTS 失败：${event.reason}")
                     }
-                    is com.yuezhou.reader.core.speech.SpeechPlaybackEvent.Buffering -> Unit
+                    is com.yuezhou.reader.core.speech.SpeechPlaybackEvent.Buffering -> {
+                        SpeechDiagnosticsState.update { it.copy(bufferingCount = it.bufferingCount + 1) }
+                        if (stateMachine.state == SpeechStateMachine.State.PLAYING) {
+                            updatePlaybackState(PlaybackState.STATE_BUFFERING)
+                        }
+                    }
                 }
             }
         }

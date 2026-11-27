@@ -86,10 +86,12 @@ class NetworkTtsPlayer(
     }
 
     sealed interface PlayerEvent {
-        data class PlayerSegmentStarted(val index: Int) : PlayerEvent
-        data class PlayerSegmentCompleted(val index: Int) : PlayerEvent
-        data object PlayerFinished : PlayerEvent
-        data class PlayerError(val reason: String) : PlayerEvent
+        val generation: Long
+
+        data class PlayerSegmentStarted(override val generation: Long, val index: Int) : PlayerEvent
+        data class PlayerSegmentCompleted(override val generation: Long, val index: Int) : PlayerEvent
+        data class PlayerFinished(override val generation: Long) : PlayerEvent
+        data class PlayerError(override val generation: Long, val reason: String) : PlayerEvent
     }
 
     data class State(
@@ -116,7 +118,6 @@ class NetworkTtsPlayer(
         ExoPlayer.Builder(appContext)
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
-            .apply { addListener(playerListener) }
     }
 
     private val _state = MutableStateFlow(State())
@@ -130,8 +131,11 @@ class NetworkTtsPlayer(
     private val completed = mutableSetOf<Int>()
     private var previousSegmentIndex: Int? = null
     private var prepared = false
+    private var eventGeneration = 0L
+    private var sessionListener: SessionListener? = null
 
-    private val playerListener = object : Player.Listener {
+    /** 每代使用独立 Listener，事件创建时即绑定不可变的代次。 */
+    private inner class SessionListener(private val generation: Long) : Player.Listener {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _state.update { it.copy(playing = isPlaying) }
@@ -150,9 +154,9 @@ class NetworkTtsPlayer(
                 Player.STATE_ENDED -> {
                     val lastIdx = itemSegmentIndex.lastOrNull()
                     if (lastIdx != null && completed.add(lastIdx)) {
-                        _events.tryEmit(PlayerEvent.PlayerSegmentCompleted(lastIdx))
+                        _events.tryEmit(PlayerEvent.PlayerSegmentCompleted(generation, lastIdx))
                     }
-                    _events.tryEmit(PlayerEvent.PlayerFinished)
+                    _events.tryEmit(PlayerEvent.PlayerFinished(generation))
                     _state.update {
                         it.copy(playing = false, finished = true, positionMs = it.durationMs)
                     }
@@ -163,13 +167,13 @@ class NetworkTtsPlayer(
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val prev = previousSegmentIndex
             if (prev != null && completed.add(prev)) {
-                _events.tryEmit(PlayerEvent.PlayerSegmentCompleted(prev))
+                _events.tryEmit(PlayerEvent.PlayerSegmentCompleted(generation, prev))
             }
             val currentItemIndex = player.currentMediaItemIndex
             val seg = itemSegmentIndex.getOrNull(currentItemIndex)
             previousSegmentIndex = seg
             if (seg != null && started.add(seg)) {
-                _events.tryEmit(PlayerEvent.PlayerSegmentStarted(seg))
+                _events.tryEmit(PlayerEvent.PlayerSegmentStarted(generation, seg))
             }
             _state.update {
                 it.copy(
@@ -182,8 +186,21 @@ class NetworkTtsPlayer(
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-            _events.tryEmit(PlayerEvent.PlayerError(error.message ?: "播放失败"))
+            _events.tryEmit(PlayerEvent.PlayerError(generation, error.message ?: "播放失败"))
             _state.update { it.copy(playing = false, error = error.message ?: "播放失败") }
+        }
+    }
+
+    private fun invalidateSession() {
+        sessionListener?.let { player.removeListener(it) }
+        sessionListener = null
+        eventGeneration++
+    }
+
+    private fun beginSession(): Long {
+        eventGeneration++
+        return eventGeneration.also { generation ->
+            sessionListener = SessionListener(generation).also { player.addListener(it) }
         }
     }
 
@@ -225,6 +242,7 @@ class NetworkTtsPlayer(
 
     suspend fun setAll(files: List<File>, segmentIndex: () -> Int, silenceMs: Int) {
         withContext(Dispatchers.Main.immediate) {
+            invalidateSession()
             player.stop()
             player.clearMediaItems()
             itemSegmentIndex.clear()
@@ -244,6 +262,7 @@ class NetworkTtsPlayer(
             }
         }
         withContext(Dispatchers.Main.immediate) {
+            beginSession()
             itemSegmentIndex.addAll(segmentMap)
             player.setMediaItems(items)
             prepared = true
@@ -266,25 +285,26 @@ class NetworkTtsPlayer(
         _state.update { it.copy(playing = false) }
     }
 
-    /** 暂停 + 截断后续队列，只保留当前正在播的 item（防止"读完这一段才停"的尾巴）。 */
-    suspend fun pauseAndTruncate() = withContext(Dispatchers.Main.immediate) {
+    /** 立即暂停并移除后续队列，返回被移除的正文段索引供后端释放缓存与恢复合成。 */
+    suspend fun pauseAndTruncate(): List<Int> = withContext(Dispatchers.Main.immediate) {
         val currentIdx = player.currentMediaItemIndex
+        val removed = mutableListOf<Int>()
         player.playWhenReady = false
         player.pause()
-        // 只保留当前播放项；如果已经播完（currentIdx 超出范围）就全部清空
         if (currentIdx in itemSegmentIndex.indices && player.mediaItemCount > 1) {
-            val keepCount = 1
             val removeFrom = currentIdx + 1
+            itemSegmentIndex.drop(removeFrom).filterNotNullTo(removed)
             player.removeMediaItems(removeFrom, player.mediaItemCount)
-            // 同步更新 segment 映射
             if (removeFrom < itemSegmentIndex.size) {
                 itemSegmentIndex.subList(removeFrom, itemSegmentIndex.size).clear()
             }
         } else if (currentIdx >= itemSegmentIndex.size) {
+            itemSegmentIndex.filterNotNullTo(removed)
             player.clearMediaItems()
             itemSegmentIndex.clear()
         }
         _state.update { it.copy(playing = false, totalCount = player.mediaItemCount) }
+        removed
     }
 
     suspend fun resume() = withContext(Dispatchers.Main.immediate) {
@@ -293,6 +313,7 @@ class NetworkTtsPlayer(
     }
 
     suspend fun stop() = withContext(Dispatchers.Main.immediate) {
+        invalidateSession()
         player.stop()
         player.clearMediaItems()
         itemSegmentIndex.clear()
@@ -303,7 +324,8 @@ class NetworkTtsPlayer(
         _state.value = State()
     }
 
-    suspend fun clear() = withContext(Dispatchers.Main.immediate) {
+    suspend fun clear(): Long = withContext(Dispatchers.Main.immediate) {
+        invalidateSession()
         player.stop()
         player.clearMediaItems()
         itemSegmentIndex.clear()
@@ -312,11 +334,13 @@ class NetworkTtsPlayer(
         previousSegmentIndex = null
         prepared = false
         _state.value = State()
+        beginSession()
     }
 
     suspend fun positionMs(): Long = withContext(Dispatchers.Main.immediate) { player.currentPosition }
 
     suspend fun release() = withContext(Dispatchers.Main.immediate) {
+        invalidateSession()
         player.release()
     }
 
@@ -325,7 +349,7 @@ class NetworkTtsPlayer(
         var removed = 0
         silencesDir.listFiles()?.forEach { if (it.delete()) removed++ }
         val audioDir = File(silencesDir.parentFile ?: return removed, "audio")
-        audioDir.walkBottomUp().forEach { f -> if (f.isFile && f.delete()) removed++ }
+        removed += NetworkTtsAudioCache(audioDir).clear()
         return removed
     }
 

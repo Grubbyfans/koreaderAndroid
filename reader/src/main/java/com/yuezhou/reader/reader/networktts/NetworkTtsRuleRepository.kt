@@ -43,11 +43,17 @@ class NetworkTtsRuleRepository(private val context: Context) {
     /** 导入 JSON 文本（单条或数组）；重复 id 覆盖，同名不同 id 保留两份。 */
     suspend fun import(text: String): ImportOutcome = withContext(Dispatchers.IO) {
         val parsed = NetworkTtsRuleCodec.parse(text)
-        val existingIds = dao.all().map { it.id }.toHashSet()
+        val existingIds = dao.all().map { it.id }.toMutableSet()
         var imported = 0
         var skipped = 0
-        parsed.rules.forEach { rule ->
-            // 导入的规则若与现有规则同名且内容一致，跳过，避免重复导入同一批规则
+        parsed.rules.forEach { original ->
+            var rule = original
+            if (rule.id in parsed.generatedIds) {
+                while (rule.id in existingIds) {
+                    rule = rule.copy(id = NetworkTtsRuleCodec.nextGeneratedId())
+                }
+            }
+            // 显式 ID 的完全重复规则跳过；自动 ID 冲突已在上方重新分配。
             val duplicate = existingIds.contains(rule.id) &&
                 dao.byId(rule.id)?.toHttpTTS()?.equal(rule) == true
             if (duplicate) {
@@ -56,6 +62,7 @@ class NetworkTtsRuleRepository(private val context: Context) {
                 dao.upsert(rule.toEntity())
                 imported++
             }
+            existingIds.add(rule.id)
         }
         ImportOutcome(imported = imported, skipped = skipped, errors = parsed.errors)
     }

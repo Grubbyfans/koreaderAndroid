@@ -22,10 +22,8 @@ import kotlinx.coroutines.CancellationException
  *
  * 来源：Legado 原版 `app/src/main/java/io/legado/app/data/entities/BaseSource.kt`（GPLv3）。
  * 裁剪说明：
- *  - 去掉登录 UI v2、发现/书籍类接口等与网络朗读无关的能力；
- *  - 登录信息加密交给 [NetworkTtsRuntime.secretStore]（app 层用 CredentialCrypto 实现），
- *    未装配时不写入任何凭证；
- *  - 登录头与自定义变量仍用 [CacheManager]，键名与原版一致。
+ *  - 登录头、登录信息与自定义变量经 [NetworkTtsRuntime.secretStore] 加密持久化，
+ *    同时用 [CacheManager] 做进程内读取缓存。
  */
 @Suppress("unused")
 interface BaseSource : JsExtensions {
@@ -64,8 +62,11 @@ interface BaseSource : JsExtensions {
 
     fun hasLogin(): Boolean = !loginUrl.isNullOrBlank() || hasLoginForm()
 
-    /** 执行规则里的 login() 函数。阶段 A 未提供登录 UI，仅保留脚本调用能力。 */
-    fun login() {
+    /** JS 内部调用的无参入口，保持与原版规则兼容。 */
+    fun login() = loginWithContext(null)
+
+    /** 用户点击登录时传入活跃 Job，使动态 jsLib 与登录脚本都能被超时/取消中断。 */
+    fun loginWithContext(coroutineContext: kotlin.coroutines.CoroutineContext?) {
         val loginJs = getLoginJs()
         if (!loginJs.isNullOrBlank()) {
             val js = """$loginJs
@@ -75,7 +76,7 @@ interface BaseSource : JsExtensions {
                     throw('Function login not implements!!!')
                 }
             """.trimIndent()
-            evalJS(js)
+            evalJS(js, coroutineContext)
         }
     }
 
@@ -83,12 +84,19 @@ interface BaseSource : JsExtensions {
      *
      * 动态 header 脚本执行失败时**直接抛出**，不静默降级——否则会把脚本错误变成
      * "缺少鉴权头的请求"，既可能打到服务器产生无效请求，也掩盖了规则本身的问题。
+     *
+     * [coroutineContext] 传入后，Rhino 指令观察器会把 header 脚本（及其首次初始化的
+     * jsLib）纳入当前 Job 的取消/超时检查，避免 header/jsLib 死循环时外层 withTimeout
+     * 无法中断。
      */
-    fun getHeaderMap(hasLoginHeader: Boolean = false) = HashMap<String, String>().apply {
+    fun getHeaderMap(
+        hasLoginHeader: Boolean = false,
+        coroutineContext: kotlin.coroutines.CoroutineContext? = null,
+    ) = HashMap<String, String>().apply {
         header?.let {
             try {
                 val json = extractInlineJs(it)?.let { js ->
-                    normalizeJsResult(evalJS(js)).orEmpty()
+                    normalizeJsResult(evalJS(js, coroutineContext)).orEmpty()
                 } ?: it
                 GSON.fromJsonObject<Map<String, String>>(json).getOrNull()?.let { map ->
                     putAll(map)
@@ -108,7 +116,15 @@ interface BaseSource : JsExtensions {
         }
     }
 
-    fun getLoginHeader(): String? = CacheManager.get("loginHeader_${getKey()}")
+    fun getLoginHeader(): String? {
+        CacheManager.get("loginHeader_${getKey()}")?.let { return it }
+        return try {
+            NetworkTtsRuntime.secretStore?.get("loginHeader_${getKey()}")
+        } catch (e: Exception) {
+            NetworkTtsLog.put("获取登录头出错", e)
+            throw IllegalStateException("登录头读取失败，请重新登录")
+        }?.also { CacheManager.put("loginHeader_${getKey()}", it) }
+    }
 
     fun getLoginHeaderMap(): Map<String, String>? {
         val cache = getLoginHeader() ?: return null
@@ -119,20 +135,28 @@ interface BaseSource : JsExtensions {
         val headerMap = GSON.fromJsonObject<Map<String, String>>(header).getOrNull()
         val cookie = headerMap?.get("Cookie") ?: headerMap?.get("cookie")
         cookie?.let { CookieStore.replaceCookie(getKey(), it) }
+        val store = NetworkTtsRuntime.secretStore
+        if (store == null) {
+            NetworkTtsLog.put("未装配凭证存储，登录头不会落盘")
+            return
+        }
+        store.put("loginHeader_${getKey()}", header)
         CacheManager.put("loginHeader_${getKey()}", header)
     }
 
     fun removeLoginHeader() {
         CacheManager.delete("loginHeader_${getKey()}")
+        NetworkTtsRuntime.secretStore?.remove("loginHeader_${getKey()}")
         CookieStore.removeCookie(getKey())
     }
 
     fun getLoginInfo(): String? {
-        return runCatching {
+        return try {
             NetworkTtsRuntime.secretStore?.get("userInfo_${getKey()}")
-        }.onFailure {
-            NetworkTtsLog.put("获取登录信息出错", it)
-        }.getOrNull()
+        } catch (e: Exception) {
+            NetworkTtsLog.put("获取登录信息出错", e)
+            throw IllegalStateException("登录信息读取失败，请重新登录")
+        }
     }
 
     fun putLoginInfo(info: String): Boolean {
@@ -153,25 +177,42 @@ interface BaseSource : JsExtensions {
         NetworkTtsRuntime.secretStore?.remove("userInfo_${getKey()}")
     }
 
-    /**
-     * 登录表单默认值。
-     *
-     * 原版支持 loginUi v2，这里只处理"JSON 数组"形态（静态表单默认值），
-     * 动态 UI 脚本留待阶段 B 与真实规则一起验证。
-     */
+    /** 登录表单 schema：v1 直接解析 JSON 数组，v2 先执行 @js:/<js> 脚本再解析。 */
+    fun getLoginRows(coroutineContext: kotlin.coroutines.CoroutineContext? = null): List<LoginRow> {
+        val rule = loginUi?.trim().takeUnless { it.isNullOrBlank() } ?: return emptyList()
+        parseLoginRows(rule)?.let { return it }
+        val js = extractInlineJs(rule) ?: return emptyList()
+        val generated = normalizeJsResult(evalJS(js, coroutineContext)).orEmpty()
+        return parseLoginRows(generated) ?: throw IllegalStateException("登录表单脚本未返回有效 JSON 数组")
+    }
+
+    private fun parseLoginRows(json: String): List<LoginRow>? =
+        GSON.fromJsonArray<LoginRow>(json).getOrNull()
+            ?.filter { it.name.isNotBlank() && it.type != "button" }
+
+    /** 登录表单默认值；无参入口供原版 JS 调用。 */
     fun getLoginInfoMap(): MutableMap<String, String> {
-        val json = getLoginInfo()
-        if (!json.isNullOrBlank()) {
-            GSON.fromJsonObject<MutableMap<String, String>>(json).getOrNull()?.let { return it }
+        val saved = getLoginInfo()
+        if (!saved.isNullOrBlank()) {
+            GSON.fromJsonObject<MutableMap<String, String>>(saved).getOrNull()?.let { return it }
         }
-        val loginUiRule = loginUi?.trim().takeUnless { it.isNullOrBlank() } ?: return mutableMapOf()
-        return GSON.fromJsonArray<LoginRow>(loginUiRule).getOrNull()
-            ?.filter { it.type != "button" }
-            ?.associate { it.name to (it.default ?: "") }
-            ?.takeIf { it.isNotEmpty() }
-            ?.also { putLoginInfo(GSON.toJson(it)) }
-            ?.toMutableMap()
-            ?: mutableMapOf()
+        val rows = loginUi?.trim()?.let { parseLoginRows(it) }.orEmpty()
+        return getLoginInfoMap(rows)
+    }
+
+    /** UI 已解析 v2 schema 时直接复用，避免在 login() 内再次嵌套执行动态表单脚本。 */
+    fun getLoginInfoMap(rows: List<LoginRow>): MutableMap<String, String> {
+        val saved = getLoginInfo()
+        if (!saved.isNullOrBlank()) {
+            GSON.fromJsonObject<MutableMap<String, String>>(saved).getOrNull()?.let { savedMap ->
+                val merged = rows.associate { it.name to (it.default.orEmpty()) }.toMutableMap()
+                merged.putAll(savedMap)
+                return merged
+            }
+        }
+        return rows.associate { it.name to it.default.orEmpty() }
+            .toMutableMap()
+            .also { if (it.isNotEmpty()) putLoginInfo(GSON.toJson(it)) }
     }
 
     fun setVariable(variable: String?) {
@@ -179,21 +220,34 @@ interface BaseSource : JsExtensions {
     }
 
     fun putVariable(variable: String?) {
+        val key = "sourceVariable_${getKey()}"
         if (variable != null) {
-            CacheManager.put("sourceVariable_${getKey()}", variable)
+            NetworkTtsRuntime.secretStore?.put(key, variable)
+            CacheManager.put(key, variable)
         } else {
-            CacheManager.delete("sourceVariable_${getKey()}")
+            NetworkTtsRuntime.secretStore?.remove(key)
+            CacheManager.delete(key)
         }
     }
 
-    fun getVariable(): String = CacheManager.get("sourceVariable_${getKey()}") ?: ""
+    fun getVariable(): String {
+        val key = "sourceVariable_${getKey()}"
+        CacheManager.get(key)?.let { return it }
+        return NetworkTtsRuntime.secretStore?.get(key)?.also { CacheManager.put(key, it) } ?: ""
+    }
 
     fun put(key: String, value: String): String {
-        CacheManager.put("v_${getKey()}_$key", value)
+        val cacheKey = "v_${getKey()}_$key"
+        NetworkTtsRuntime.secretStore?.put(cacheKey, value)
+        CacheManager.put(cacheKey, value)
         return value
     }
 
-    fun get(key: String): String = CacheManager.get("v_${getKey()}_$key") ?: ""
+    fun get(key: String): String {
+        val cacheKey = "v_${getKey()}_$key"
+        CacheManager.get(cacheKey)?.let { return it }
+        return NetworkTtsRuntime.secretStore?.get(cacheKey)?.also { CacheManager.put(cacheKey, it) } ?: ""
+    }
 
     fun refreshJSLib() {
         jsLib?.let { SharedJsScope.remove(it) }
@@ -246,5 +300,10 @@ interface BaseSource : JsExtensions {
         val name: String = "",
         val type: String = "text",
         val default: String? = null,
-    )
+        val hint: String? = null,
+        val values: List<String>? = null,
+        val options: List<String>? = null,
+    ) {
+        fun choices(): List<String> = values ?: options ?: emptyList()
+    }
 }

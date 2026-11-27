@@ -4,6 +4,8 @@ import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.legado.app.data.entities.HttpTTS
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.assertThrows
 import java.io.File
 import java.net.InetSocketAddress
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 本地 Mock 服务验证合成链路（不依赖外部网络）。
@@ -29,6 +32,7 @@ class NetworkTtsSynthesizerTest {
     private lateinit var cacheDir: File
 
     private var lastQuery: String? = null
+    private val requestCount = AtomicInteger(0)
 
     @BeforeEach
     fun setUp() {
@@ -70,6 +74,7 @@ class NetworkTtsSynthesizerTest {
     }
 
     private fun handleTts(exchange: HttpExchange) {
+        requestCount.incrementAndGet()
         lastQuery = exchange.requestURI.rawQuery
         val bytes = ByteArray(64) + wavHeader()
         respond(exchange, 200, "audio/wav", bytes)
@@ -167,6 +172,29 @@ class NetworkTtsSynthesizerTest {
     }
 
     @Test
+    fun `concurrent same key synthesis is deduplicated across cache instances`() = runBlocking {
+        requestCount.set(0)
+        val first = synthesizer()
+        val second = NetworkTtsSynthesizer(
+            cache = NetworkTtsAudioCache(cacheDir),
+            maxRetries = 0,
+            jsTimeoutMs = 2_000,
+            requestTimeoutMs = 5_000,
+        )
+        val currentRule = rule("$baseUrl/tts?text={{speakText}}")
+        val results = listOf(first, second).map { item ->
+            async { item.synthesize(currentRule, "同键去重", 5) }
+        }.awaitAll()
+        try {
+            assertEquals(1, requestCount.get())
+            assertEquals(results[0].file.absolutePath, results[1].file.absolutePath)
+            assertTrue(results.count { it.fromCache } == 1)
+        } finally {
+            results.forEach { it.close() }
+        }
+    }
+
+    @Test
     fun `rule change invalidates cache key`() = runBlocking {
         val synthesizer = synthesizer()
         val first = synthesizer.synthesize(rule("$baseUrl/tts?text={{speakText}}"), "同一文本", 5)
@@ -190,7 +218,8 @@ class NetworkTtsSynthesizerTest {
             }
         }.exceptionOrNull()
         val elapsed = System.currentTimeMillis() - start
-        assertTrue(thrown is CancellationException, "实际异常：$thrown")
+        assertTrue(thrown is NetworkTtsSynthesizer.SynthesisException, "实际异常：$thrown")
+        assertTrue(thrown?.message.orEmpty().contains("超时"), "实际异常：$thrown")
         assertTrue(elapsed < 10_000, "超时未生效，耗时 ${elapsed}ms")
     }
 
